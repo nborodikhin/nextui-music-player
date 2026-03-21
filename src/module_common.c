@@ -17,6 +17,12 @@
 static bool autosleep_disabled = false;
 static uint32_t last_input_time = 0;
 
+// Adaptive FPS state
+static uint32_t frame_start_time = 0;
+static bool display_off = false;
+static uint32_t display_off_time = 0;
+#define ADAPTIVE_FPS_IDLE_MS 5000
+
 // Screen off hint state
 static bool screen_off_hint_active = false;
 static uint32_t screen_off_hint_start = 0;
@@ -56,10 +62,17 @@ void ModuleCommon_init(void) {
     start_was_pressed = false;
     overlay_buttons_were_active = false;
     overlay_release_time = 0;
+    display_off = false;
+    frame_start_time = 0;
 }
 
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, int app_state) {
     GlobalInputResult result = {false, false, false};
+
+    // Reset adaptive FPS activity timer on any button press
+    if (PAD_anyPressed()) {
+        last_input_time = SDL_GetTicks();
+    }
 
     // Poll USB HID events (earphone buttons)
     USBHIDEvent hid_event;
@@ -290,6 +303,33 @@ bool ModuleCommon_processScreenOffHintTimeout(void) {
         return true;
     }
     return false;
+}
+
+void ModuleCommon_startFrame(void) {
+    GFX_startFrame();
+    frame_start_time = SDL_GetTicks();
+}
+
+static int get_frame_budget_ms(void) {
+    uint32_t now = SDL_GetTicks();
+    if (display_off) {
+        return (now - display_off_time > ADAPTIVE_FPS_IDLE_MS) ? 67 : 33;  // 15 or 30 FPS
+    }
+    return (now - last_input_time > ADAPTIVE_FPS_IDLE_MS) ? 33 : 17;      // 30 or 60 FPS
+}
+
+void ModuleCommon_adaptiveSync(void) {
+    int budget = get_frame_budget_ms();
+    uint32_t elapsed = SDL_GetTicks() - frame_start_time;
+    if (elapsed < (uint32_t)budget)
+        SDL_Delay(budget - elapsed);
+}
+
+void ModuleCommon_setDisplayOff(bool off) {
+    display_off = off;
+    if (off) {
+        display_off_time = SDL_GetTicks();
+    }
 }
 
 void ModuleCommon_quit(void) {

@@ -63,6 +63,15 @@ bool ModuleCommon_checkAutoScreenOffTimeout(void);
 // Check toast state: if active and not expired, sets dirty=1; if expired, clears message and sets dirty=1.
 void ModuleCommon_tickToast(char* message, uint32_t toast_time, int* dirty);
 
+// Adaptive FPS: call instead of GFX_startFrame()
+void ModuleCommon_startFrame(void);
+
+// Adaptive FPS: call instead of GFX_sync() — sleeps based on activity state
+void ModuleCommon_adaptiveSync(void);
+
+// Adaptive FPS: notify that display backlight is off/on
+void ModuleCommon_setDisplayOff(bool off);
+
 // Clean up module common resources (call at app exit)
 void ModuleCommon_quit(void);
 
