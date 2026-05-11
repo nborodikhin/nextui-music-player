@@ -194,8 +194,9 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int info_y = SCALE1(PADDING + 45);
     char truncated[256];
 
-    // Max width for text (album art is now only shown as background)
-    int max_w_text = hw - SCALE1(PADDING * 2);
+    // Max width for text.
+    // Only left padding is respected - right edge of scrolling text should be aligned to the right edge of the art.
+    int max_w_text = hw - SCALE1(PADDING * 1);
 
     // Artist name (Medium font, gray)
     const char* artist = info->artist[0] ? info->artist : "Unknown Artist";

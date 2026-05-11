@@ -71,13 +71,17 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, 
 
         if (state->cached_scroll_surface) {
             // Clear to transparent
+            SDL_SetSurfaceBlendMode(state->cached_scroll_surface, SDL_BLENDMODE_NONE);
             SDL_FillRect(state->cached_scroll_surface, NULL, 0);
 
             // Render text twice for seamless looping
             SDL_Color white = {255, 255, 255, 255};  // Will be overwritten by actual color
             SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font, state->text, white);
             if (text_surf) {
-                SDL_SetSurfaceBlendMode(text_surf, SDL_BLENDMODE_NONE);
+                // Important: TTF rendering produces "transparent white" pixels which are not handled well by
+                // LAYER_SCROLLTEXT which expects premultiplied pixels.
+                // BLEND mode converts those into "transparent black"
+                SDL_SetSurfaceBlendMode(text_surf, SDL_BLENDMODE_BLEND);
                 SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &(SDL_Rect){0, 0, 0, 0});
                 SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &(SDL_Rect){state->text_width + padding, 0, 0, 0});
                 SDL_FreeSurface(text_surf);
@@ -246,8 +250,8 @@ void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
         state->max_width, height, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!clipped) return;
 
-    SDL_FillRect(clipped, NULL, 0);
     SDL_SetSurfaceBlendMode(state->cached_scroll_surface, SDL_BLENDMODE_NONE);
+    SDL_FillRect(clipped, NULL, 0);
     SDL_Rect src = {state->scroll_offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
 
