@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <SDL2/SDL.h>
 
-// Open the add-to-playlist dialog for a track
+// Open the add-to-playlist dialog for a single track
 void AddToPlaylist_open(const char* track_path, const char* display_name);
+
+// Open the add-to-playlist dialog for all audio files in a directory (recursive, max 1000)
+void AddToPlaylist_openDir(const char* dir_path);
 
 // Check if the dialog is currently active
 bool AddToPlaylist_isActive(void);

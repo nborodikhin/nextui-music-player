@@ -63,16 +63,12 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
             case SETTINGS_STATE_MENU:
                 // Navigation
                 if (PAD_justPressed(BTN_UP)) {
-                    if (menu_selected > 0) {
-                        menu_selected--;
-                        dirty = 1;
-                    }
+                    menu_selected = (menu_selected > 0) ? menu_selected - 1 : SETTINGS_ITEM_COUNT - 1;
+                    dirty = 1;
                 }
                 else if (PAD_justPressed(BTN_DOWN)) {
-                    if (menu_selected < SETTINGS_ITEM_COUNT - 1) {
-                        menu_selected++;
-                        dirty = 1;
-                    }
+                    menu_selected = (menu_selected < SETTINGS_ITEM_COUNT - 1) ? menu_selected + 1 : 0;
+                    dirty = 1;
                 }
                 // Left/Right for cyclable settings; page navigation for others
                 else if (PAD_justPressed(BTN_LEFT)) {

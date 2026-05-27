@@ -14,6 +14,10 @@
 static char menu_toast_message[128] = "";
 static uint32_t menu_toast_time = 0;
 
+// Two-step exit state: timestamp of first B-press; 0 = not armed.
+// Window equals TOAST_DURATION so the exit toast and the arm-window expire together.
+static uint32_t exit_armed_at = 0;
+
 int MenuModule_run(SDL_Surface* screen) {
     int menu_selected = 0;
     int dirty = 1;
@@ -99,9 +103,18 @@ int MenuModule_run(SDL_Surface* screen) {
             }
         }
         else if (PAD_justPressed(BTN_B)) {
-            GFX_clearLayers(LAYER_SCROLLTEXT);
-            // Exit app from main menu
-            return MENU_QUIT;
+            uint32_t now = SDL_GetTicks();
+            if (exit_armed_at != 0 && now - exit_armed_at < TOAST_DURATION) {
+                GFX_clearLayers(LAYER_SCROLLTEXT);
+                exit_armed_at = 0;
+                return MENU_QUIT;
+            }
+            // First press (or window expired) — arm and show toast
+            exit_armed_at = now;
+            snprintf(menu_toast_message, sizeof(menu_toast_message),
+                     "Press B again to exit");
+            menu_toast_time = now;
+            dirty = 1;
         }
 
         // Handle power management

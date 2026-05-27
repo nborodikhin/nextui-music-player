@@ -90,7 +90,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
             switch (menu_selected) {
                 case LIBRARY_FILES:
-                    reason = PlayerModule_run(screen);
+                    reason = PlayerModule_run(screen, false);  // File browser entry
                     break;
                 case LIBRARY_PLAYLISTS:
                     reason = PlaylistModule_run(screen);

@@ -9,7 +9,11 @@
 
 // Run the local files player module
 // Handles: File browser, music playback, playlist, shuffle/repeat
-ModuleExitReason PlayerModule_run(SDL_Surface* screen);
+// now_playing_entry: true when called from "Now Playing" on the main menu (reclaims
+// background audio into the playing screen, B pops to main menu). false when called
+// to browse files (Library → Files); the file browser is shown regardless of any
+// background audio.
+ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry);
 
 // Run the player directly with a pre-built playlist (used by PlaylistModule)
 // Enters playing state immediately, returns when user presses B or all tracks end.

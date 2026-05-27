@@ -51,6 +51,15 @@ static char delete_target_name[256] = "";
 // Screen off state (module-local)
 static bool screen_off = false;
 
+// Navigation stack — push on A-into-folder, pop on B-back
+typedef struct {
+    char path[512];
+    int  selected;
+} NavEntry;
+#define NAV_STACK_DEPTH 32
+static NavEntry nav_stack[NAV_STACK_DEPTH];
+static int      nav_stack_top = 0;
+
 // Resume: M3U playlist path (set by PlaylistModule before runWithPlaylist)
 static char resume_playlist_path[512] = "";
 
@@ -77,6 +86,7 @@ static void init_player(void) {
     if (initialized) return;
     mkdir(MUSIC_PATH, 0755);
     load_directory(MUSIC_PATH);
+    nav_stack_top = 0;
     initialized = true;
 }
 
@@ -264,12 +274,25 @@ static bool browser_play_entry(FileEntry *entry) {
 static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
     if (PAD_justPressed(BTN_B)) {
         if (strcmp(browser.current_path, MUSIC_PATH) != 0) {
-            char* last_slash = strrchr(browser.current_path, '/');
-            if (last_slash) {
-                *last_slash = '\0';
-                load_directory(browser.current_path);
-                *dirty = 1;
+            if (nav_stack_top > 0) {
+                nav_stack_top--;
+                load_directory(nav_stack[nav_stack_top].path);
+                int sel = nav_stack[nav_stack_top].selected;
+                if (sel >= browser.entry_count)
+                    sel = browser.entry_count > 0 ? browser.entry_count - 1 : 0;
+                browser.selected = sel;
+                int half = browser.items_per_page / 2;
+                browser.scroll_offset = sel - half;
+                if (browser.scroll_offset < 0) browser.scroll_offset = 0;
+                int max_scroll = browser.entry_count - browser.items_per_page;
+                if (max_scroll < 0) max_scroll = 0;
+                if (browser.scroll_offset > max_scroll) browser.scroll_offset = max_scroll;
+            } else {
+                // No history: fall back to path truncation
+                char* last_slash = strrchr(browser.current_path, '/');
+                if (last_slash) { *last_slash = '\0'; load_directory(browser.current_path); }
             }
+            *dirty = 1;
         } else {
             GFX_clearLayers(LAYER_SCROLLTEXT);
             if (!Background_isPlaying()) {
@@ -291,6 +314,12 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
         else if (PAD_justPressed(BTN_A)) {
             FileEntry* entry = &browser.entries[browser.selected];
             if (entry->is_dir) {
+                if (nav_stack_top < NAV_STACK_DEPTH) {
+                    snprintf(nav_stack[nav_stack_top].path, sizeof(nav_stack[nav_stack_top].path),
+                             "%s", browser.current_path);
+                    nav_stack[nav_stack_top].selected = browser.selected;
+                    nav_stack_top++;
+                }
                 char path_copy[512];
                 snprintf(path_copy, sizeof(path_copy), "%s", entry->path);
                 load_directory(path_copy);
@@ -312,7 +341,14 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
         }
         else if (PAD_justPressed(BTN_Y)) {
             FileEntry* entry = &browser.entries[browser.selected];
-            if (!entry->is_dir && !entry->is_play_all) {
+            // Inactive on parent-dir (".."): user must navigate up to add its contents.
+            // Inactive on "Play All": it's a playback shortcut, not a target.
+            if (entry->is_play_all || strcmp(entry->name, "..") == 0) {
+                // no-op
+            } else if (entry->is_dir) {
+                AddToPlaylist_openDir(entry->path);
+                *dirty = 1;
+            } else {
                 AddToPlaylist_open(entry->path, entry->name);
                 *dirty = 1;
             }
@@ -349,7 +385,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
             ModuleCommon_resetScreenOffHint();
             ModuleCommon_recordInputTime();
             *dirty = 1;
-            return false;
+            return true;  // skip this frame's input so A doesn't toggle pause
         } else {
             // Any other button resets the hint timer
             if (PAD_anyPressed()) {
@@ -388,6 +424,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
                 PLAT_enableBacklight(1);
                 cleanup_playback(false);
                 load_directory(MUSIC_PATH);
+                nav_stack_top = 0;
                 *state = PLAYER_INTERNAL_BROWSER;
                 *dirty = 1;
             }
@@ -472,6 +509,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
             Resume_clear();  // All tracks finished naturally
             cleanup_playback(false);
             load_directory(MUSIC_PATH);
+            nav_stack_top = 0;
             *state = PLAYER_INTERNAL_BROWSER;
         }
         *dirty = 1;
@@ -515,7 +553,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     return false;
 }
 
-ModuleExitReason PlayerModule_run(SDL_Surface* screen) {
+ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
     init_player();
     load_directory(browser.current_path[0] ? browser.current_path : MUSIC_PATH);
 
@@ -527,12 +565,14 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen) {
     ModuleCommon_resetScreenOffHint();
     ModuleCommon_recordInputTime();
 
-    // Reclaim background music — re-enter playing state
-    if (Background_getActive() == BG_MUSIC && PlayerModule_isActive()) {
+    // Reclaim background music — re-enter playing state (only when entered via Now Playing)
+    bool entered_via_now_playing = false;
+    if (now_playing_entry && Background_getActive() == BG_MUSIC && PlayerModule_isActive()) {
         Background_setActive(BG_NONE);
         Spectrum_init();
         ModuleCommon_setAutosleepDisabled(true);
         state = PLAYER_INTERNAL_PLAYING;
+        entered_via_now_playing = true;
     }
 
     while (1) {
@@ -603,9 +643,11 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen) {
             }
         }
         else if (state == PLAYER_INTERNAL_PLAYING) {
-            if (handle_playing_input(screen, &state, &dirty)) {
-                continue;
+            bool skip_render = handle_playing_input(screen, &state, &dirty);
+            if (entered_via_now_playing && state != PLAYER_INTERNAL_PLAYING) {
+                return MODULE_EXIT_TO_MENU;
             }
+            if (skip_render) continue;
         }
 
         // Handle power management
@@ -660,10 +702,12 @@ bool PlayerModule_isActive(void) {
 void PlayerModule_nextTrack(void) {
     if (playlist_active) {
         int new_idx = Playlist_next(&playlist);
-        if (new_idx >= 0) {
-            Player_stop();
-            playlist_try_play(new_idx);
+        if (new_idx < 0) {
+            new_idx = 0;
+            Playlist_setCurrentIndex(&playlist, new_idx);
         }
+        Player_stop();
+        playlist_try_play(new_idx);
     } else if (initialized) {
         for (int i = browser.selected + 1; i < browser.entry_count; i++) {
             if (!browser.entries[i].is_dir) {
@@ -680,10 +724,12 @@ void PlayerModule_nextTrack(void) {
 void PlayerModule_prevTrack(void) {
     if (playlist_active) {
         int new_idx = Playlist_prev(&playlist);
-        if (new_idx >= 0) {
-            Player_stop();
-            playlist_try_play(new_idx);
+        if (new_idx < 0) {
+            new_idx = playlist.track_count - 1;
+            Playlist_setCurrentIndex(&playlist, new_idx);
         }
+        Player_stop();
+        playlist_try_play(new_idx);
     } else if (initialized) {
         for (int i = browser.selected - 1; i >= 0; i--) {
             if (!browser.entries[i].is_dir) {
@@ -767,25 +813,39 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
             }
         }
 
-        // Handle screen off hint timeout
+        // Handle screen off hint
         if (ModuleCommon_isScreenOffHintActive()) {
-            if (ModuleCommon_processScreenOffHintTimeout()) {
-                screen_off = true;
-                GFX_clear(screen);
-                GFX_flip(screen);
+            handle_hid_events();
+            ModuleCommon_handleHardwareVolume();
+            if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+                ModuleCommon_resetScreenOffHint();
+                ModuleCommon_recordInputTime();
+                dirty = 1;
+                continue;  // skip this frame's input so A doesn't toggle pause
+            } else {
+                if (PAD_anyPressed()) {
+                    ModuleCommon_startScreenOffHint();
+                }
+                if (ModuleCommon_processScreenOffHintTimeout()) {
+                    screen_off = true;
+                    GFX_clear(screen);
+                    GFX_flip(screen);
+                }
+                Player_update();
+                GFX_sync();
+                continue;
             }
-            Player_update();
-            GFX_sync();
-            continue;
         }
 
         // Handle screen off mode
         if (screen_off) {
-            if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+            if (PAD_anyPressed()) {
                 screen_off = false;
                 PLAT_enableBacklight(1);
-                ModuleCommon_recordInputTime();
-                dirty = 1;
+                ModuleCommon_startScreenOffHint();
+                GFX_clear(screen);
+                render_screen_off_hint(screen);
+                GFX_flip(screen);
             }
             handle_hid_events();
             ModuleCommon_handleHardwareVolume();
@@ -969,6 +1029,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
         // Initialize browser with saved folder
         init_player();
         load_directory(resume->folder_path);
+        nav_stack_top = 0;
 
         // Build playlist from directory starting at the saved track
         Playlist_free(&playlist);

@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
                     // "Now Playing" — route to the active background module
                     switch (Background_getActive()) {
                         case BG_MUSIC:
-                            reason = PlayerModule_run(screen);
+                            reason = PlayerModule_run(screen, true);  // Now Playing entry
                             break;
                         case BG_RADIO:
                             reason = RadioModule_run(screen);

@@ -312,6 +312,96 @@ int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const ch
     return ctx->track_count;
 }
 
+// Recursive helper for Playlist_collectPaths
+static void collect_paths_recursive(const char* path, int depth,
+                                    char*** out_paths, int* count, int max_count) {
+    if (depth > PLAYLIST_MAX_DEPTH || *count >= max_count) return;
+
+    DIR* dir = opendir(path);
+    if (!dir) return;
+
+    char** files = NULL;
+    char** dirs = NULL;
+    int file_count = 0, dir_count = 0;
+    int files_cap = 64, dirs_cap = 32;
+
+    files = malloc(sizeof(char*) * files_cap);
+    dirs  = malloc(sizeof(char*) * dirs_cap);
+    if (!files || !dirs) {
+        if (files) free(files);
+        if (dirs)  free(dirs);
+        closedir(dir);
+        return;
+    }
+
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, ent->d_name);
+        struct stat st;
+        if (lstat(full_path, &st) != 0) continue;
+        if (S_ISLNK(st.st_mode)) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (dir_count >= dirs_cap) {
+                dirs_cap *= 2;
+                char** nd = realloc(dirs, sizeof(char*) * dirs_cap);
+                if (!nd) continue;
+                dirs = nd;
+            }
+            dirs[dir_count] = strdup(ent->d_name);
+            if (dirs[dir_count]) dir_count++;
+        } else if (is_audio_file(ent->d_name)) {
+            if (file_count >= files_cap) {
+                files_cap *= 2;
+                char** nf = realloc(files, sizeof(char*) * files_cap);
+                if (!nf) continue;
+                files = nf;
+            }
+            files[file_count] = strdup(ent->d_name);
+            if (files[file_count]) file_count++;
+        }
+    }
+    closedir(dir);
+
+    if (file_count > 1) qsort(files, file_count, sizeof(char*), compare_strings);
+    if (dir_count  > 1) qsort(dirs,  dir_count,  sizeof(char*), compare_strings);
+
+    for (int i = 0; i < file_count && *count < max_count; i++) {
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
+        (*out_paths)[*count] = strdup(full_path);
+        if ((*out_paths)[*count]) (*count)++;
+    }
+    for (int i = 0; i < dir_count && *count < max_count; i++) {
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, dirs[i]);
+        collect_paths_recursive(full_path, depth + 1, out_paths, count, max_count);
+    }
+
+    for (int i = 0; i < file_count; i++) free(files[i]);
+    for (int i = 0; i < dir_count;  i++) free(dirs[i]);
+    free(files);
+    free(dirs);
+}
+
+int Playlist_collectPaths(const char* dir_path, char*** out_paths, int max_count) {
+    if (!dir_path || !out_paths || max_count <= 0) return 0;
+
+    *out_paths = malloc(sizeof(char*) * max_count);
+    if (!*out_paths) return 0;
+
+    int count = 0;
+    collect_paths_recursive(dir_path, 0, out_paths, &count, max_count);
+    return count;
+}
+
+void Playlist_freePaths(char** paths, int count) {
+    if (!paths) return;
+    for (int i = 0; i < count; i++) free(paths[i]);
+    free(paths);
+}
+
 // Navigation - next track (no wrap-around)
 int Playlist_next(PlaylistContext* ctx) {
     if (!ctx || ctx->track_count == 0) return -1;

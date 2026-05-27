@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "add_to_playlist.h"
+#include "playlist.h"
 #include "playlist_m3u.h"
 #include "keyboard.h"
 #include "ui_fonts.h"
@@ -13,8 +14,9 @@
 
 // Internal state
 static bool active = false;
-static char track_path[512];
-static char track_display_name[256];
+
+static char** file_paths = NULL;
+static int    file_count  = 0;
 
 static PlaylistInfo playlists[MAX_PLAYLISTS];
 static int playlist_count = 0;
@@ -25,14 +27,50 @@ static int scroll = 0;
 static char toast_msg[128] = "";
 static uint32_t toast_time = 0;
 
+// Extract display name from a file path: basename without extension
+// TODO: prefer the track name from file metadata (ID3 / Vorbis comment / etc.)
+// over the filename when available; fall back to this only when metadata is missing.
+static void display_name_from_path(const char* path, char* out, int out_size) {
+    const char* base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    snprintf(out, out_size, "%s", base);
+    char* dot = strrchr(out, '.');
+    if (dot && dot != out) *dot = '\0';
+}
+
+static void free_file_list(void) {
+    Playlist_freePaths(file_paths, file_count);
+    file_paths = NULL;
+    file_count  = 0;
+}
+
 void AddToPlaylist_open(const char* path, const char* display_name) {
     if (!path) return;
+    free_file_list();
+
+    file_paths = malloc(sizeof(char*));
+    if (!file_paths) return;
+    file_paths[0] = strdup(path);
+    if (!file_paths[0]) { free(file_paths); file_paths = NULL; return; }
+    file_count = 1;
+
+    (void)display_name;  // unused — display name always derived from path at add time
 
     M3U_init();
-    snprintf(track_path, sizeof(track_path), "%s", path);
-    snprintf(track_display_name, sizeof(track_display_name), "%s",
-             display_name ? display_name : "");
+    playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
+    selected = 0;
+    scroll = 0;
+    active = true;
+}
 
+void AddToPlaylist_openDir(const char* dir_path) {
+    if (!dir_path) return;
+    free_file_list();
+
+    file_count = Playlist_collectPaths(dir_path, &file_paths, 1000);
+    if (file_count == 0) return;  // no audio files — no-op
+
+    M3U_init();
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
     selected = 0;
     scroll = 0;
@@ -47,6 +85,7 @@ int AddToPlaylist_handleInput(void) {
     if (!active) return 1;
 
     if (PAD_justPressed(BTN_B)) {
+        free_file_list();
         active = false;
         return 1;
     }
@@ -70,27 +109,36 @@ int AddToPlaylist_handleInput(void) {
                 if (M3U_create(name) == 0) {
                     char new_path[512];
                     snprintf(new_path, sizeof(new_path), "%s/%s.m3u", PLAYLISTS_DIR, name);
-                    M3U_addTrack(new_path, track_path, track_display_name);
-                    snprintf(toast_msg, sizeof(toast_msg), "Added to %s", name);
+                    int added = 0;
+                    char dname[256];
+                    for (int i = 0; i < file_count; i++) {
+                        display_name_from_path(file_paths[i], dname, sizeof(dname));
+                        if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
+                    }
+                    snprintf(toast_msg, sizeof(toast_msg), "Added %d/%d files to %s",
+                             added, file_count, name);
                     toast_time = SDL_GetTicks();
                 }
                 free(name);
             }
+            free_file_list();
             active = false;
             return 1;
         } else {
             // Existing playlist
             int idx = selected - 1;
             if (idx >= 0 && idx < playlist_count) {
-                if (M3U_containsTrack(playlists[idx].path, track_path)) {
-                    snprintf(toast_msg, sizeof(toast_msg), "Already in %s", playlists[idx].name);
-                    toast_time = SDL_GetTicks();
-                } else {
-                    M3U_addTrack(playlists[idx].path, track_path, track_display_name);
-                    snprintf(toast_msg, sizeof(toast_msg), "Added to %s", playlists[idx].name);
-                    toast_time = SDL_GetTicks();
+                int added = 0;
+                char dname[256];
+                for (int i = 0; i < file_count; i++) {
+                    display_name_from_path(file_paths[i], dname, sizeof(dname));
+                    if (M3U_addTrack(playlists[idx].path, file_paths[i], dname) == 0) added++;
                 }
+                snprintf(toast_msg, sizeof(toast_msg), "Added %d/%d files to %s",
+                         added, file_count, playlists[idx].name);
+                toast_time = SDL_GetTicks();
             }
+            free_file_list();
             active = false;
             return 1;
         }
@@ -109,8 +157,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
     int line_height = SCALE1(22);
     DialogBox db = render_dialog_box(screen, SCALE1(260), SCALE1(70) + (visible_items * line_height));
 
-    // Title
-    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), "Add to Playlist", COLOR_WHITE);
+    // Title with file count
+    char title[64];
+    snprintf(title, sizeof(title), "Add to Playlist: (%d %s)",
+             file_count, file_count == 1 ? "file" : "files");
+    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), title, COLOR_WHITE);
     if (title_surf) {
         SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){db.content_x, db.box_y + SCALE1(10)});
         SDL_FreeSurface(title_surf);

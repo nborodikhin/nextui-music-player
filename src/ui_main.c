@@ -164,6 +164,7 @@ static const ControlHelp main_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
     {"X", "Clear History/Playback"},
+    {"B (double)", "Exit App"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -355,6 +356,13 @@ static const ControlHelp settings_controls[] = {
     {NULL, NULL}
 };
 
+static const ControlHelp library_menu_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Generic/default controls
 static const ControlHelp default_controls[] = {
     {"Start (hold)", "Exit App"},
@@ -470,7 +478,7 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
             page_title = "Playlist Tracks";
             break;
         case 55: // LIBRARY_MENU_HELP_STATE
-            controls = main_menu_controls;
+            controls = library_menu_controls;
             page_title = "Library";
             break;
         case 41: // SETTINGS_INTERNAL_ABOUT
