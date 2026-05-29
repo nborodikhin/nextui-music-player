@@ -38,7 +38,9 @@
 
 #include "defines.h"     // SHARED_USERDATA_PATH — must come before api.h
 #include "api.h"         // LOG_*
+#include "background.h"
 #include "fb_capture.h"
+#include "player.h"
 #include "ring_log.h"
 #include "settings.h"
 #include "watchdog.h"
@@ -52,7 +54,7 @@ static char bundle_dir[256];     // BUNDLE_ROOT "/yyyy-mm-dd_HH-MM-SS"
 static char log_path[320];       // bundle_dir "/log.txt"
 static char meta_path[320];      // bundle_dir "/meta.txt"
 static char screen_path[320];    // bundle_dir "/screen.bmp"
-static char meta_buf[1024];      // formatted meta.txt content
+static char meta_buf[2048];      // formatted meta.txt content (audio_track path can be ~512 chars)
 
 static atomic_int collection_enabled = 0;
 static atomic_int handler_installed = 0;
@@ -66,6 +68,25 @@ static const char* signal_name(int signo) {
         case SIGABRT: return "SIGABRT";
         case SIGBUS:  return "SIGBUS";
         default:      return "SIGNAL";
+    }
+}
+
+static const char* player_state_name(PlayerState s) {
+    switch (s) {
+        case PLAYER_STATE_PLAYING: return "playing";
+        case PLAYER_STATE_PAUSED:  return "paused";
+        case PLAYER_STATE_STOPPED: return "stopped";
+        default:                   return "unknown";
+    }
+}
+
+static const char* background_name(BackgroundPlayerType t) {
+    switch (t) {
+        case BG_MUSIC:   return "music";
+        case BG_RADIO:   return "radio";
+        case BG_PODCAST: return "podcast";
+        case BG_NONE:    return "none";
+        default:         return "unknown";
     }
 }
 
@@ -104,11 +125,23 @@ static void build_bundle_dir(void) {
 }
 
 // Format meta.txt into meta_buf. Returns the length (excluding trailing NUL).
+//
+// Audio fields are best-effort racy snapshots — the player getters are simple
+// reads with no mutex, so a torn read is possible but won't deadlock or crash.
+// PII consideration: audio_track is the raw filesystem path; gated by the same
+// "Collect crash reports" opt-in as the rest of the bundle.
 static size_t format_meta(int signo) {
     uint32_t now = SDL_GetTicks();
     uint32_t uptime = now - app_start_ticks;
     uint32_t hb = (uint32_t)Watchdog_lastHeartbeatMs();
     uint32_t hb_age = (hb == 0) ? 0 : (now - hb);
+
+    PlayerState ps = Player_getState();
+    BackgroundPlayerType bg = Background_getActive();
+    int pos_ms = Player_getPosition();
+    int dur_ms = Player_getDuration();
+    const char* track = Player_getCurrentFile();
+    if (!track) track = "";
 
     int n = snprintf(meta_buf, sizeof(meta_buf),
         "version: " VERSION_STR "\n"
@@ -119,14 +152,24 @@ static size_t format_meta(int signo) {
         "ring_total_bytes: %zu\n"
         "screen_width: %d\n"
         "screen_height: %d\n"
-        "screen_bpp: %d\n",
+        "screen_bpp: %d\n"
+        "audio_state: %s\n"
+        "audio_background: %s\n"
+        "audio_position_ms: %d\n"
+        "audio_duration_ms: %d\n"
+        "audio_track: %s\n",
         signal_name(signo), signo,
         uptime,
         hb_age,
         RingLog_totalAppended(),
         FbCapture_width(),
         FbCapture_height(),
-        FbCapture_bpp()
+        FbCapture_bpp(),
+        player_state_name(ps),
+        background_name(bg),
+        pos_ms,
+        dur_ms,
+        track
     );
     if (n < 0) return 0;
     return (size_t)n < sizeof(meta_buf) ? (size_t)n : sizeof(meta_buf) - 1;
