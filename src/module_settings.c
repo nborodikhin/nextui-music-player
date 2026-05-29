@@ -11,6 +11,8 @@
 #include "ui_system.h"
 #include "wifi.h"
 #include "album_art.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Internal states
 typedef enum {
@@ -22,13 +24,19 @@ typedef enum {
 } SettingsState;
 
 // Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
+#define SETTINGS_ITEM_SCREEN_OFF        0
+#define SETTINGS_ITEM_BASS_FILTER       1
+#define SETTINGS_ITEM_SOFT_LIMITER      2
+#define SETTINGS_ITEM_COLLECT_CRASH     3
+// TODO: insert a conditional SETTINGS_ITEM_DELETE_CRASH_REPORTS here when at
+// least one bundle exists under crash-reports/. A opens a confirmation dialog
+// (same renderer as Clear-Cache) that shows the SD-relative crash-reports/
+// path in its body and rm -rf's the whole directory on confirm. See
+// spec/crash-reporting.md > TODOs.
+#define SETTINGS_ITEM_CLEAR_CACHE       4
+#define SETTINGS_ITEM_UPDATE_YTDLP      5
+#define SETTINGS_ITEM_ABOUT             6
+#define SETTINGS_ITEM_COUNT             7
 
 // Internal app state constants for controls help
 // These match the pattern used in ui_main.c
@@ -36,6 +44,7 @@ typedef enum {
 #define SETTINGS_INTERNAL_ABOUT     41
 
 ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
+    LOG_trace("SettingsModule_run: enter");
     SettingsState state = SETTINGS_STATE_MENU;
     int menu_selected = 0;
     int menu_scroll = 0;
@@ -45,6 +54,8 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle global input first
         int app_state = (state == SETTINGS_STATE_MENU) ? SETTINGS_INTERNAL_MENU : SETTINGS_INTERNAL_ABOUT;
@@ -81,6 +92,9 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
                         Settings_cycleSoftLimiterPrev();
                         dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_COLLECT_CRASH) {
+                        Settings_toggleCollectCrashReports();
+                        dirty = 1;
                     } else {
                         int items_per_page = calc_list_layout(screen).items_per_page;
                         list_page_up(&menu_selected, &menu_scroll, SETTINGS_ITEM_COUNT, items_per_page);
@@ -96,6 +110,9 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                         dirty = 1;
                     } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
                         Settings_cycleSoftLimiterNext();
+                        dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_COLLECT_CRASH) {
+                        Settings_toggleCollectCrashReports();
                         dirty = 1;
                     } else {
                         int items_per_page = calc_list_layout(screen).items_per_page;
@@ -119,7 +136,12 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                             Settings_cycleSoftLimiterNext();
                             dirty = 1;
                             break;
+                        case SETTINGS_ITEM_COLLECT_CRASH:
+                            Settings_toggleCollectCrashReports();
+                            dirty = 1;
+                            break;
                         case SETTINGS_ITEM_CLEAR_CACHE:
+                            LOG_trace("dialog enter: clear_cache_confirm");
                             state = SETTINGS_STATE_CLEAR_CACHE_CONFIRM;
                             dirty = 1;
                             break;
@@ -145,12 +167,14 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
             case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
                 if (PAD_justPressed(BTN_A)) {
                     // Confirm - clear the cache
+                    LOG_trace("dialog exit: clear_cache_confirm action=clear");
                     album_art_clear_disk_cache();
                     state = SETTINGS_STATE_MENU;
                     dirty = 1;
                 }
                 else if (PAD_justPressed(BTN_B)) {
                     // Cancel
+                    LOG_trace("dialog exit: clear_cache_confirm action=cancel");
                     state = SETTINGS_STATE_MENU;
                     dirty = 1;
                 }
@@ -233,14 +257,20 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
         // Handle power management
         ModuleCommon_PWR_update(&dirty, &show_setting);
 
+        // Adjust scroll so menu_selected stays visible
+        {
+            int items_per_page = calc_list_layout(screen).items_per_page;
+            adjust_list_scroll(menu_selected, &menu_scroll, items_per_page);
+        }
+
         // Render
         if (dirty) {
             switch (state) {
                 case SETTINGS_STATE_MENU:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll);
                     break;
                 case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll);
                     render_confirmation_dialog(screen, NULL, "Clear album art cache?");
                     break;
                 case SETTINGS_STATE_ABOUT:

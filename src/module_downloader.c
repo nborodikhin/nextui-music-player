@@ -12,6 +12,8 @@
 #include "ui_downloader.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Menu count
 #define DOWNLOADER_MENU_COUNT 2
@@ -36,6 +38,7 @@ static char toast_message[128] = "";
 static uint32_t toast_time = 0;
 
 ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
+    LOG_trace("DownloaderModule_run: enter");
     Downloader_init();
 
     // Check WiFi before entering
@@ -74,6 +77,8 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle global input
         int app_state_for_help;

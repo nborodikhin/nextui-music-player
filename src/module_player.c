@@ -25,6 +25,8 @@
 #include "playlist_m3u.h"
 #include "background.h"
 #include "album_art.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Music folder path
 #define MUSIC_PATH SDCARD_PATH "/Music"
@@ -92,6 +94,7 @@ static void init_player(void) {
 
 // Try to load and play a track, returns true on success
 static bool try_load_and_play(const char *path) {
+    LOG_trace("try_load_and_play: %s", path ? path : "(null)");
     if (Player_load(path) == 0) {
         Player_play();
         const TrackInfo* info = Player_getTrackInfo();
@@ -334,6 +337,7 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
             if (!entry->is_dir && !entry->is_play_all) {
                 snprintf(delete_target_path, sizeof(delete_target_path), "%s", entry->path);
                 snprintf(delete_target_name, sizeof(delete_target_name), "%s", entry->name);
+                LOG_trace("dialog enter: file_delete_confirm name=%s", delete_target_name);
                 show_delete_confirm = true;
                 GFX_clearLayers(LAYER_SCROLLTEXT);
                 *dirty = 1;
@@ -554,6 +558,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
 }
 
 ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
+    LOG_trace("PlayerModule_run: enter now_playing_entry=%d", now_playing_entry ? 1 : 0);
     init_player();
     load_directory(browser.current_path[0] ? browser.current_path : MUSIC_PATH);
 
@@ -578,6 +583,8 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -609,6 +616,8 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
                 }
             }
             if (PAD_justPressed(BTN_A) || PAD_justPressed(BTN_B)) {
+                LOG_trace("dialog exit: file_delete_confirm action=%s",
+                    PAD_justPressed(BTN_A) ? "delete" : "cancel");
                 delete_target_path[0] = '\0';
                 delete_target_name[0] = '\0';
                 show_delete_confirm = false;
@@ -747,6 +756,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
                                               PlaylistTrack* tracks,
                                               int track_count,
                                               int start_index) {
+    LOG_trace("PlayerModule_runWithPlaylist: enter tracks=%d start=%d", track_count, start_index);
     if (!tracks || track_count <= 0) return MODULE_EXIT_TO_MENU;
 
     // Set up the playlist context
@@ -777,6 +787,8 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -1023,6 +1035,7 @@ void PlayerModule_setResumePlaylistPath(const char* m3u_path) {
 
 // Run player restoring a saved resume state
 ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* resume) {
+    LOG_trace("PlayerModule_runResume: enter type=%d", resume ? (int)resume->type : -1);
     if (!resume) return MODULE_EXIT_TO_MENU;
 
     if (resume->type == RESUME_TYPE_FILES) {
@@ -1068,6 +1081,8 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
         while (1) {
             GFX_startFrame();
             PAD_poll();
+            Watchdog_heartbeat();
+            ModuleCommon_traceButtons();
 
             // Handle add-to-playlist dialog overlay
             if (AddToPlaylist_isActive()) {

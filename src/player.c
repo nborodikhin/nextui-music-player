@@ -35,6 +35,8 @@ struct input_event_raw {
 #include "defines.h"
 #include "api.h"
 #include "msettings.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Include dr_libs for audio decoding (header-only libraries)
 #define DR_MP3_IMPLEMENTATION
@@ -1445,9 +1447,11 @@ int Player_init(void) {
     if (audio_sink == AUDIO_SINK_BLUETOOTH) {
         // Set all mixer controls that contain "A2DP" in their name to 100%
         // This handles devices like "Galaxy Buds Live (4B23 A2DP" etc.
+        Watchdog_pause(WATCHDOG_REASON_SUBPROCESS, true);
         system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
                "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
                "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
+        Watchdog_resume(WATCHDOG_REASON_SUBPROCESS, true);
         // Initialize HID input monitoring for Bluetooth AVRCP buttons
         Player_initUSBHID();
     }
@@ -1456,11 +1460,13 @@ int Player_init(void) {
     if (audio_sink == AUDIO_SINK_USBDAC) {
         // USB DACs typically appear as card 1, set common mixer controls to 100%
         // Different USB DACs use different control names (PCM, Master, Headset, etc.)
+        Watchdog_pause(WATCHDOG_REASON_SUBPROCESS, true);
         system("amixer -c 1 sset PCM 100% 2>/dev/null; "
                "amixer -c 1 sset Master 100% 2>/dev/null; "
                "amixer -c 1 sset Speaker 100% 2>/dev/null; "
                "amixer -c 1 sset Headphone 100% 2>/dev/null; "
                "amixer -c 1 sset Headset 100% 2>/dev/null");
+        Watchdog_resume(WATCHDOG_REASON_SUBPROCESS, true);
         // Initialize USB HID input monitoring for earphone buttons
         Player_initUSBHID();
     }
@@ -1641,9 +1647,11 @@ static void audio_device_change_callback(int device_type, int event) {
     if (was_bluetooth != bluetooth_audio_active) {
         // If Bluetooth just activated, set mixer to 100% and init HID
         if (bluetooth_audio_active) {
+            Watchdog_pause(WATCHDOG_REASON_SUBPROCESS, true);
             system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
                    "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
                    "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
+            Watchdog_resume(WATCHDOG_REASON_SUBPROCESS, true);
             // Initialize HID input monitoring for Bluetooth AVRCP buttons
             Player_initUSBHID();
         } else if (!usbdac_audio_active) {
@@ -1654,11 +1662,13 @@ static void audio_device_change_callback(int device_type, int event) {
 
     // If USB DAC just activated, set its mixer to 100%
     if (!was_usbdac && usbdac_audio_active) {
+        Watchdog_pause(WATCHDOG_REASON_SUBPROCESS, true);
         system("amixer -c 1 sset PCM 100% 2>/dev/null; "
                "amixer -c 1 sset Master 100% 2>/dev/null; "
                "amixer -c 1 sset Speaker 100% 2>/dev/null; "
                "amixer -c 1 sset Headphone 100% 2>/dev/null; "
                "amixer -c 1 sset Headset 100% 2>/dev/null");
+        Watchdog_resume(WATCHDOG_REASON_SUBPROCESS, true);
         // Initialize USB HID input monitoring for earphone buttons
         Player_initUSBHID();
     } else if (was_usbdac && !usbdac_audio_active && !bluetooth_audio_active) {
@@ -2553,23 +2563,24 @@ USBHIDEvent Player_pollUSBHID(void) {
         return USB_HID_EVENT_NONE;
     }
 
+    USBHIDEvent ev_out = USB_HID_EVENT_NONE;
+
     struct input_event_raw ev;
     while (read(usb_hid_fd, &ev, sizeof(ev)) == sizeof(ev)) {
         // Only handle key press events (value=1), ignore release (0) and repeat (2)
         if (ev.type == EV_KEY && ev.value == 1) {
             switch (ev.code) {
-                case KEY_VOLUMEUP:
-                    return USB_HID_EVENT_VOLUME_UP;
-                case KEY_VOLUMEDOWN:
-                    return USB_HID_EVENT_VOLUME_DOWN;
-                case KEY_NEXTSONG:
-                    return USB_HID_EVENT_NEXT_TRACK;
+                case KEY_VOLUMEUP:      ev_out = USB_HID_EVENT_VOLUME_UP;   break;
+                case KEY_VOLUMEDOWN:    ev_out = USB_HID_EVENT_VOLUME_DOWN; break;
+                case KEY_NEXTSONG:      ev_out = USB_HID_EVENT_NEXT_TRACK;  break;
                 case KEY_PLAYPAUSE:
                 case KEY_PLAYCD:
-                case KEY_PAUSECD:
-                    return USB_HID_EVENT_PLAY_PAUSE;
-                case KEY_PREVIOUSSONG:
-                    return USB_HID_EVENT_PREV_TRACK;
+                case KEY_PAUSECD:       ev_out = USB_HID_EVENT_PLAY_PAUSE;  break;
+                case KEY_PREVIOUSSONG:  ev_out = USB_HID_EVENT_PREV_TRACK;  break;
+            }
+            if (ev_out != USB_HID_EVENT_NONE) {
+                LOG_trace("Player_pollUSBHID: event=%d code=%u", (int)ev_out, (unsigned)ev.code);
+                return ev_out;
             }
         }
     }

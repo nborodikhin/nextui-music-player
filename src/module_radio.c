@@ -18,6 +18,8 @@
 #include "ui_utils.h"
 #include "wifi.h"
 #include "background.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Internal states
 typedef enum {
@@ -113,6 +115,7 @@ static void build_sorted_station_indices(const char* country_code) {
 }
 
 ModuleExitReason RadioModule_run(SDL_Surface* screen) {
+    LOG_trace("RadioModule_run: enter");
     Radio_init();
 
     RadioInternalState state = RADIO_INTERNAL_LIST;
@@ -138,6 +141,8 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -158,11 +163,13 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                     Radio_removeStationByUrl(confirm_station_url);
                     Radio_saveStations();
                 }
+                LOG_trace("dialog exit: radio_confirm action=confirm kind=%d", confirm_action_type);
                 show_confirm = false;
                 dirty = 1;
                 GFX_sync();
                 continue;
             } else if (PAD_justPressed(BTN_B)) {
+                LOG_trace("dialog exit: radio_confirm action=cancel");
                 show_confirm = false;
                 dirty = 1;
                 GFX_sync();
@@ -258,6 +265,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 confirm_station_name[RADIO_MAX_NAME - 1] = '\0';
                 confirm_target_index = radio_selected;
                 confirm_action_type = 0;
+                LOG_trace("dialog enter: radio_confirm kind=remove_station name=%s", confirm_station_name);
                 show_confirm = true;
                 dirty = 1;
             }
@@ -479,6 +487,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                     strncpy(confirm_station_url, station->url, RADIO_MAX_URL - 1);
                     confirm_station_url[RADIO_MAX_URL - 1] = '\0';
                     confirm_action_type = 1;
+                    LOG_trace("dialog enter: radio_confirm kind=remove_from_browse name=%s", confirm_station_name);
                     show_confirm = true;
                     dirty = 1;
                 } else {

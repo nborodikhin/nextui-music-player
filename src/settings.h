@@ -43,6 +43,20 @@ void Settings_cycleSoftLimiterNext(void);
 void Settings_cycleSoftLimiterPrev(void);
 const char* Settings_getSoftLimiterDisplayStr(void);
 
+// Collect crash reports (opt-in; default false)
+// Controls whether the signal handler writes diagnostic bundles to SD card.
+// The setter also notifies the registered listener (see Settings_setCollectCrashReportsListener)
+// so the signal handler's atomic flag is kept in sync.
+bool Settings_getCollectCrashReports(void);
+void Settings_setCollectCrashReports(bool enabled);
+void Settings_toggleCollectCrashReports(void);
+const char* Settings_getCollectCrashReportsDisplayStr(void);
+
+// Register a listener that is invoked whenever the collect-crash-reports value changes.
+// The crash handler registers itself here to keep its in-memory atomic in sync.
+// Set to NULL to clear. At most one listener at a time.
+void Settings_setCollectCrashReportsListener(void (*listener)(bool enabled));
+
 // Save settings to file (auto-called on change)
 void Settings_save(void);
 

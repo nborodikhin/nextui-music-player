@@ -33,6 +33,10 @@
 #include "resume.h"
 #include "background.h"
 #include "display_helper.h"
+#include "ring_log.h"
+#include "log_trace.h"   // Must come AFTER api.h — wraps LOG_note into the ring
+#include "crash_handler.h"
+#include "watchdog.h"
 
 // Global quit flag
 static bool quit = false;
@@ -57,6 +61,12 @@ int main(int argc, char* argv[]) {
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
+
+    // Crash-report ring + LOG wrapper (before any LOG_* call).
+    RingLog_init();
+    LogTrace_init();
+    LOG_info("Music Player starting; ring log initialized\n");
+    LOG_trace("smoke: LOG_trace alive\n");
 
     // Show splash screen immediately while heavy subsystems initialize
     {
@@ -123,6 +133,15 @@ int main(int argc, char* argv[]) {
 
     // Initialize app-specific settings
     Settings_init();
+
+    // Install the crash signal handler. Must come AFTER Settings_init so the
+    // collection_enabled atomic is seeded from the persisted setting and the
+    // settings listener is registered for runtime toggles.
+    CrashHandler_init();
+
+    // Start the watchdog AFTER the crash handler is installed so any SIGABRT
+    // it raises is captured into a bundle. Default 5s stall threshold.
+    Watchdog_init(0);
 
     // Initialize resume state
     Resume_init();
@@ -195,6 +214,7 @@ int main(int argc, char* argv[]) {
     }
 
 cleanup:
+    Watchdog_quit();
     Background_stopAll();
     Downloader_cleanup();
     Settings_quit();

@@ -12,13 +12,14 @@
 #include "downloader.h"
 
 // Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
+#define SETTINGS_ITEM_SCREEN_OFF        0
+#define SETTINGS_ITEM_BASS_FILTER       1
+#define SETTINGS_ITEM_SOFT_LIMITER      2
+#define SETTINGS_ITEM_COLLECT_CRASH     3
+#define SETTINGS_ITEM_CLEAR_CACHE       4
+#define SETTINGS_ITEM_UPDATE_YTDLP      5
+#define SETTINGS_ITEM_ABOUT             6
+#define SETTINGS_ITEM_COUNT             7
 
 // Format cache size as human-readable string
 static void format_cache_size(long bytes, char* buf, int buf_size) {
@@ -31,7 +32,7 @@ static void format_cache_size(long bytes, char* buf, int buf_size) {
     }
 }
 
-void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
+void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -39,18 +40,25 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     render_screen_header(screen, "Settings", show_setting);
     ListLayout layout = calc_list_layout(screen);
 
-    // Vertically center items in available area
-    int item_h = SCALE1(PILL_SIZE);
-    int total_items_h = SETTINGS_ITEM_COUNT * item_h;
-    int start_y = layout.list_y + (layout.list_h - total_items_h) / 8;
+    int item_h = layout.item_h;
+    int start_y = layout.list_y;
+
+    // Clamp scroll to valid range (defensive — caller should already adjust)
+    int max_scroll = (SETTINGS_ITEM_COUNT > layout.items_per_page)
+                     ? SETTINGS_ITEM_COUNT - layout.items_per_page : 0;
+    if (menu_scroll < 0) menu_scroll = 0;
+    if (menu_scroll > max_scroll) menu_scroll = max_scroll;
 
     char truncated[256];
     char label_buffer[256];
 
-    for (int i = 0; i < SETTINGS_ITEM_COUNT; i++) {
+    int last_visible = menu_scroll + layout.items_per_page;
+    if (last_visible > SETTINGS_ITEM_COUNT) last_visible = SETTINGS_ITEM_COUNT;
+
+    for (int i = menu_scroll; i < last_visible; i++) {
         bool selected = (i == menu_selected);
 
-        int item_y = start_y + i * item_h;
+        int item_y = start_y + (i - menu_scroll) * item_h;
 
         // Build label text based on item
         const char* label = "";
@@ -68,6 +76,10 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
             case SETTINGS_ITEM_SOFT_LIMITER:
                 label = "Soft Limiter";
                 value_str = Settings_getSoftLimiterDisplayStr();
+                break;
+            case SETTINGS_ITEM_COLLECT_CRASH:
+                label = "Collect Crash Reports";
+                value_str = Settings_getCollectCrashReportsDisplayStr();
                 break;
             case SETTINGS_ITEM_CLEAR_CACHE: {
                 long cache_size = album_art_get_cache_size();
@@ -174,13 +186,17 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
         }
     }
 
+    // Scroll indicators (... at top/bottom when content overflows the visible window)
+    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, SETTINGS_ITEM_COUNT);
+
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
 
     // Different hints based on selected item
     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF ||
         menu_selected == SETTINGS_ITEM_BASS_FILTER ||
-        menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
+        menu_selected == SETTINGS_ITEM_SOFT_LIMITER ||
+        menu_selected == SETTINGS_ITEM_COLLECT_CRASH) {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);

@@ -8,6 +8,8 @@
 #include "settings.h"
 #include "ui_main.h"
 #include "ui_music.h"
+#include "watchdog.h"
+#include "log_trace.h"
 #include "ui_radio.h"
 #include "player.h"
 #include "radio.h"
@@ -145,12 +147,14 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     // Handle quit confirmation dialog
     if (show_quit_confirm) {
         if (PAD_justPressed(BTN_A)) {
+            LOG_trace("dialog exit: quit_confirm action=quit");
             show_quit_confirm = false;
             result.input_consumed = true;
             result.should_quit = true;
             return result;
         }
         else if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_START)) {
+            LOG_trace("dialog exit: quit_confirm action=cancel");
             show_quit_confirm = false;
             result.input_consumed = true;
             result.dirty = true;
@@ -170,6 +174,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_DOWN) ||
             PAD_justPressed(BTN_LEFT) || PAD_justPressed(BTN_RIGHT) ||
             PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_MENU)) {
+            LOG_trace("dialog exit: controls_help");
             show_controls_help = false;
             result.input_consumed = true;
             result.dirty = true;
@@ -196,11 +201,13 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             // Check for long press threshold while button is held
             uint32_t hold_time = SDL_GetTicks() - start_press_time;
             if (hold_time >= START_LONG_PRESS_MS) {
+                LOG_trace("dialog enter: quit_confirm");
                 show_quit_confirm = true;
                 show_dialog = true;
             }
         } else if (PAD_justReleased(BTN_START)) {
             // Short press - show controls help
+            LOG_trace("dialog enter: controls_help");
             show_controls_help = true;
             show_dialog = true;
         }
@@ -227,7 +234,18 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     {
         int dirty_before = result.dirty ? 1 : 0;
         int dirty_tmp = dirty_before;
+        // PWR_update can block for the full deep-sleep duration if the user
+        // presses the power button. Muzzle the watchdog around the call —
+        // Watchdog_resume() also refreshes the heartbeat so we don't immediately
+        // trip on a stale tick after wake.
+        //
+        // trace=false: this wrap fires every frame (~60/s) and the operation is
+        // almost always a fast no-op. Logging every iteration would drown the
+        // ring buffer. Real deep-sleep events still show up in the log as a
+        // visible jump in timestamps between consecutive lines.
+        Watchdog_pause(WATCHDOG_REASON_DEEP_SLEEP, false);
         PWR_update(&dirty_tmp, show_setting, NULL, NULL);
+        Watchdog_resume(WATCHDOG_REASON_DEEP_SLEEP, false);
 
         if (dirty_tmp && !dirty_before) {
             result.dirty = true;
@@ -317,8 +335,12 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
         overlay_release_time = SDL_GetTicks();
     }
 
-    // Call platform PWR_update
+    // Call platform PWR_update. Can block for deep-sleep duration.
+    // trace=false for the same reason as the other PWR_update wrap above:
+    // this fires every frame, logging would swamp the ring.
+    Watchdog_pause(WATCHDOG_REASON_DEEP_SLEEP, false);
     PWR_update(dirty, show_setting, NULL, NULL);
+    Watchdog_resume(WATCHDOG_REASON_DEEP_SLEEP, false);
 
     // After visible period, force hide overlay
     if (overlay_release_time > 0) {
@@ -335,6 +357,43 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     }
 
     overlay_buttons_were_active = overlay_buttons_active;
+}
+
+// Short label per BTN_ID for the per-frame trace log.
+static const char* btn_label(int id) {
+    switch (id) {
+        case BTN_ID_DPAD_UP:    return "UP";
+        case BTN_ID_DPAD_DOWN:  return "DOWN";
+        case BTN_ID_DPAD_LEFT:  return "LEFT";
+        case BTN_ID_DPAD_RIGHT: return "RIGHT";
+        case BTN_ID_A:          return "A";
+        case BTN_ID_B:          return "B";
+        case BTN_ID_X:          return "X";
+        case BTN_ID_Y:          return "Y";
+        case BTN_ID_START:      return "START";
+        case BTN_ID_SELECT:     return "SELECT";
+        case BTN_ID_L1:         return "L1";
+        case BTN_ID_R1:         return "R1";
+        case BTN_ID_L2:         return "L2";
+        case BTN_ID_R2:         return "R2";
+        case BTN_ID_L3:         return "L3";
+        case BTN_ID_R3:         return "R3";
+        case BTN_ID_MENU:       return "MENU";
+        case BTN_ID_PLUS:       return "PLUS";
+        case BTN_ID_MINUS:      return "MINUS";
+        case BTN_ID_POWER:      return "POWER";
+        default:                return NULL;
+    }
+}
+
+void ModuleCommon_traceButtons(void) {
+    for (int id = 0; id < BTN_ID_COUNT; id++) {
+        const char* label = btn_label(id);
+        if (!label) continue;
+        uint32_t mask = 1u << id;
+        if (PAD_justPressed(mask))  LOG_trace("btn press: %s", label);
+        if (PAD_justReleased(mask)) LOG_trace("btn release: %s", label);
+    }
 }
 
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {

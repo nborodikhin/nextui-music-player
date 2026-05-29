@@ -76,4 +76,9 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);
 // Handle hardware volume buttons (BTN_PLUS/BTN_MINUS).
 void ModuleCommon_handleHardwareVolume(void);
 
+// Emit a LOG_trace line for every button that was just-pressed or just-released
+// this frame. Call once per module loop iteration, after PAD_poll(). Used by the
+// crash-report ring log to capture user input leading up to a stall/crash.
+void ModuleCommon_traceButtons(void);
+
 #endif

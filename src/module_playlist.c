@@ -14,6 +14,8 @@
 #include "ui_playlist.h"
 #include "ui_main.h"
 #include "ui_utils.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Internal states
 typedef enum {
@@ -63,6 +65,7 @@ static void show_toast(const char* msg) {
 }
 
 ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
+    LOG_trace("PlaylistModule_run: enter");
     M3U_init();
     Keyboard_init();
     refresh_playlists();
@@ -74,6 +77,8 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -102,11 +107,14 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                         show_toast("Track removed");
                     }
                 }
+                LOG_trace("dialog exit: playlist_confirm action=%s",
+                    confirm_action == 0 ? "delete_playlist" : "remove_track");
                 show_confirm = false;
                 dirty = 1;
                 continue;
             }
             if (PAD_justPressed(BTN_B)) {
+                LOG_trace("dialog exit: playlist_confirm action=cancel");
                 show_confirm = false;
                 dirty = 1;
                 continue;
@@ -196,6 +204,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                     snprintf(confirm_name, sizeof(confirm_name), "%s", playlists[list_selected].name);
                     confirm_action = 0;
                     confirm_target = list_selected;
+                    LOG_trace("dialog enter: playlist_confirm kind=delete_playlist name=%s", confirm_name);
                     show_confirm = true;
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     dirty = 1;
@@ -254,6 +263,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                     snprintf(confirm_name, sizeof(confirm_name), "%s", detail_tracks[detail_selected].name);
                     confirm_action = 1;
                     confirm_target = detail_selected;
+                    LOG_trace("dialog enter: playlist_confirm kind=remove_track name=%s", confirm_name);
                     show_confirm = true;
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     dirty = 1;

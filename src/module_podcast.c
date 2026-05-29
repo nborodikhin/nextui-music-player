@@ -16,6 +16,8 @@
 #include "ui_utils.h"
 #include "wifi.h"
 #include "background.h"
+#include "watchdog.h"
+#include "log_trace.h"
 
 // Internal states
 typedef enum {
@@ -98,6 +100,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
 }
 
 ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
+    LOG_trace("PodcastModule_run: enter");
     Podcast_init();
     Keyboard_init();
 
@@ -130,6 +133,8 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -149,12 +154,14 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 }
                 snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Unsubscribed");
                 podcast_toast_time = SDL_GetTicks();
+                LOG_trace("dialog exit: podcast_confirm action=unsubscribe");
                 show_confirm = false;
                 Podcast_clearTitleScroll();
                 dirty = 1;
                 GFX_sync();
                 continue;
             } else if (PAD_justPressed(BTN_B)) {
+                LOG_trace("dialog exit: podcast_confirm action=cancel");
                 show_confirm = false;
                 Podcast_clearTitleScroll();
                 dirty = 1;
@@ -333,6 +340,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                         confirm_target_index = sub_idx;
                         confirm_return_state = 0;
                         Podcast_clearTitleScroll();
+                        LOG_trace("dialog enter: podcast_confirm name=%s", confirm_podcast_name);
                         show_confirm = true;
                         dirty = 1;
                     }
