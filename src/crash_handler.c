@@ -275,6 +275,78 @@ int CrashHandler_convertPendingScreenshots(void) {
     return converted;
 }
 
+bool CrashHandler_hasAnyBundle(void) {
+    DIR* dir = opendir(BUNDLE_ROOT);
+    if (!dir) return false;
+
+    bool found = false;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        char p[320];
+        snprintf(p, sizeof(p), "%s/%s", BUNDLE_ROOT, ent->d_name);
+        struct stat st;
+        if (stat(p, &st) == 0 && S_ISDIR(st.st_mode)) {
+            found = true;
+            break;
+        }
+    }
+    closedir(dir);
+    return found;
+}
+
+// Walk one bundle directory: unlink every regular file, then rmdir the bundle.
+// Best-effort — individual failures don't stop the wipe.
+static void delete_bundle_dir(const char* path) {
+    DIR* dir = opendir(path);
+    if (!dir) return;
+
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.' &&
+            (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0'))) {
+            continue;
+        }
+        char filepath[384];
+        snprintf(filepath, sizeof(filepath), "%s/%s", path, ent->d_name);
+        unlink(filepath);
+    }
+    closedir(dir);
+    rmdir(path);
+}
+
+int CrashHandler_deleteAllBundles(void) {
+    DIR* dir = opendir(BUNDLE_ROOT);
+    if (!dir) return -1;
+
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+        char p[320];
+        snprintf(p, sizeof(p), "%s/%s", BUNDLE_ROOT, ent->d_name);
+        struct stat st;
+        if (stat(p, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            delete_bundle_dir(p);
+        } else {
+            unlink(p);
+        }
+    }
+    closedir(dir);
+    rmdir(BUNDLE_ROOT);
+    return 0;
+}
+
+void CrashHandler_getBundleRootDisplayPath(char* out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const char* full = BUNDLE_ROOT;
+    const char* userdata = strstr(full, ".userdata/");
+    const char* src = userdata ? userdata : full;
+    size_t n = strnlen(src, out_size - 1);
+    memcpy(out, src, n);
+    out[n] = '\0';
+}
+
 int CrashHandler_skipBundle(const char* bundle_path) {
     if (!bundle_path || !bundle_path[0]) return -1;
     char skip_path[320];

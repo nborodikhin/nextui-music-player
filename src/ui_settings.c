@@ -10,16 +10,22 @@
 #include "album_art.h"
 #include "selfupdate.h"
 #include "downloader.h"
+#include "crash_handler.h"
 
-// Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF        0
-#define SETTINGS_ITEM_BASS_FILTER       1
-#define SETTINGS_ITEM_SOFT_LIMITER      2
-#define SETTINGS_ITEM_COLLECT_CRASH     3
-#define SETTINGS_ITEM_CLEAR_CACHE       4
-#define SETTINGS_ITEM_UPDATE_YTDLP      5
-#define SETTINGS_ITEM_ABOUT             6
-#define SETTINGS_ITEM_COUNT             7
+int settings_build_visible_items(int* out, int max_count) {
+    int n = 0;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_SCREEN_OFF;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_BASS_FILTER;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_SOFT_LIMITER;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_COLLECT_CRASH;
+    if (CrashHandler_hasAnyBundle()) {
+        if (n < max_count) out[n++] = SETTINGS_ITEM_DELETE_CRASH;
+    }
+    if (n < max_count) out[n++] = SETTINGS_ITEM_CLEAR_CACHE;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_UPDATE_YTDLP;
+    if (n < max_count) out[n++] = SETTINGS_ITEM_ABOUT;
+    return n;
+}
 
 // Format cache size as human-readable string
 static void format_cache_size(long bytes, char* buf, int buf_size) {
@@ -43,9 +49,12 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     int item_h = layout.item_h;
     int start_y = layout.list_y;
 
+    int visible_items[SETTINGS_VISIBLE_MAX];
+    int visible_count = settings_build_visible_items(visible_items, SETTINGS_VISIBLE_MAX);
+
     // Clamp scroll to valid range (defensive — caller should already adjust)
-    int max_scroll = (SETTINGS_ITEM_COUNT > layout.items_per_page)
-                     ? SETTINGS_ITEM_COUNT - layout.items_per_page : 0;
+    int max_scroll = (visible_count > layout.items_per_page)
+                     ? visible_count - layout.items_per_page : 0;
     if (menu_scroll < 0) menu_scroll = 0;
     if (menu_scroll > max_scroll) menu_scroll = max_scroll;
 
@@ -53,18 +62,22 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     char label_buffer[256];
 
     int last_visible = menu_scroll + layout.items_per_page;
-    if (last_visible > SETTINGS_ITEM_COUNT) last_visible = SETTINGS_ITEM_COUNT;
+    if (last_visible > visible_count) last_visible = visible_count;
 
-    for (int i = menu_scroll; i < last_visible; i++) {
-        bool selected = (i == menu_selected);
+    int selected_item_id = (menu_selected >= 0 && menu_selected < visible_count)
+                           ? visible_items[menu_selected] : -1;
 
-        int item_y = start_y + (i - menu_scroll) * item_h;
+    for (int row = menu_scroll; row < last_visible; row++) {
+        bool selected = (row == menu_selected);
+        int item_id = visible_items[row];
+
+        int item_y = start_y + (row - menu_scroll) * item_h;
 
         // Build label text based on item
         const char* label = "";
         const char* value_str = NULL;
 
-        switch (i) {
+        switch (item_id) {
             case SETTINGS_ITEM_SCREEN_OFF:
                 label = "Auto Screen Off";
                 value_str = Settings_getScreenOffDisplayStr();
@@ -80,6 +93,9 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
             case SETTINGS_ITEM_COLLECT_CRASH:
                 label = "Collect Crash Reports";
                 value_str = Settings_getCollectCrashReportsDisplayStr();
+                break;
+            case SETTINGS_ITEM_DELETE_CRASH:
+                label = "Delete Crash Reports";
                 break;
             case SETTINGS_ITEM_CLEAR_CACHE: {
                 long cache_size = album_art_get_cache_size();
@@ -187,16 +203,16 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     }
 
     // Scroll indicators (... at top/bottom when content overflows the visible window)
-    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, SETTINGS_ITEM_COUNT);
+    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, visible_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
 
     // Different hints based on selected item
-    if (menu_selected == SETTINGS_ITEM_SCREEN_OFF ||
-        menu_selected == SETTINGS_ITEM_BASS_FILTER ||
-        menu_selected == SETTINGS_ITEM_SOFT_LIMITER ||
-        menu_selected == SETTINGS_ITEM_COLLECT_CRASH) {
+    if (selected_item_id == SETTINGS_ITEM_SCREEN_OFF ||
+        selected_item_id == SETTINGS_ITEM_BASS_FILTER ||
+        selected_item_id == SETTINGS_ITEM_SOFT_LIMITER ||
+        selected_item_id == SETTINGS_ITEM_COLLECT_CRASH) {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);

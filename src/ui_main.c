@@ -555,10 +555,30 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
     }
 }
 
-// Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
+// Render confirmation dialog overlay (title + optional content + "A: Yes  B: No").
+// content may contain a single '\n' to force a two-line break (each line
+// truncated independently); useful for paths that won't fit on one line.
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title) {
     bool has_content = content && content[0];
-    int box_h = has_content ? SCALE1(110) : SCALE1(90);
+
+    // Detect optional two-line content.
+    const char* line1 = content;
+    const char* line2 = NULL;
+    char line1_buf[128];
+    if (has_content) {
+        const char* nl = strchr(content, '\n');
+        if (nl) {
+            size_t n = (size_t)(nl - content);
+            if (n >= sizeof(line1_buf)) n = sizeof(line1_buf) - 1;
+            memcpy(line1_buf, content, n);
+            line1_buf[n] = '\0';
+            line1 = line1_buf;
+            line2 = nl + 1;
+        }
+    }
+
+    int extra_line_h = line2 ? SCALE1(15) : 0;
+    int box_h = (has_content ? SCALE1(110) : SCALE1(90)) + extra_line_h;
     DialogBox db = render_dialog_box(screen, SCALE1(280), box_h);
     int hw = screen->w;
 
@@ -571,19 +591,33 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
         SDL_FreeSurface(title_surf);
     }
 
-    // Content text (truncated if needed)
+    // Content text (truncated if needed). Two lines stacked when line2 is set.
     if (has_content) {
-        char truncated[64];
-        GFX_truncateText(Fonts_getSmall(), content, truncated, db.box_w - SCALE1(20), 0);
-        SDL_Surface* name_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_GRAY);
-        if (name_surf) {
-            SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){(hw - name_surf->w) / 2, db.box_y + SCALE1(45)});
-            SDL_FreeSurface(name_surf);
+        TTF_Font* font = Fonts_getSmall();
+        int line_h = TTF_FontHeight(font);
+        int y = db.box_y + SCALE1(45);
+
+        char truncated[128];
+        GFX_truncateText(font, line1, truncated, db.box_w - SCALE1(20), 0);
+        SDL_Surface* s = TTF_RenderUTF8_Blended(font, truncated, COLOR_GRAY);
+        if (s) {
+            SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){(hw - s->w) / 2, y});
+            SDL_FreeSurface(s);
+        }
+
+        if (line2) {
+            y += line_h + SCALE1(2);
+            GFX_truncateText(font, line2, truncated, db.box_w - SCALE1(20), 0);
+            SDL_Surface* s2 = TTF_RenderUTF8_Blended(font, truncated, COLOR_GRAY);
+            if (s2) {
+                SDL_BlitSurface(s2, NULL, screen, &(SDL_Rect){(hw - s2->w) / 2, y});
+                SDL_FreeSurface(s2);
+            }
         }
     }
 
     // Button hints
-    int hint_y = has_content ? db.box_y + SCALE1(75) : db.box_y + SCALE1(55);
+    int hint_y = (has_content ? db.box_y + SCALE1(75) : db.box_y + SCALE1(55)) + extra_line_h;
     const char* hint = "A: Yes   B: No";
     SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), hint, COLOR_GRAY);
     if (hint_surf) {

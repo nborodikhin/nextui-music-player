@@ -41,4 +41,20 @@ int CrashHandler_skipBundle(const char* bundle_path);
 // could not be opened (typically because no bundles exist yet).
 int CrashHandler_convertPendingScreenshots(void);
 
+// Returns true iff at least one bundle subdirectory exists under crash-reports/.
+// Skipped or empty bundles still count — the predicate only asks whether the
+// directory has any content to delete.
+bool CrashHandler_hasAnyBundle(void);
+
+// Recursively delete every bundle directory under crash-reports/ and the
+// crash-reports/ directory itself. Returns 0 on success, -1 if the root could
+// not be opened (e.g., already absent). Best-effort: individual file/dir
+// removal failures are tolerated so a partial wipe still makes progress.
+int CrashHandler_deleteAllBundles(void);
+
+// Write the SD-relative crash-reports path (e.g. ".userdata/shared/music-
+// player/crash-reports") into out for display in user-visible UI. Truncates
+// to out_size - 1 chars and always NUL-terminates.
+void CrashHandler_getBundleRootDisplayPath(char* out, size_t out_size);
+
 #endif
