@@ -3,9 +3,10 @@
 // Layout per spec/crash-reporting.md:
 //
 //   <SHARED_USERDATA_PATH>/music-player/crash-reports/<yyyy-mm-dd_HH-MM-SS>/
-//       log.txt   — ring buffer dump
-//       meta.txt  — environment metadata
-//       (screen.bmp added in T06)
+//       log.txt    — ring buffer dump
+//       screen.bmp — framebuffer snapshot (signal-safe), converted to
+//                    screen.png at next startup
+//       meta.txt   — environment metadata
 //
 // Signal-handler discipline (POSIX async-signal-safe):
 //   - No malloc, no printf-family, no SDL calls inside the handler.
@@ -33,8 +34,10 @@
 #include <unistd.h>
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 
-#include "defines.h"     // SHARED_USERDATA_PATH
+#include "defines.h"     // SHARED_USERDATA_PATH — must come before api.h
+#include "api.h"         // LOG_*
 #include "fb_capture.h"
 #include "ring_log.h"
 #include "settings.h"
@@ -160,8 +163,8 @@ static void crash_handler(int signo) {
     }
 
     // 4) Write screen.bmp (framebuffer snapshot). BMP is the signal-safe choice
-    //    here; the post-start scanner converts BMP → PNG once SDL_image is up
-    //    (see spec/crash-reporting.md TODO "Post-start BMP → PNG conversion").
+    //    here; CrashHandler_convertPendingScreenshots() converts BMP → PNG at
+    //    next startup once SDL_image is usable.
     snprintf(screen_path, sizeof(screen_path), "%s/screen.bmp", bundle_dir);
     int screen_fd = open(screen_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (screen_fd >= 0) {
@@ -222,6 +225,54 @@ bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
         snprintf(out_path, out_size, "%s/%s", BUNDLE_ROOT, newest);
     }
     return true;
+}
+
+int CrashHandler_convertPendingScreenshots(void) {
+    DIR* dir = opendir(BUNDLE_ROOT);
+    if (!dir) return -1;
+
+    int converted = 0;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.') continue;
+
+        char bundle[320];
+        snprintf(bundle, sizeof(bundle), "%s/%s", BUNDLE_ROOT, ent->d_name);
+
+        struct stat st;
+        if (stat(bundle, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+
+        char bmp[384];
+        char png[384];
+        snprintf(bmp, sizeof(bmp), "%s/screen.bmp", bundle);
+        snprintf(png, sizeof(png), "%s/screen.png", bundle);
+
+        if (access(bmp, F_OK) != 0) continue;       // no BMP: incomplete or already converted
+        if (access(png, F_OK) == 0) continue;       // already converted
+
+        SDL_Surface* surf = SDL_LoadBMP(bmp);
+        if (!surf) {
+            LOG_warn("crash_handler: SDL_LoadBMP(%s) failed: %s\n", bmp, SDL_GetError());
+            continue;
+        }
+
+        int rc = IMG_SavePNG(surf, png);
+        SDL_FreeSurface(surf);
+
+        if (rc != 0) {
+            LOG_warn("crash_handler: IMG_SavePNG(%s) failed: %s\n", png, IMG_GetError());
+            unlink(png);   // partial file may exist
+            continue;
+        }
+
+        if (unlink(bmp) != 0) {
+            LOG_warn("crash_handler: unlink(%s) failed\n", bmp);
+        }
+        LOG_info("crash_handler: converted screen.bmp → screen.png in %s\n", ent->d_name);
+        converted++;
+    }
+    closedir(dir);
+    return converted;
 }
 
 int CrashHandler_skipBundle(const char* bundle_path) {

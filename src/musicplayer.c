@@ -139,6 +139,11 @@ int main(int argc, char* argv[]) {
     // settings listener is registered for runtime toggles.
     CrashHandler_init();
 
+    // Convert any pending screen.bmp left by a previous crash into screen.png.
+    // The signal handler can only emit raw BMP (async-signal-safe); PNG is far
+    // smaller and friendlier to attach to a GitHub issue.
+    CrashHandler_convertPendingScreenshots();
+
     // Start the watchdog AFTER the crash handler is installed so any SIGABRT
     // it raises is captured into a bundle. Default 5s stall threshold.
     Watchdog_init(0);

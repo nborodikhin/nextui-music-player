@@ -33,4 +33,12 @@ bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size);
 // inside it. Returns 0 on success, -1 on error.
 int CrashHandler_skipBundle(const char* bundle_path);
 
+// Scan crash-reports/ for bundle directories that contain screen.bmp but not
+// screen.png and convert each one to PNG. Runs on the main thread; safe to call
+// after SDL_image is usable. On success the source BMP is unlinked; on failure
+// it is preserved untouched. Bundles without screen.bmp are skipped. Returns
+// the number of successful conversions (>=0); negative means the directory
+// could not be opened (typically because no bundles exist yet).
+int CrashHandler_convertPendingScreenshots(void);
+
 #endif
