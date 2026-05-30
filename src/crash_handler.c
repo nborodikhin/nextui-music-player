@@ -8,6 +8,11 @@
 //                    screen.png at next startup
 //       meta.txt   — environment metadata
 //
+// SIGUSR1 produces the same bundle layout as a real crash (only the signal
+// name in meta.txt differs); the process keeps running afterward. From the
+// menu and report-recipient's point of view, USR1 dumps and fatal-signal
+// crashes are interchangeable.
+//
 // Signal-handler discipline (POSIX async-signal-safe):
 //   - No malloc, no printf-family, no SDL calls inside the handler.
 //   - All buffers/paths/format strings allocated at init.
@@ -17,7 +22,8 @@
 //   - localtime_r is also "safe in practice" on glibc; used once per handler
 //     invocation to format the timestamp.
 //
-// The handler short-circuits to _exit(1) if collection_enabled is false.
+// The handler short-circuits to _exit(1) (crash) or return (SIGUSR1) if
+// collection_enabled is false.
 
 #include "crash_handler.h"
 
@@ -67,6 +73,7 @@ static const char* signal_name(int signo) {
         case SIGSEGV: return "SIGSEGV";
         case SIGABRT: return "SIGABRT";
         case SIGBUS:  return "SIGBUS";
+        case SIGUSR1: return "SIGUSR1";
         default:      return "SIGNAL";
     }
 }
@@ -185,19 +192,15 @@ static void write_all(int fd, const char* buf, size_t len) {
     }
 }
 
-static void crash_handler(int signo) {
-    // 1) Honor the collection setting.
-    if (!atomic_load_explicit(&collection_enabled, memory_order_relaxed)) {
-        _exit(1);
-    }
-
-    // 2) Make the bundle directory.
+// Shared bundle writer used by both the fatal-signal handler and the SIGUSR1
+// diagnostic-dump handler. Order: log.txt → screen.bmp → meta.txt so a partial
+// bundle still has the highest-value file first.
+static void write_bundle(int signo) {
     mkdir_p(PARENT_DIR);
     mkdir(BUNDLE_ROOT, 0755);
     build_bundle_dir();
     mkdir(bundle_dir, 0755);
 
-    // 3) Write log.txt first (most diagnostic value).
     snprintf(log_path, sizeof(log_path), "%s/log.txt", bundle_dir);
     int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (log_fd >= 0) {
@@ -205,9 +208,8 @@ static void crash_handler(int signo) {
         close(log_fd);
     }
 
-    // 4) Write screen.bmp (framebuffer snapshot). BMP is the signal-safe choice
-    //    here; CrashHandler_convertPendingScreenshots() converts BMP → PNG at
-    //    next startup once SDL_image is usable.
+    // BMP is the signal-safe choice; CrashHandler_convertPendingScreenshots()
+    // converts BMP → PNG at next startup once SDL_image is usable.
     snprintf(screen_path, sizeof(screen_path), "%s/screen.bmp", bundle_dir);
     int screen_fd = open(screen_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (screen_fd >= 0) {
@@ -215,8 +217,6 @@ static void crash_handler(int signo) {
         close(screen_fd);
     }
 
-    // 5) Write meta.txt last so a viewer can quickly tell whether the bundle is
-    //    complete.
     snprintf(meta_path, sizeof(meta_path), "%s/meta.txt", bundle_dir);
     int meta_fd = open(meta_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (meta_fd >= 0) {
@@ -224,8 +224,27 @@ static void crash_handler(int signo) {
         write_all(meta_fd, meta_buf, meta_len);
         close(meta_fd);
     }
+}
 
+static void crash_handler(int signo) {
+    if (!atomic_load_explicit(&collection_enabled, memory_order_relaxed)) {
+        _exit(1);
+    }
+    write_bundle(signo);
     _exit(1);
+}
+
+// SIGUSR1 — on-demand dump. Writes the same bundle layout as a real crash and
+// then *returns* to whatever the main thread was doing. The bundle is
+// indistinguishable from a fatal-signal crash at the filesystem level (only
+// `signal: SIGUSR1` in meta.txt reveals the difference); it surfaces in the
+// menu as a normal "Send Crash Report" entry. Self-masked at install time so
+// a second SIGUSR1 cannot re-enter while a dump is in flight.
+static void diagnostic_handler(int signo) {
+    if (!atomic_load_explicit(&collection_enabled, memory_order_relaxed)) {
+        return;
+    }
+    write_bundle(signo);
 }
 
 void CrashHandler_setCollectionEnabled(bool enabled) {
@@ -425,4 +444,18 @@ void CrashHandler_init(void) {
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGBUS,  &sa, NULL);
+
+    // SIGUSR1 — diagnostic dump that *returns* to normal execution. Self-mask
+    // so a second SIGUSR1 while we're writing cannot re-enter and clobber the
+    // shared bundle_dir / meta_buf scratch. SA_RESTART so any syscall the
+    // signal interrupts is restarted instead of returning EINTR — the audio
+    // thread and the main loop would not all handle EINTR gracefully, and a
+    // diagnostic dump must not disrupt normal app execution.
+    struct sigaction diag_sa;
+    memset(&diag_sa, 0, sizeof(diag_sa));
+    diag_sa.sa_handler = diagnostic_handler;
+    sigemptyset(&diag_sa.sa_mask);
+    sigaddset(&diag_sa.sa_mask, SIGUSR1);
+    diag_sa.sa_flags = SA_RESTART;
+    sigaction(SIGUSR1, &diag_sa, NULL);
 }
