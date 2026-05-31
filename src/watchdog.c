@@ -7,13 +7,21 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include <SDL2/SDL.h>
+#include <time.h>
 
 #include "defines.h"
 #include "api.h"
 #include "log_trace.h"
 
 #define DEFAULT_THRESHOLD_MS 5000u
+
+// Async-signal-safe millisecond clock (CLOCK_MONOTONIC via vDSO on ARM64).
+// Wraps at 2^32 ms like SDL_GetTicks(), so unsigned subtraction stays correct.
+static uint32_t monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
 
 static pthread_t watchdog_thread;
 static bool watchdog_running = false;
@@ -45,7 +53,7 @@ static void* watchdog_loop(void* arg) {
         if (Watchdog_isPaused()) continue;
 
         uint32_t hb = atomic_load_explicit(&heartbeat_ms, memory_order_relaxed);
-        uint32_t now = SDL_GetTicks();
+        uint32_t now = monotonic_ms();
         if (now - hb > threshold_ms) {
             fprintf(stderr,
                 "watchdog: main loop stalled, age=%u ms (threshold=%u ms)\n",
@@ -77,7 +85,7 @@ void Watchdog_quit(void) {
 }
 
 void Watchdog_heartbeat(void) {
-    atomic_store_explicit(&heartbeat_ms, SDL_GetTicks(), memory_order_relaxed);
+    atomic_store_explicit(&heartbeat_ms, monotonic_ms(), memory_order_relaxed);
 }
 
 static const char* reason_name(WatchdogPauseReason r) {

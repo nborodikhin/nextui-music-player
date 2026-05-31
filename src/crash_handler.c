@@ -66,13 +66,23 @@ static atomic_int collection_enabled = 0;
 static atomic_int handler_installed = 0;
 
 // App-start tick captured at init so meta.txt can report uptime in ms.
-static uint32_t app_start_ticks = 0;
+// CLOCK_MONOTONIC ms (not SDL) so the handler stays async-signal-safe.
+static uint32_t app_start_ms = 0;
+
+// Async-signal-safe millisecond clock — replaces SDL_GetTicks() in the handler.
+static uint32_t monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
 
 static const char* signal_name(int signo) {
     switch (signo) {
         case SIGSEGV: return "SIGSEGV";
         case SIGABRT: return "SIGABRT";
         case SIGBUS:  return "SIGBUS";
+        case SIGFPE:  return "SIGFPE";
+        case SIGILL:  return "SIGILL";
         case SIGUSR1: return "SIGUSR1";
         default:      return "SIGNAL";
     }
@@ -138,8 +148,8 @@ static void build_bundle_dir(void) {
 // PII consideration: audio_track is the raw filesystem path; gated by the same
 // "Collect crash reports" opt-in as the rest of the bundle.
 static size_t format_meta(int signo) {
-    uint32_t now = SDL_GetTicks();
-    uint32_t uptime = now - app_start_ticks;
+    uint32_t now = monotonic_ms();
+    uint32_t uptime = now - app_start_ms;
     uint32_t hb = (uint32_t)Watchdog_lastHeartbeatMs();
     uint32_t hb_age = (hb == 0) ? 0 : (now - hb);
 
@@ -425,7 +435,7 @@ void CrashHandler_init(void) {
         return;  // already installed
     }
 
-    app_start_ticks = SDL_GetTicks();
+    app_start_ms = monotonic_ms();
 
     // Pre-read framebuffer dimensions and pre-build the BMP header so the
     // signal handler does not have to do any heavyweight work.
@@ -444,6 +454,8 @@ void CrashHandler_init(void) {
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGBUS,  &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
 
     // SIGUSR1 — diagnostic dump that *returns* to normal execution. Self-mask
     // so a second SIGUSR1 while we're writing cannot re-enter and clobber the

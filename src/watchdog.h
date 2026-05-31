@@ -28,7 +28,8 @@ void Watchdog_init(unsigned threshold_ms);
 void Watchdog_quit(void);
 
 // Heartbeat — call once per main-loop iteration (top of each module's while(1)).
-// Updates the monotonic heartbeat the watchdog reads. Inline-friendly, no syscall.
+// Updates the monotonic heartbeat the watchdog reads. Backed by a vDSO-fast
+// CLOCK_MONOTONIC read (clock_gettime), so cheap to call every frame.
 void Watchdog_heartbeat(void);
 
 // Pause/resume the dog for a specific reason. Pausing multiple times for distinct
@@ -46,7 +47,7 @@ void Watchdog_resume(WatchdogPauseReason reason, bool trace);
 // Returns true iff the dog is currently paused (any reason set). For tests.
 bool Watchdog_isPaused(void);
 
-// Last heartbeat tick as observed by the watchdog (SDL_GetTicks() at last
+// Last heartbeat tick as observed by the watchdog (CLOCK_MONOTONIC ms at last
 // Watchdog_heartbeat() call). 0 if no heartbeat has happened yet.
 // Async-signal-safe (atomic load).
 unsigned int Watchdog_lastHeartbeatMs(void);
