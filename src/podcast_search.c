@@ -8,6 +8,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // JSON library
 #include "include/parson/parson.h"

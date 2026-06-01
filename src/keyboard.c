@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 #include "watchdog.h"
 
 #include <stdio.h>

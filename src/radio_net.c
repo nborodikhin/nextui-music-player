@@ -12,6 +12,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // zlib for gzip decompression (some CDNs send gzip despite Accept-Encoding: identity)
 #include <zlib.h>

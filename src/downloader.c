@@ -18,6 +18,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // Paths
 static char ytdlp_path[512] = "";

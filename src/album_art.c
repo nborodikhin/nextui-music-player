@@ -13,6 +13,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 #include "include/parson/parson.h"
 
 #include <SDL2/SDL.h>

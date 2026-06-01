@@ -6,6 +6,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 #include "browser.h"
 
 // Check if file is a supported audio format

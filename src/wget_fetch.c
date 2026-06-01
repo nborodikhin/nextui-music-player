@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // Path to bundled wget binary (relative to pak root, which is the working directory)
 #define WGET_BIN "./bin/wget"
