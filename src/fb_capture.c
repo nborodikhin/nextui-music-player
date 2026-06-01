@@ -79,9 +79,7 @@ static void build_header(int w, int h) {
     put_u32(dib + 48, 0x000000FF);                // blue  mask
     put_u32(dib + 52, 0xFF000000);                // alpha mask
 
-    put_u32(dib + 56, 0x20204E49);                // CSType: 'sRGB' is 0x73524742; many
-                                                  // viewers accept 'WIN ' (0x57494E20)
-                                                  // or 0 — pick a neutral value.
+    put_u32(dib + 56, 0x73524742);                // CSType = 'sRGB' (LCS_sRGB)
     // Endpoints (36) + gamma R/G/B (12) left zero.
 }
 

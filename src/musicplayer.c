@@ -136,8 +136,10 @@ int main(int argc, char* argv[]) {
 
     // Install the crash signal handler. Must come AFTER Settings_init so the
     // collection_enabled atomic is seeded from the persisted setting and the
-    // settings listener is registered for runtime toggles.
-    CrashHandler_init();
+    // settings listener is registered for runtime toggles. The version recorded
+    // in meta.txt comes from SelfUpdate (which read state/app_version.txt at
+    // SelfUpdate_init above); falls back to "unknown" if it wasn't readable.
+    CrashHandler_init(SelfUpdate_getVersion());
 
     // Convert any pending screen.bmp left by a previous crash into screen.png.
     // The signal handler can only emit raw BMP (async-signal-safe); PNG is far

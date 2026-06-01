@@ -53,7 +53,11 @@
 
 #define BUNDLE_ROOT      SHARED_USERDATA_PATH "/music-player/crash-reports"
 #define PARENT_DIR       SHARED_USERDATA_PATH "/music-player"
-#define VERSION_STR      "1.10.0"     // sync with app version
+
+// App version recorded in meta.txt. Captured at CrashHandler_init() from the
+// value SelfUpdate already read out of state/app_version.txt. "unknown" until
+// init (and if no usable version was passed).
+static char app_version[32] = "unknown";
 
 // Pre-allocated buffers — all writable from the handler, never freed.
 static char bundle_dir[256];     // BUNDLE_ROOT "/yyyy-mm-dd_HH-MM-SS"
@@ -157,11 +161,25 @@ static size_t format_meta(int signo) {
     BackgroundPlayerType bg = Background_getActive();
     int pos_ms = Player_getPosition();
     int dur_ms = Player_getDuration();
+
+    // Snapshot the track path into a local fixed buffer before printing it.
+    // The source is a fixed-size, always-NUL-terminated struct field
+    // (player.current_file[512]) — never freed heap — so this can't fault on a
+    // dangling pointer. The strnlen cap also bounds the read to track_buf size
+    // even if a concurrent writer leaves the source momentarily un-terminated,
+    // which matters for the SIGUSR1 dump that must return and keep running.
+    char track_buf[512];
     const char* track = Player_getCurrentFile();
-    if (!track) track = "";
+    if (track) {
+        size_t tlen = strnlen(track, sizeof(track_buf) - 1);
+        memcpy(track_buf, track, tlen);
+        track_buf[tlen] = '\0';
+    } else {
+        track_buf[0] = '\0';
+    }
 
     int n = snprintf(meta_buf, sizeof(meta_buf),
-        "version: " VERSION_STR "\n"
+        "version: %s\n"
         "platform: " PLATFORM "\n"
         "signal: %s (%d)\n"
         "uptime_ms: %u\n"
@@ -175,6 +193,7 @@ static size_t format_meta(int signo) {
         "audio_position_ms: %d\n"
         "audio_duration_ms: %d\n"
         "audio_track: %s\n",
+        app_version,
         signal_name(signo), signo,
         uptime,
         hb_age,
@@ -186,7 +205,7 @@ static size_t format_meta(int signo) {
         background_name(bg),
         pos_ms,
         dur_ms,
-        track
+        track_buf
     );
     if (n < 0) return 0;
     return (size_t)n < sizeof(meta_buf) ? (size_t)n : sizeof(meta_buf) - 1;
@@ -430,9 +449,16 @@ int CrashHandler_skipBundle(const char* bundle_path) {
     return 0;
 }
 
-void CrashHandler_init(void) {
+void CrashHandler_init(const char* version) {
     if (atomic_exchange_explicit(&handler_installed, 1, memory_order_acq_rel)) {
         return;  // already installed
+    }
+
+    // Capture the app version for meta.txt. Keep the "unknown" default if the
+    // caller passed nothing usable (e.g. state/app_version.txt was unreadable).
+    if (version && version[0]) {
+        strncpy(app_version, version, sizeof(app_version) - 1);
+        app_version[sizeof(app_version) - 1] = '\0';
     }
 
     app_start_ms = monotonic_ms();
@@ -449,6 +475,14 @@ void CrashHandler_init(void) {
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = crash_handler;
     sigemptyset(&sa.sa_mask);
+    // Block the other fatal signals while handling one, so a secondary fault
+    // can't re-enter write_bundle() and clobber the shared bundle_dir/meta_buf
+    // scratch mid-write. (The signal being handled is auto-blocked already.)
+    sigaddset(&sa.sa_mask, SIGSEGV);
+    sigaddset(&sa.sa_mask, SIGABRT);
+    sigaddset(&sa.sa_mask, SIGBUS);
+    sigaddset(&sa.sa_mask, SIGFPE);
+    sigaddset(&sa.sa_mask, SIGILL);
     sa.sa_flags = 0;   // no SA_RESTART — let interrupted syscalls fail naturally
 
     sigaction(SIGSEGV, &sa, NULL);

@@ -27,11 +27,29 @@ static bool show_crash_dialog = false;
 static int  crash_dialog_cursor = CRASH_DIALOG_ACTION_CLOSE;
 static char crash_bundle_path[320] = "";
 
+// Cached crash-row state. The filesystem is scanned exactly ONCE — the first
+// time the app enters the menu — then this cache is reused for the rest of the
+// process lifetime. The bundle set can't change underneath us (a crash restarts
+// the app); only Skip / Never-collect hide the row, and both update the cache
+// in-memory. Avoids any per-frame or per-entry SD-card I/O.
+static bool crash_scan_done = false;
+static bool crash_row_visible = false;
+
 int MenuModule_run(SDL_Surface* screen) {
     LOG_trace("MenuModule_run: enter");
     int menu_selected = 0;
     int dirty = 1;
     int show_setting = 0;
+
+    // Scan the filesystem for the newest unsent crash bundle exactly once, the
+    // first time the app reaches the menu. Subsequent menu entries reuse the
+    // cached result (see crash_scan_done above). The scan also fills
+    // crash_bundle_path with the bundle to operate on.
+    if (!crash_scan_done) {
+        crash_row_visible = CrashHandler_findUnsentBundle(
+            crash_bundle_path, sizeof(crash_bundle_path));
+        crash_scan_done = true;
+    }
 
     while (1) {
         GFX_startFrame();
@@ -54,10 +72,8 @@ int MenuModule_run(SDL_Surface* screen) {
         }
         bool has_first = (first_item_mode != MENU_FIRST_NONE);
 
-        // Determine whether the "Send Crash Report" row should be shown. The
-        // scanner also fills crash_bundle_path with the bundle to operate on.
-        bool crash_row_visible = CrashHandler_findUnsentBundle(
-            crash_bundle_path, sizeof(crash_bundle_path));
+        // crash_row_visible is cached (scanned on entry, refreshed after
+        // Skip / Never-collect) — see the scan above the loop.
         int item_count = (has_first ? 5 : 4) + (crash_row_visible ? 1 : 0);
         // Crash row, when present, sits immediately above Settings (the last row).
         int crash_row_index = crash_row_visible ? (item_count - 2) : -1;
@@ -89,9 +105,14 @@ int MenuModule_run(SDL_Surface* screen) {
                         break;
                     case CRASH_DIALOG_ACTION_SKIP:
                         CrashHandler_skipBundle(crash_bundle_path);
+                        // Newest bundle is now skipped → hide the row. Update the
+                        // cache in-memory — no filesystem rescan (scan-once design).
+                        crash_row_visible = false;
                         break;
                     case CRASH_DIALOG_ACTION_NEVER_COLLECT:
                         Settings_setCollectCrashReports(false);
+                        // Collection disabled → hide the row. In-memory, no rescan.
+                        crash_row_visible = false;
                         break;
                 }
                 show_crash_dialog = false;

@@ -12,7 +12,10 @@
 // Settings_getCollectCrashReports(), and register a settings listener so the
 // atomic stays in sync when the user toggles the value at runtime.
 // Idempotent. Call once after RingLog_init() + Settings_init().
-void CrashHandler_init(void);
+// `app_version` (e.g. from SelfUpdate_getVersion(), which reads
+// state/app_version.txt) is recorded in meta.txt; pass NULL/"" to leave it
+// "unknown". The string is copied, so the caller need not keep it alive.
+void CrashHandler_init(const char* app_version);
 
 // Update the in-memory atomic the signal handler reads. Called by the
 // Settings listener whenever Settings_setCollectCrashReports(...) runs.
