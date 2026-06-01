@@ -280,6 +280,15 @@ void CrashHandler_setCollectionEnabled(bool enabled) {
     atomic_store_explicit(&collection_enabled, enabled ? 1 : 0, memory_order_relaxed);
 }
 
+// True if `name` is a non-dotfile entry under BUNDLE_ROOT that stats as a
+// directory; on success fills `out` with "<BUNDLE_ROOT>/<name>".
+static bool bundle_dir_path(const char* name, char* out, size_t out_size) {
+    if (name[0] == '.') return false;
+    snprintf(out, out_size, "%s/%s", BUNDLE_ROOT, name);
+    struct stat st;
+    return stat(out, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
     if (!Settings_getCollectCrashReports()) return false;
 
@@ -289,14 +298,8 @@ bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
     char newest[64] = {0};
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-
-        // Filter to directories only.
-        char check_path[320];
-        snprintf(check_path, sizeof(check_path), "%s/%s", BUNDLE_ROOT, ent->d_name);
-        struct stat st;
-        if (stat(check_path, &st) != 0) continue;
-        if (!S_ISDIR(st.st_mode)) continue;
+        char path[320];
+        if (!bundle_dir_path(ent->d_name, path, sizeof(path))) continue;
 
         if (strcmp(ent->d_name, newest) > 0) {
             strncpy(newest, ent->d_name, sizeof(newest) - 1);
@@ -325,13 +328,8 @@ int CrashHandler_convertPendingScreenshots(void) {
     int converted = 0;
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-
         char bundle[320];
-        snprintf(bundle, sizeof(bundle), "%s/%s", BUNDLE_ROOT, ent->d_name);
-
-        struct stat st;
-        if (stat(bundle, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        if (!bundle_dir_path(ent->d_name, bundle, sizeof(bundle))) continue;
 
         char bmp[384];
         char png[384];
@@ -373,11 +371,8 @@ bool CrashHandler_hasAnyBundle(void) {
     bool found = false;
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
         char p[320];
-        snprintf(p, sizeof(p), "%s/%s", BUNDLE_ROOT, ent->d_name);
-        struct stat st;
-        if (stat(p, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (bundle_dir_path(ent->d_name, p, sizeof(p))) {
             found = true;
             break;
         }

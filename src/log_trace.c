@@ -51,19 +51,26 @@ static void ring_format_and_append(const char* msg) {
     RingLog_append(tl_line, (size_t)n);
 }
 
-void LogTrace_emit(int level, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
+// Format fmt/ap into tl_msg and strip trailing newlines (the ring format owns
+// line termination). Returns false if formatting failed — caller emits nothing.
+static bool fill_tl_msg(const char* fmt, va_list ap) {
     int n = vsnprintf(tl_msg, sizeof(tl_msg), fmt, ap);
-    va_end(ap);
-    if (n < 0) return;
+    if (n < 0) return false;
 
-    // Strip trailing newline from msg so the ring format owns line termination.
     size_t msg_len = (size_t)n;
     if (msg_len >= sizeof(tl_msg)) msg_len = sizeof(tl_msg) - 1;
     while (msg_len > 0 && tl_msg[msg_len - 1] == '\n') {
         tl_msg[--msg_len] = '\0';
     }
+    return true;
+}
+
+void LogTrace_emit(int level, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    bool ok = fill_tl_msg(fmt, ap);
+    va_end(ap);
+    if (!ok) return;
 
     // 1) Forward to NextUI's original LOG_note with already-formatted message.
     //    LOG_note here is the real function (this TU does not include log_trace.h).
@@ -76,15 +83,9 @@ void LogTrace_emit(int level, const char* fmt, ...) {
 void LogTrace_trace(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    int n = vsnprintf(tl_msg, sizeof(tl_msg), fmt, ap);
+    bool ok = fill_tl_msg(fmt, ap);
     va_end(ap);
-    if (n < 0) return;
-
-    size_t msg_len = (size_t)n;
-    if (msg_len >= sizeof(tl_msg)) msg_len = sizeof(tl_msg) - 1;
-    while (msg_len > 0 && tl_msg[msg_len - 1] == '\n') {
-        tl_msg[--msg_len] = '\0';
-    }
+    if (!ok) return;
 
     ring_format_and_append(tl_msg);
 }
