@@ -25,9 +25,7 @@
 #include "playlist_m3u.h"
 #include "background.h"
 #include "album_art.h"
-
-// Music folder path
-#define MUSIC_PATH SDCARD_PATH "/Music"
+#include "music_folders.h"
 
 // Internal states
 typedef enum {
@@ -37,6 +35,9 @@ typedef enum {
 
 // Module state
 static BrowserContext browser = {0};
+// Folder we're browsing within ("" while at the virtual root listing all folders)
+static char current_root[512] = "";
+static bool at_virtual_root = false;
 static bool shuffle_enabled = false;
 static bool repeat_enabled = false;
 static PlaylistContext playlist = {0};
@@ -76,17 +77,67 @@ static void clear_gpu_layers(void) {
     PLAT_GPU_Flip();
 }
 
-// Helper to load directory
+// Navigate to a directory inside the current root (keeps current_root)
 static void load_directory(const char* path) {
-    Browser_loadDirectory(&browser, path, MUSIC_PATH);
+    at_virtual_root = false;
+    Browser_loadDirectory(&browser, path, current_root);
+}
+
+// Snapshot all configured folder paths into out[]; returns the count
+static int collect_music_folders(const char* out[]) {
+    int n = MusicFolders_count();
+    for (int i = 0; i < n; i++) out[i] = MusicFolders_get(i);
+    return n;
+}
+
+// Show the virtual root listing all configured folders
+static void enter_virtual_root(void) {
+    const char* folders[MUSIC_FOLDERS_MAX];
+    int n = collect_music_folders(folders);
+
+    at_virtual_root = true;
+    current_root[0] = '\0';
+    nav_stack_top = 0;
+    Browser_loadFolderList(&browser, folders, n);
+}
+
+// Enter a configured folder as the browse root
+static void enter_root_folder(const char* path) {
+    at_virtual_root = false;
+    snprintf(current_root, sizeof(current_root), "%s", path);
+    nav_stack_top = 0;
+    load_directory(current_root);
+}
+
+// Landing view: virtual root when multiple folders, else the single folder
+static void load_home(void) {
+    if (MusicFolders_count() > 1) {
+        enter_virtual_root();
+    } else {
+        enter_root_folder(MusicFolders_get(0));
+    }
+}
+
+// Set current_root to the configured folder containing path (fallback: path itself)
+static void set_root_for_path(const char* path) {
+    at_virtual_root = false;
+    int n = MusicFolders_count();
+    for (int i = 0; i < n; i++) {
+        const char* f = MusicFolders_get(i);
+        size_t fl = strlen(f);
+        if (strcmp(path, f) == 0 || (strncmp(path, f, fl) == 0 && path[fl] == '/')) {
+            snprintf(current_root, sizeof(current_root), "%s", f);
+            return;
+        }
+    }
+    snprintf(current_root, sizeof(current_root), "%s", path);
 }
 
 // Initialize player module
 static void init_player(void) {
     if (initialized) return;
-    mkdir(MUSIC_PATH, 0755);
-    load_directory(MUSIC_PATH);
-    nav_stack_top = 0;
+    mkdir(MusicFolders_defaultPath(), 0755);
+    load_home();
     initialized = true;
 }
 
@@ -224,10 +275,8 @@ static void cleanup_playback_ui(void) {
     Spectrum_quit();
 }
 
-// Build a playlist from a directory and start playing the first track
-static bool build_and_start_playlist(const char* dir_path, const char* start_file) {
-    Playlist_free(&playlist);
-    int track_count = Playlist_buildFromDirectory(&playlist, dir_path, start_file);
+// Start playing the just-built playlist at its current index
+static bool start_current_playlist(int track_count) {
     if (track_count > 0) {
         playlist_active = true;
         const PlaylistTrack* track = Playlist_getCurrentTrack(&playlist);
@@ -236,6 +285,22 @@ static bool build_and_start_playlist(const char* dir_path, const char* start_fil
         }
     }
     return false;
+}
+
+// Build a playlist from a directory and start playing (anchored at start_file)
+static bool build_and_start_playlist(const char* dir_path, const char* start_file) {
+    Playlist_free(&playlist);
+    return start_current_playlist(Playlist_buildFromDirectory(&playlist, dir_path, start_file));
+}
+
+// Build a playlist spanning every configured folder and start playing
+static bool build_and_start_all_folders(void) {
+    Playlist_free(&playlist);
+
+    const char* dirs[MUSIC_FOLDERS_MAX];
+    int n = collect_music_folders(dirs);
+
+    return start_current_playlist(Playlist_buildFromDirectories(&playlist, dirs, n));
 }
 
 // Render delete confirmation dialog
@@ -262,8 +327,12 @@ static void handle_hid_events(void) {
 
 // Try to start playback from a browser entry (play-all or single file). Returns true on success.
 static bool browser_play_entry(FileEntry *entry) {
-    if (entry->is_play_all)
+    if (entry->is_play_all) {
+        // Virtual-root "Play All" (empty path) spans every configured folder
+        if (at_virtual_root || entry->path[0] == '\0')
+            return build_and_start_all_folders();
         return build_and_start_playlist(entry->path, "");
+    }
     if (build_and_start_playlist(browser.current_path, entry->path))
         return true;
     playlist_active = false;
@@ -273,7 +342,9 @@ static bool browser_play_entry(FileEntry *entry) {
 // Handle input in browser state. Returns true if module should exit to menu.
 static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
     if (PAD_justPressed(BTN_B)) {
-        if (strcmp(browser.current_path, MUSIC_PATH) != 0) {
+        bool at_root = at_virtual_root || strcmp(browser.current_path, current_root) == 0;
+        if (!at_root) {
+            // Below a configured folder: go up one level
             if (nav_stack_top > 0) {
                 nav_stack_top--;
                 load_directory(nav_stack[nav_stack_top].path);
@@ -293,7 +364,13 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
                 if (last_slash) { *last_slash = '\0'; load_directory(browser.current_path); }
             }
             *dirty = 1;
+        } else if (!at_virtual_root && MusicFolders_count() > 1) {
+            // Top of a configured folder with several folders: back to virtual root
+            GFX_clearLayers(LAYER_SCROLLTEXT);
+            enter_virtual_root();
+            *dirty = 1;
         } else {
+            // Virtual root, or single-folder mode: leave the browser
             GFX_clearLayers(LAYER_SCROLLTEXT);
             if (!Background_isPlaying()) {
                 Spectrum_quit();
@@ -313,7 +390,11 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
         }
         else if (PAD_justPressed(BTN_A)) {
             FileEntry* entry = &browser.entries[browser.selected];
-            if (entry->is_dir) {
+            if (entry->is_dir && at_virtual_root) {
+                // Enter a configured folder as the new browse root
+                enter_root_folder(entry->path);
+                *dirty = 1;
+            } else if (entry->is_dir) {
                 if (nav_stack_top < NAV_STACK_DEPTH) {
                     snprintf(nav_stack[nav_stack_top].path, sizeof(nav_stack[nav_stack_top].path),
                              "%s", browser.current_path);
@@ -423,8 +504,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
                 screen_off = false;
                 PLAT_enableBacklight(1);
                 cleanup_playback(false);
-                load_directory(MUSIC_PATH);
-                nav_stack_top = 0;
+                load_home();
                 *state = PLAYER_INTERNAL_BROWSER;
                 *dirty = 1;
             }
@@ -508,8 +588,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
             Resume_clear();  // All tracks finished naturally
             cleanup_playback(false);
-            load_directory(MUSIC_PATH);
-            nav_stack_top = 0;
+            load_home();
             *state = PLAYER_INTERNAL_BROWSER;
         }
         *dirty = 1;
@@ -555,7 +634,11 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
 
 ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
     init_player();
-    load_directory(browser.current_path[0] ? browser.current_path : MUSIC_PATH);
+    if (browser.current_path[0]) {
+        load_directory(browser.current_path);
+    } else {
+        load_home();
+    }
 
     PlayerInternalState state = PLAYER_INTERNAL_BROWSER;
     int dirty = 1;
@@ -1028,6 +1111,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
     if (resume->type == RESUME_TYPE_FILES) {
         // Initialize browser with saved folder
         init_player();
+        set_root_for_path(resume->folder_path);
         load_directory(resume->folder_path);
         nav_stack_top = 0;
 

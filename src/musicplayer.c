@@ -30,6 +30,7 @@
 #include "module_system.h"
 #include "module_settings.h"
 #include "settings.h"
+#include "music_folders.h"
 #include "resume.h"
 #include "background.h"
 #include "display_helper.h"
@@ -123,6 +124,9 @@ int main(int argc, char* argv[]) {
 
     // Initialize app-specific settings
     Settings_init();
+
+    // Initialize configurable music folder list
+    MusicFolders_init();
 
     // Initialize resume state
     Resume_init();

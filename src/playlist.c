@@ -312,6 +312,26 @@ int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const ch
     return ctx->track_count;
 }
 
+// Build a playlist by recursively scanning several directories in order.
+// Starts from the first track. Returns track count, or -1 on error.
+int Playlist_buildFromDirectories(PlaylistContext* ctx, const char** dirs, int dir_count) {
+    if (!ctx || !dirs || dir_count <= 0) return -1;
+
+    if (!ctx->tracks) {
+        Playlist_init(ctx);
+        if (!ctx->tracks) return -1;
+    }
+
+    Playlist_clear(ctx);
+
+    for (int i = 0; i < dir_count && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
+        if (dirs[i] && dirs[i][0]) scan_directory_recursive(ctx, dirs[i], 1);
+    }
+
+    ctx->current_index = 0;
+    return ctx->track_count;
+}
+
 // Recursive helper for Playlist_collectPaths
 static void collect_paths_recursive(const char* path, int depth,
                                     char*** out_paths, int* count, int max_count) {

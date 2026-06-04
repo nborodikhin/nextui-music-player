@@ -40,10 +40,11 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
     render_screen_header(screen, "Music Player", show_setting);
 
-    // Empty state at root: no playable music anywhere
-    if (Browser_countAudioFiles(browser) == 0 && !Browser_hasParent(browser)) {
+    // Empty state at a folder root: no playable music anywhere (skip the virtual root)
+    if (browser->current_path[0] != '\0' &&
+        Browser_countAudioFiles(browser) == 0 && !Browser_hasParent(browser)) {
         if (!Browser_hasAudioRecursive(browser->current_path)) {
-            render_empty_state(screen, "No music files found", "Add music to /Music on your SD card", NULL);
+            render_empty_state(screen, "No music files found", "Add audio files to your music folder", NULL);
             return;
         }
     }

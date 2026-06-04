@@ -168,6 +168,57 @@ void Browser_loadDirectory(BrowserContext* ctx, const char* path, const char* mu
     ctx->entry_count = idx;
 }
 
+// Virtual root: one dir entry per configured folder + a "Play All" entry
+// (empty path = all folders). current_path "" marks the virtual root.
+void Browser_loadFolderList(BrowserContext* ctx, const char** folders, int count) {
+    Browser_freeEntries(ctx);
+
+    ctx->current_path[0] = '\0';
+    ctx->selected = 0;
+    ctx->scroll_offset = 0;
+
+    if (count < 0) count = 0;
+
+    bool add_play_all = (count > 0);
+    int total = count + (add_play_all ? 1 : 0);
+
+    ctx->entries = malloc(sizeof(FileEntry) * (total > 0 ? total : 1));
+    if (!ctx->entries) {
+        ctx->entry_count = 0;
+        return;
+    }
+
+    int idx = 0;
+    for (int i = 0; i < count; i++) {
+        const char* path = folders[i] ? folders[i] : "";
+
+        // Display the folder's base name; fall back to the full path.
+        const char* slash = strrchr(path, '/');
+        const char* name = (slash && slash[1]) ? slash + 1 : path;
+
+        strncpy(ctx->entries[idx].name, name, sizeof(ctx->entries[idx].name) - 1);
+        ctx->entries[idx].name[sizeof(ctx->entries[idx].name) - 1] = '\0';
+        strncpy(ctx->entries[idx].path, path, sizeof(ctx->entries[idx].path) - 1);
+        ctx->entries[idx].path[sizeof(ctx->entries[idx].path) - 1] = '\0';
+        ctx->entries[idx].is_dir = true;
+        ctx->entries[idx].is_play_all = false;
+        ctx->entries[idx].format = AUDIO_FORMAT_UNKNOWN;
+        idx++;
+    }
+
+    if (add_play_all) {
+        strncpy(ctx->entries[idx].name, "Play All", sizeof(ctx->entries[idx].name) - 1);
+        ctx->entries[idx].name[sizeof(ctx->entries[idx].name) - 1] = '\0';
+        ctx->entries[idx].path[0] = '\0';  // empty path => all folders
+        ctx->entries[idx].is_dir = false;
+        ctx->entries[idx].is_play_all = true;
+        ctx->entries[idx].format = AUDIO_FORMAT_UNKNOWN;
+        idx++;
+    }
+
+    ctx->entry_count = idx;
+}
+
 // Get display name for file (without extension)
 void Browser_getDisplayName(const char* filename, char* out, int max_len) {
     strncpy(out, filename, max_len - 1);
