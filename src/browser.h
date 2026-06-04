@@ -29,6 +29,9 @@ void Browser_freeEntries(BrowserContext* ctx);
 // Load directory contents
 void Browser_loadDirectory(BrowserContext* ctx, const char* path, const char* music_root);
 
+// Build a virtual root listing the configured music folders (current_path = "").
+void Browser_loadFolderList(BrowserContext* ctx, const char** folders, int count);
+
 // Get display name for file (without extension)
 void Browser_getDisplayName(const char* filename, char* out, int max_len);
 

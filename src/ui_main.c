@@ -363,6 +363,23 @@ static const ControlHelp library_menu_controls[] = {
     {NULL, NULL}
 };
 
+static const ControlHelp music_folders_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"A", "Add / Remove"},
+    {"B", "Back"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+static const ControlHelp folder_picker_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"A", "Open Folder"},
+    {"X", "Add Folder"},
+    {"B", "Back"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Generic/default controls
 static const ControlHelp default_controls[] = {
     {"Start (hold)", "Exit App"},
@@ -480,6 +497,14 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
         case 55: // LIBRARY_MENU_HELP_STATE
             controls = library_menu_controls;
             page_title = "Library";
+            break;
+        case 56: // MF_HELP_STATE_LIST (Music Folders manager)
+            controls = music_folders_controls;
+            page_title = "Music Folders";
+            break;
+        case 57: // MF_HELP_STATE_PICKER (Add Folder)
+            controls = folder_picker_controls;
+            page_title = "Add Folder";
             break;
         case 41: // SETTINGS_INTERNAL_ABOUT
             controls = about_controls;

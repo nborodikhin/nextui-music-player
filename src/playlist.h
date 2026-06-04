@@ -36,6 +36,9 @@ void Playlist_clear(PlaylistContext* ctx);
 // Returns: number of tracks added, or -1 on error
 int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const char* start_track_path);
 
+// Build playlist by recursively scanning several directories in order (starts at first track)
+int Playlist_buildFromDirectories(PlaylistContext* ctx, const char** dirs, int dir_count);
+
 // Navigation (no wrap-around)
 // Returns: new index, or -1 if at end/start
 int Playlist_next(PlaylistContext* ctx);

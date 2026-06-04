@@ -11,6 +11,7 @@
 #include "ui_system.h"
 #include "wifi.h"
 #include "album_art.h"
+#include "module_music_folders.h"
 
 // Internal states
 typedef enum {
@@ -22,13 +23,14 @@ typedef enum {
 } SettingsState;
 
 // Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
+#define SETTINGS_ITEM_MUSIC_FOLDERS 0
+#define SETTINGS_ITEM_SCREEN_OFF    1
+#define SETTINGS_ITEM_BASS_FILTER   2
+#define SETTINGS_ITEM_SOFT_LIMITER  3
+#define SETTINGS_ITEM_CLEAR_CACHE   4
+#define SETTINGS_ITEM_UPDATE_YTDLP  5
+#define SETTINGS_ITEM_ABOUT         6
+#define SETTINGS_ITEM_COUNT         7
 
 // Internal app state constants for controls help
 // These match the pattern used in ui_main.c
@@ -106,6 +108,12 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                 // A button
                 else if (PAD_justPressed(BTN_A)) {
                     switch (menu_selected) {
+                        case SETTINGS_ITEM_MUSIC_FOLDERS:
+                            if (MusicFoldersModule_run(screen) == MODULE_EXIT_QUIT) {
+                                return MODULE_EXIT_QUIT;
+                            }
+                            dirty = 1;
+                            break;
                         case SETTINGS_ITEM_SCREEN_OFF:
                             // A also cycles the value (convenience)
                             Settings_cycleScreenOffNext();
@@ -237,10 +245,10 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
         if (dirty) {
             switch (state) {
                 case SETTINGS_STATE_MENU:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, menu_selected, &menu_scroll);
                     break;
                 case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, menu_selected, &menu_scroll);
                     render_confirmation_dialog(screen, NULL, "Clear album art cache?");
                     break;
                 case SETTINGS_STATE_ABOUT:
