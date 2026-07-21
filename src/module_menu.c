@@ -18,10 +18,21 @@ static uint32_t menu_toast_time = 0;
 // Window equals TOAST_DURATION so the exit toast and the arm-window expire together.
 static uint32_t exit_armed_at = 0;
 
+// How long to show the "Exiting..." toast before actually quitting.
+// It has to be a few frames to ensure the text is drawn which is important since
+// the last frame rendered by the app will stay visible after app exit
+// until NextUI draws its first frame.
+#define EXIT_TOAST_DELAY_MS 100
+
 int MenuModule_run(SDL_Surface* screen) {
     int menu_selected = 0;
     int dirty = 1;
     int show_setting = 0;
+    int exiting = 0;
+
+    // Reset two-step exit arming on (re-)entry, so a stale arm from a previous
+    // visit to the menu can't make a single B-press here read as the confirm.
+    exit_armed_at = 0;
 
     while (1) {
         GFX_startFrame();
@@ -107,12 +118,14 @@ int MenuModule_run(SDL_Surface* screen) {
             if (exit_armed_at != 0 && now - exit_armed_at < TOAST_DURATION) {
                 GFX_clearLayers(LAYER_SCROLLTEXT);
                 exit_armed_at = 0;
-                return MENU_QUIT;
+                exiting = 1;
+                snprintf(menu_toast_message, sizeof(menu_toast_message), "Exiting...");
+            } else {
+                // First press (or window expired) — arm and show toast
+                exit_armed_at = now;
+                snprintf(menu_toast_message, sizeof(menu_toast_message),
+                         "Press B again to exit");
             }
-            // First press (or window expired) — arm and show toast
-            exit_armed_at = now;
-            snprintf(menu_toast_message, sizeof(menu_toast_message),
-                     "Press B again to exit");
             menu_toast_time = now;
             dirty = 1;
         }
@@ -131,6 +144,13 @@ int MenuModule_run(SDL_Surface* screen) {
 
             GFX_flip(screen);
             dirty = 0;
+
+            if (exiting) {
+                // Give the "Exiting..." toast a moment on screen before NextUI
+                // takes over and starts rendering its own UI.
+                SDL_Delay(EXIT_TOAST_DELAY_MS);
+                return MENU_QUIT;
+            }
 
             // Keep refreshing while toast is visible
             ModuleCommon_tickToast(menu_toast_message, menu_toast_time, &dirty);
