@@ -192,6 +192,12 @@ $(OBJ_DIR)/ext/%.o: ../../%.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
 
+# NextUI's config.c rewrites the global theme file as a side effect of reading
+# it (CFG_init -> setters -> CFG_sync). This pak must never write global config,
+# so force-include a shim that makes config.c a read-only consumer by failing
+# write-mode fopen() inside that one translation unit. See config_readonly_shim.h.
+$(OBJ_DIR)/ext/all/common/config.o: MY_CFLAGS += -include $(CURDIR)/config_readonly_shim.h
+
 # Compile Opus / OGG / Opusfile sources
 $(OPUS_OBJ_DIR)/%.o: %.c
 	@mkdir -p $(@D)
