@@ -38,7 +38,19 @@ LIBOPUS          = $(BUILD_DIR)/libopus.a
 LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
+
+# macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
+# the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
+# builds use the cross/system `ar` as before.
+ifeq ($(PLATFORM), desktop)
+ifeq ($(shell uname -s), Darwin)
+AR = gcc-ar
+else
 AR = $(CROSS_COMPILE)ar
+endif
+else
+AR = $(CROSS_COMPILE)ar
+endif
 
 ###########################################################
 # Include paths
