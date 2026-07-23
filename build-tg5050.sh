@@ -1,6 +1,7 @@
 #!/bin/sh
-# Cross-compile the Music Player for tg5050 in the Docker toolchain, then push
-# the binary to a connected device over ADB. Run from anywhere.
+# Cross-compile the Music Player in the Docker toolchain, then push the binary
+# to a connected device over ADB. Run from anywhere.
+export PLATFORM=tg5050
 cd "$(dirname "$0")" || exit
-PLATFORM=tg5050 sh run-docker.sh /bin/sh -c 'cd nextui-music-player/src && make PLATFORM=tg5050' || exit
-adb push bin/tg5050/musicplayer.elf "/tmp/m/bin/tg5050/musicplayer.elf"
+sh run-docker.sh /bin/sh -c "cd nextui-music-player/src && make PLATFORM=$PLATFORM" || exit
+adb push "bin/$PLATFORM/musicplayer.elf" "/mnt/SDCARD/Tools/$PLATFORM/Music Player.pak/bin/$PLATFORM/musicplayer.elf"
