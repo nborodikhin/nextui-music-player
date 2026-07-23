@@ -42,7 +42,7 @@ SETUP_MARKER="$PREFIX_LOCAL/.desktop_setup_ok"
 if [ ! -f "$SETUP_MARKER" ]; then
     echo "Preparing NextUI desktop workspace (one-time setup)..."
 
-    if [ "$(uname -s)" = "Darwin" ]; then
+    if [ "$(uname -s)" = "Darwin" ] && [ ! -x /usr/local/bin/gcc ]; then
         sudo "$NEXTUI_ROOT/workspace/desktop/macos_create_gcc_symlinks.sh"
     fi
 
