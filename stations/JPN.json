@@ -1,0 +1,30 @@
+{
+    "country": "Japan",
+    "code": "JPN",
+    "stations": [
+        {
+            "name": "OTTAVA",
+            "url": "http://ottava2.out.airtime.pro:8000/ottava2_a",
+            "genre": "Classical",
+            "slogan": "Japan's only classical music internet radio"
+        },
+        {
+            "name": "LISTEN.moe (J-Pop)",
+            "url": "https://listen.moe/fallback",
+            "genre": "Anime / J-Pop",
+            "slogan": "Free, ad-free radio for J-pop, K-pop and anime music"
+        },
+        {
+            "name": "Retro PC Game Music",
+            "url": "http://gyusyabu.ddo.jp:8000/",
+            "genre": "Retro Game Music",
+            "slogan": "Retro PC game music streaming around the clock"
+        },
+        {
+            "name": "Jazz Sakura - asia DREAM radio",
+            "url": "https://kathy.torontocast.com:3330/stream/1/",
+            "genre": "Jazz",
+            "slogan": "Japanese jazz across the Showa, Heisei and Reiwa eras"
+        }
+    ]
+}

@@ -1,6 +1,10 @@
 ###########################################################
 # Supported platforms
-SUPPORTED_PLATFORMS = tg5040 tg5050
+#   tg5040 / tg5050 : ARM64 device builds (cross-compiled in the Docker toolchain)
+#   desktop         : native Linux/macOS build for local dev/testing (no device,
+#                     no cross-compiler). Uses SDL2 + desktop OpenGL instead of
+#                     GLES, and has no AAC/M4A support (see fdk_aac_desktop_stub.c).
+SUPPORTED_PLATFORMS = tg5040 tg5050 desktop
 DEFAULT_PLATFORM = tg5040
 
 ifeq (,$(PLATFORM))
@@ -12,8 +16,13 @@ endif
 ifeq (,$(filter $(PLATFORM),$(SUPPORTED_PLATFORMS)))
 $(error Invalid PLATFORM '$(PLATFORM)'. Supported: $(SUPPORTED_PLATFORMS))
 endif
+
+# The desktop target compiles natively, so CROSS_COMPILE is expected to be empty
+# (CC falls back to the host gcc). Device targets must have a cross toolchain.
+ifneq ($(PLATFORM), desktop)
 ifeq (,$(CROSS_COMPILE))
 $(error Missing CROSS_COMPILE for this toolchain)
+endif
 endif
 
 ###########################################################
@@ -29,7 +38,19 @@ LIBOPUS          = $(BUILD_DIR)/libopus.a
 LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
+
+# macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
+# the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
+# builds use the cross/system `ar` as before.
+ifeq ($(PLATFORM), desktop)
+ifeq ($(shell uname -s), Darwin)
+AR = gcc-ar
+else
 AR = $(CROSS_COMPILE)ar
+endif
+else
+AR = $(CROSS_COMPILE)ar
+endif
 
 ###########################################################
 # Include paths
@@ -102,7 +123,7 @@ MBEDTLS_OBJS = $(patsubst %.c,$(MBEDTLS_OBJ_DIR)/%.o,$(MBEDTLS_SRC))
 ###########################################################
 # Main application sources
 
-APP_SRC = \
+LOCAL_SRC = \
     musicplayer.c player.c playlist.c playlist_m3u.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
     downloader.c selfupdate.c display_helper.c \
@@ -118,12 +139,31 @@ APP_SRC = \
     spectrum.c \
     audio/kiss_fft.c audio/kiss_fftr.c \
     include/yxml/yxml.c \
-    include/parson/parson.c \
+    include/parson/parson.c
+
+# Desktop has no libfdk-aac; link a no-op stub so player.c (which calls the FDK
+# API unconditionally) links, with AAC/M4A decode failing gracefully at runtime.
+ifeq ($(PLATFORM), desktop)
+LOCAL_SRC += fdk_aac_desktop_stub.c
+endif
+
+# Sources that live outside src/ (shared NextUI code + per-platform code).
+# These need their own rule below: a plain $(OBJ_DIR)/%.o: %.c pattern would
+# reuse the same object/dep file across platforms, since the ../../ in the
+# source path collapses right back out of $(OBJ_DIR) (e.g. both
+# build/tg5040/obj/../../all/common/api.o and build/tg5050/obj/../../all/common/api.o
+# resolve to build/all/common/api.o). That caused stale objects compiled for
+# one platform's headers to get linked into the other platform's binary.
+EXT_SRC = \
     ../../all/common/utils.c ../../all/common/api.c \
     ../../all/common/config.c ../../all/common/scaler.c \
     ../../$(PLATFORM)/platform/platform.c
 
-APP_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(APP_SRC))
+APP_SRC = $(LOCAL_SRC) $(EXT_SRC)
+
+LOCAL_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LOCAL_SRC))
+EXT_OBJS   = $(patsubst ../../%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
+APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
 
 ###########################################################
 # Compiler / linker flags
@@ -132,8 +172,17 @@ MY_CFLAGS  = -O2 -fomit-frame-pointer
 MY_CFLAGS += -DMBEDTLS_CONFIG_FILE='<mbedtls_config.h>'
 MY_CFLAGS += -DOPUS_BUILD -DHAVE_LRINTF -DOP_DISABLE_HTTP -DOP_DISABLE_FLOAT_API
 MY_CFLAGS += $(INCDIR) -DPLATFORM=\"$(PLATFORM)\" -std=gnu99
-MY_CFLAGS += -DUSE_SDL2 -DUSE_GLES -DGL_GLEXT_PROTOTYPES
+MY_CFLAGS += -DUSE_SDL2 -DGL_GLEXT_PROTOTYPES
 MY_CFLAGS += -MMD -MP
+
+# Desktop uses full OpenGL; devices use GLES. Neither macro is read by this
+# repo's sources today (the GL context profile is picked at runtime via
+# PLAT_getModel()), but keep them matching the platform's makefile.env.
+ifeq ($(PLATFORM), desktop)
+MY_CFLAGS += -DUSE_GL
+else
+MY_CFLAGS += -DUSE_GLES
+endif
 
 MY_LDFLAGS  = -L$(BUILD_DIR)
 MY_LDFLAGS += -L$(PREFIX)/lib -L$(PREFIX_LOCAL)/lib
@@ -142,13 +191,26 @@ MY_LDFLAGS += -L../../$(PLATFORM)/libmsettings
 MY_LDFLAGS += -L../../all/minarch/build/$(PLATFORM)
 
 LDLIBS  = -lopus -lmbedtls
-LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
 LDLIBS += -lSDL2_image -lSDL2_ttf
 LDLIBS += -lmsettings -lsamplerate -lzip -lm -lpthread -ldl -lz
-LDLIBS += -lasound -lfdk-aac
 
+ifeq ($(PLATFORM), desktop)
+# Native desktop build: full OpenGL, and SDL2 provides audio output so there is
+# no ALSA link. libfdk-aac is not available on desktop (not in Debian), so AAC/
+# M4A decoding is stubbed out — see fdk_aac_desktop_stub.c, linked via LOCAL_SRC.
+# GL links differently per host: macOS OpenGL is a framework, Linux is -lGL (no
+# gl.pc, so pkg-config falls back). Mirrors desktop/platform/makefile.env.
+ifeq ($(shell uname -s), Darwin)
+LDLIBS += -lSDL2 -framework OpenGL
+else
+LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
+endif
+else
+LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+LDLIBS += -lasound -lfdk-aac
 ifeq ($(PLATFORM), tg5050)
 LDLIBS += -ltinyalsa
+endif
 endif
 
 ###########################################################
@@ -171,6 +233,19 @@ $(LIBMBEDTLS): $(MBEDTLS_OBJS)
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
+
+# Compile sources that live outside src/ (see EXT_SRC above) into their own
+# per-platform subdirectory instead of $(OBJ_DIR)/%.o, so they can't collapse
+# to a path shared with another platform's build.
+$(OBJ_DIR)/ext/%.o: ../../%.c
+	@mkdir -p $(@D)
+	$(CC) -c $(MY_CFLAGS) -o $@ $<
+
+# NextUI's config.c rewrites the global theme file as a side effect of reading
+# it (CFG_init -> setters -> CFG_sync). This pak must never write global config,
+# so force-include a shim that makes config.c a read-only consumer by failing
+# write-mode fopen() inside that one translation unit. See config_readonly_shim.h.
+$(OBJ_DIR)/ext/all/common/config.o: MY_CFLAGS += -include $(CURDIR)/config_readonly_shim.h
 
 # Compile Opus / OGG / Opusfile sources
 $(OPUS_OBJ_DIR)/%.o: %.c

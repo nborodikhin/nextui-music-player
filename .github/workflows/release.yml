@@ -41,7 +41,7 @@ jobs:
       - name: Package release zip
         run: |
           cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
-          rm -rf .github src .git .gitignore LICENSE README.md
+          sudo rm -rf .github src .git .gitignore LICENSE README.md
           zip -r ../Music.Player.pak.zip .
 
       - name: Create GitHub Release
