@@ -9,6 +9,7 @@
 #include "ui_main.h"
 #include "ui_music.h"
 #include "watchdog.h"
+#include "crash_handler.h"
 #include "log_trace.h"
 #include "ui_radio.h"
 #include "player.h"
@@ -391,7 +392,10 @@ void ModuleCommon_traceButtons(void) {
         const char* label = btn_label(id);
         if (!label) continue;
         uint32_t mask = 1u << id;
-        if (PAD_justPressed(mask))  LOG_trace("btn press: %s", label);
+        if (PAD_justPressed(mask)) {
+            LOG_trace("btn press: %s", label);
+            CrashHandler_noteInput(label);
+        }
         if (PAD_justReleased(mask)) LOG_trace("btn release: %s", label);
     }
 }

@@ -17,6 +17,12 @@
 // "unknown". The string is copied, so the caller need not keep it alive.
 void CrashHandler_init(const char* app_version);
 
+// Record the most recent button press for meta.txt's last_input_button /
+// last_input_age_ms fields. Called from ModuleCommon_traceButtons() on every
+// press; `label` is copied (truncated to 23 chars). Cheap — a bounded memcpy
+// plus one relaxed atomic store.
+void CrashHandler_noteInput(const char* label);
+
 // Update the in-memory atomic the signal handler reads. Called by the
 // Settings listener whenever Settings_setCollectCrashReports(...) runs.
 // Async-signal-safe via __atomic_store_n.

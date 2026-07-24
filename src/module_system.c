@@ -5,6 +5,7 @@
 #include "selfupdate.h"
 #include "ui_system.h"
 #include "wifi.h"
+#include "watchdog.h"
 
 // Internal states
 typedef enum {
@@ -19,6 +20,8 @@ ModuleExitReason SystemModule_run(SDL_Surface* screen) {
 
     while (1) {
         PAD_poll();
+        Watchdog_heartbeat();
+        ModuleCommon_traceButtons();
 
         // Handle global input first
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting,

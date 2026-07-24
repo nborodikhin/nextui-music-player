@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include <time.h>
@@ -24,8 +25,33 @@ static uint32_t monotonic_ms(void) {
 }
 
 static pthread_t watchdog_thread;
-static bool watchdog_running = false;
+// Read by the dog thread every loop iteration, written by main in Watchdog_quit().
+// Must be atomic: a plain bool lets the compiler hoist the load out of the loop,
+// which either hangs the join or lets the dog abort() during a clean shutdown.
+static _Atomic bool watchdog_running = false;
 static bool watchdog_started = false;
+
+// TID of the thread the watchdog is watching. The dog exists to detect main-loop
+// death, so a worker thread's liveness — and its blocking — is none of its
+// business. Everything below is scoped to this thread; off-main calls are ignored.
+static _Atomic pid_t main_tid = 0;
+
+// Per-thread cache: gettid() has no vDSO entry, and pause/resume run a few times
+// per frame. A thread's TID never changes, and the only fork() in the app is the
+// popen/system pair, whose child execs immediately.
+static __thread pid_t cached_tid = 0;
+
+static pid_t current_tid(void) {
+    if (cached_tid == 0) cached_tid = (pid_t)syscall(SYS_gettid);
+    return cached_tid;
+}
+
+// True when the caller is the watched thread. Before Watchdog_bindMainThread()
+// nothing is bound and no dog is running, so every caller counts as main.
+static bool on_main_thread(void) {
+    pid_t m = atomic_load_explicit(&main_tid, memory_order_relaxed);
+    return m == 0 || current_tid() == m;
+}
 
 // Monotonic last-known-good main-loop tick. Read by the dog, written by main.
 static _Atomic uint32_t heartbeat_ms = 0;
@@ -64,8 +90,13 @@ static void* watchdog_loop(void* arg) {
     return NULL;
 }
 
+void Watchdog_bindMainThread(void) {
+    atomic_store_explicit(&main_tid, current_tid(), memory_order_relaxed);
+}
+
 void Watchdog_init(unsigned override_threshold_ms) {
     if (watchdog_started) return;
+    Watchdog_bindMainThread();
     threshold_ms = override_threshold_ms ? override_threshold_ms : DEFAULT_THRESHOLD_MS;
     atomic_store_explicit(&heartbeat_ms, 0, memory_order_relaxed);
     atomic_store_explicit(&pause_mask, 0, memory_order_relaxed);
@@ -85,6 +116,7 @@ void Watchdog_quit(void) {
 }
 
 void Watchdog_heartbeat(void) {
+    if (!on_main_thread()) return;
     atomic_store_explicit(&heartbeat_ms, monotonic_ms(), memory_order_relaxed);
 }
 
@@ -100,6 +132,7 @@ static const char* reason_name(WatchdogPauseReason r) {
 }
 
 void Watchdog_pause(WatchdogPauseReason reason, bool trace) {
+    if (!on_main_thread()) return;
     if ((unsigned)reason >= (unsigned)WATCHDOG_REASON_COUNT) return;
     atomic_fetch_or_explicit(&pause_mask, 1u << (unsigned)reason, memory_order_relaxed);
     if (trace) {
@@ -108,10 +141,12 @@ void Watchdog_pause(WatchdogPauseReason reason, bool trace) {
 }
 
 void Watchdog_resume(WatchdogPauseReason reason, bool trace) {
+    if (!on_main_thread()) return;
     if ((unsigned)reason >= (unsigned)WATCHDOG_REASON_COUNT) return;
     atomic_fetch_and_explicit(&pause_mask, ~(1u << (unsigned)reason), memory_order_relaxed);
     // Re-arm the heartbeat so we don't immediately trip on a stale value after a
-    // long pause (deep sleep, keyboard hold, ...).
+    // long pause (deep sleep, keyboard hold, ...). Only reachable on main, so this
+    // can no longer forge main-loop liveness from a worker.
     Watchdog_heartbeat();
     if (trace) {
         uint32_t mask_after = atomic_load_explicit(&pause_mask, memory_order_relaxed);

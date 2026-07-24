@@ -17,7 +17,7 @@ LDLIBS   = -lpthread
 SRC      = ../src
 BIN      = bin
 
-TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog
+TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog $(BIN)/test_utc_time
 
 .PHONY: all run clean
 all: run
@@ -30,6 +30,9 @@ $(BIN)/test_ring_log: test_ring_log.c $(SRC)/ring_log.c test.h | $(BIN)
 
 $(BIN)/test_watchdog: test_watchdog.c $(SRC)/watchdog.c $(SRC)/watchdog.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_watchdog.c $(SRC)/watchdog.c $(LDLIBS)
+
+$(BIN)/test_utc_time: test_utc_time.c $(SRC)/utc_time.c $(SRC)/utc_time.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_utc_time.c $(SRC)/utc_time.c $(LDLIBS)
 
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \

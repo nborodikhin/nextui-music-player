@@ -19,8 +19,12 @@
 //   - snprintf is used (technically not strictly POSIX async-signal-safe but
 //     safe in glibc for the simple %d/%s/%u formatting here — same trade-off
 //     as documented in the spec).
-//   - localtime_r is also "safe in practice" on glibc; used once per handler
-//     invocation to format the timestamp.
+//   - NO localtime_r. It takes tzset_lock and mallocs on first call. glibc's
+//     malloc corruption detector calls abort() *while holding the arena lock*,
+//     so a SIGABRT handler that allocates deadlocks against it — precisely the
+//     heap-corruption case where the bundle matters most. Bundle directories
+//     are named in UTC via time(2) (which IS async-signal-safe) plus the
+//     integer civil-time conversion in utc_time.c.
 //
 // The handler short-circuits to _exit(1) (crash) or return (SIGUSR1) if
 // collection_enabled is false.
@@ -49,6 +53,7 @@
 #include "player.h"
 #include "ring_log.h"
 #include "settings.h"
+#include "utc_time.h"
 #include "watchdog.h"
 
 #define BUNDLE_ROOT      SHARED_USERDATA_PATH "/music-player/crash-reports"
@@ -69,6 +74,13 @@ static char meta_buf[2048];      // formatted meta.txt content (audio_track path
 static atomic_int collection_enabled = 0;
 static atomic_int handler_installed = 0;
 
+// Last button press observed by the main loop, for meta.txt. Written by
+// ModuleCommon_traceButtons() via CrashHandler_noteInput(); read best-effort
+// from the handler. A torn read is possible but bounded — format_meta() copies
+// with a strnlen cap, the same trade-off documented for audio_track below.
+static char last_input_button[24] = "";
+static _Atomic uint32_t last_input_ms = 0;
+
 // App-start tick captured at init so meta.txt can report uptime in ms.
 // CLOCK_MONOTONIC ms (not SDL) so the handler stays async-signal-safe.
 static uint32_t app_start_ms = 0;
@@ -78,6 +90,14 @@ static uint32_t monotonic_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+void CrashHandler_noteInput(const char* label) {
+    if (!label || !label[0]) return;
+    size_t n = strnlen(label, sizeof(last_input_button) - 1);
+    memcpy(last_input_button, label, n);
+    last_input_button[n] = '\0';
+    atomic_store_explicit(&last_input_ms, monotonic_ms(), memory_order_relaxed);
 }
 
 static const char* signal_name(int signo) {
@@ -129,20 +149,19 @@ static void mkdir_p(const char* path) {
     mkdir(tmp, 0755);
 }
 
-// Build "<BUNDLE_ROOT>/yyyy-mm-dd_HH-MM-SS" into bundle_dir.
+// Build "<BUNDLE_ROOT>/yyyy-mm-dd_HH-MM-SS" into bundle_dir, in UTC.
+//
+// UTC rather than local time on purpose: it keeps the handler allocation-free
+// (see the file header), and the names stay ISO-sortable, which is what
+// CrashHandler_findUnsentBundle()'s strcmp ordering relies on. Nobody
+// correlates a crash bundle against local wall-clock time.
 static void build_bundle_dir(void) {
-    time_t now = time(NULL);
-    struct tm tm_buf;
-    localtime_r(&now, &tm_buf);
+    UtcTime t;
+    UtcTime_fromUnix((int64_t)time(NULL), &t);
 
     snprintf(bundle_dir, sizeof(bundle_dir),
              BUNDLE_ROOT "/%04d-%02d-%02d_%02d-%02d-%02d",
-             tm_buf.tm_year + 1900,
-             tm_buf.tm_mon + 1,
-             tm_buf.tm_mday,
-             tm_buf.tm_hour,
-             tm_buf.tm_min,
-             tm_buf.tm_sec);
+             t.year, t.mon, t.day, t.hour, t.min, t.sec);
 }
 
 // Format meta.txt into meta_buf. Returns the length (excluding trailing NUL).
@@ -178,11 +197,21 @@ static size_t format_meta(int signo) {
         track_buf[0] = '\0';
     }
 
+    // Same bounded-copy treatment as track_buf — the main loop may be mid-write.
+    char btn_buf[sizeof(last_input_button)];
+    size_t blen = strnlen(last_input_button, sizeof(btn_buf) - 1);
+    memcpy(btn_buf, last_input_button, blen);
+    btn_buf[blen] = '\0';
+    uint32_t last_in = atomic_load_explicit(&last_input_ms, memory_order_relaxed);
+    uint32_t input_age = (last_in == 0) ? 0 : (now - last_in);
+
     int n = snprintf(meta_buf, sizeof(meta_buf),
         "version: %s\n"
         "platform: " PLATFORM "\n"
         "signal: %s (%d)\n"
         "uptime_ms: %u\n"
+        "last_input_button: %s\n"
+        "last_input_age_ms: %u\n"
         "heartbeat_age_ms: %u\n"
         "ring_total_bytes: %zu\n"
         "screen_width: %d\n"
@@ -196,6 +225,8 @@ static size_t format_meta(int signo) {
         app_version,
         signal_name(signo), signo,
         uptime,
+        btn_buf[0] ? btn_buf : "none",
+        input_age,
         hb_age,
         RingLog_totalAppended(),
         FbCapture_width(),
@@ -221,10 +252,26 @@ static void write_all(int fd, const char* buf, size_t len) {
     }
 }
 
+// Re-entry guard for write_bundle(). Signal masks are PER-THREAD, so sa_mask
+// cannot stop two threads from faulting at once and both entering write_bundle()
+// — a realistic case under heap corruption, where the stream thread and the main
+// thread walk the same bad pointer. Without this, both interleave writes into the
+// shared bundle_dir / meta_buf / *_path scratch and neither bundle is coherent.
+static atomic_int bundle_in_progress = 0;
+
 // Shared bundle writer used by both the fatal-signal handler and the SIGUSR1
 // diagnostic-dump handler. Order: log.txt → screen.bmp → meta.txt so a partial
 // bundle still has the highest-value file first.
+//
+// First caller wins; a concurrent or nested caller returns immediately without
+// writing. On the fatal path that means the loser proceeds straight to _exit(1),
+// which can truncate an in-flight SIGUSR1 dump — an acceptable trade, since
+// blocking inside a signal handler to wait for the winner is strictly worse.
 static void write_bundle(int signo) {
+    if (atomic_exchange_explicit(&bundle_in_progress, 1, memory_order_acq_rel)) {
+        return;
+    }
+
     mkdir_p(PARENT_DIR);
     mkdir(BUNDLE_ROOT, 0755);
     build_bundle_dir();
@@ -253,6 +300,10 @@ static void write_bundle(int signo) {
         write_all(meta_fd, meta_buf, meta_len);
         close(meta_fd);
     }
+
+    // Only matters for the SIGUSR1 path, which returns and may dump again.
+    // The fatal path _exit(1)s before this is ever observed.
+    atomic_store_explicit(&bundle_in_progress, 0, memory_order_release);
 }
 
 static void crash_handler(int signo) {
@@ -470,14 +521,22 @@ void CrashHandler_init(const char* version) {
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = crash_handler;
     sigemptyset(&sa.sa_mask);
-    // Block the other fatal signals while handling one, so a secondary fault
-    // can't re-enter write_bundle() and clobber the shared bundle_dir/meta_buf
-    // scratch mid-write. (The signal being handled is auto-blocked already.)
+    // Block the other fatal signals, and SIGUSR1, while handling one — a
+    // *delivered* signal then cannot re-enter write_bundle() on this thread.
+    // (The signal being handled is auto-blocked already.)
+    //
+    // This is defence in depth, not the actual protection: masks are per-thread,
+    // so they do nothing about two threads faulting at once, and a hardware
+    // SIGSEGV raised while SIGSEGV is blocked is undefined per POSIX — Linux
+    // force-delivers it with default disposition and kills the process, which is
+    // the right outcome anyway. The bundle_in_progress guard in write_bundle()
+    // is what actually keeps the shared scratch coherent.
     sigaddset(&sa.sa_mask, SIGSEGV);
     sigaddset(&sa.sa_mask, SIGABRT);
     sigaddset(&sa.sa_mask, SIGBUS);
     sigaddset(&sa.sa_mask, SIGFPE);
     sigaddset(&sa.sa_mask, SIGILL);
+    sigaddset(&sa.sa_mask, SIGUSR1);
     sa.sa_flags = 0;   // no SA_RESTART — let interrupted syscalls fail naturally
 
     sigaction(SIGSEGV, &sa, NULL);
@@ -497,6 +556,13 @@ void CrashHandler_init(const char* version) {
     diag_sa.sa_handler = diagnostic_handler;
     sigemptyset(&diag_sa.sa_mask);
     sigaddset(&diag_sa.sa_mask, SIGUSR1);
+    // Also block the fatal signals: without these, a fault during a diagnostic
+    // dump re-enters via crash_handler() on this same thread.
+    sigaddset(&diag_sa.sa_mask, SIGSEGV);
+    sigaddset(&diag_sa.sa_mask, SIGABRT);
+    sigaddset(&diag_sa.sa_mask, SIGBUS);
+    sigaddset(&diag_sa.sa_mask, SIGFPE);
+    sigaddset(&diag_sa.sa_mask, SIGILL);
     diag_sa.sa_flags = SA_RESTART;
     sigaction(SIGUSR1, &diag_sa, NULL);
 }
