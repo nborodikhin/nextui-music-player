@@ -27,12 +27,13 @@ static bool show_crash_dialog = false;
 static int  crash_dialog_cursor = CRASH_DIALOG_ACTION_CLOSE;
 static char crash_bundle_path[320] = "";
 
-// Cached crash-row state. The filesystem is scanned exactly ONCE — the first
-// time the app enters the menu — then this cache is reused for the rest of the
-// process lifetime. The bundle set can't change underneath us (a crash restarts
-// the app); only Skip / Never-collect hide the row, and both update the cache
-// in-memory. Avoids any per-frame or per-entry SD-card I/O.
-static bool crash_scan_done = false;
+// Cached crash-row state. Scanned once per menu ENTRY (not once per process):
+// a SIGUSR1 diagnostic dump or enabling "Collect crash reports" in Settings can
+// add a bundle while the app keeps running, and a once-per-process scan would
+// never surface it. Re-entering the menu — including returning from the Settings
+// submenu — refreshes it. The scan is off the per-frame path (menu entry is a
+// rare event), so this does not reintroduce hot-loop SD I/O. During a single
+// visit, Skip / Never-collect hide the row by updating this flag in-memory.
 static bool crash_row_visible = false;
 
 // How long to show the "Exiting..." toast before actually quitting.
@@ -52,15 +53,11 @@ int MenuModule_run(SDL_Surface* screen) {
     // visit to the menu can't make a single B-press here read as the confirm.
     exit_armed_at = 0;
 
-    // Scan the filesystem for the newest unsent crash bundle exactly once, the
-    // first time the app reaches the menu. Subsequent menu entries reuse the
-    // cached result (see crash_scan_done above). The scan also fills
-    // crash_bundle_path with the bundle to operate on.
-    if (!crash_scan_done) {
-        crash_row_visible = CrashHandler_findUnsentBundle(
-            crash_bundle_path, sizeof(crash_bundle_path));
-        crash_scan_done = true;
-    }
+    // Scan for the newest unsent crash bundle once per menu entry, so a dump or
+    // a newly-enabled collect setting since the last visit is picked up (see the
+    // crash_row_visible note above). Also fills crash_bundle_path.
+    crash_row_visible = CrashHandler_findUnsentBundle(
+        crash_bundle_path, sizeof(crash_bundle_path));
 
     while (1) {
         GFX_startFrame();

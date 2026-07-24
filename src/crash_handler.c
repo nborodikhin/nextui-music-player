@@ -285,12 +285,18 @@ static void write_bundle(int signo) {
     }
 
     // BMP is the signal-safe choice; CrashHandler_convertPendingScreenshots()
-    // converts BMP → PNG at next startup once SDL_image is usable.
-    snprintf(screen_path, sizeof(screen_path), "%s/screen.bmp", bundle_dir);
-    int screen_fd = open(screen_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (screen_fd >= 0) {
-        FbCapture_writeBmp(screen_fd);
-        close(screen_fd);
+    // converts BMP → PNG at next startup once SDL_image is usable. Skip it
+    // entirely when capture never initialized, and delete the file if the
+    // capture came back incomplete — a 0-byte or truncated screen.bmp is
+    // unloadable and would be retried and warned about on every future launch.
+    if (FbCapture_isAvailable()) {
+        snprintf(screen_path, sizeof(screen_path), "%s/screen.bmp", bundle_dir);
+        int screen_fd = open(screen_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (screen_fd >= 0) {
+            ssize_t wrote = FbCapture_writeBmp(screen_fd);
+            close(screen_fd);
+            if (wrote <= 0) unlink(screen_path);
+        }
     }
 
     snprintf(meta_path, sizeof(meta_path), "%s/meta.txt", bundle_dir);
@@ -340,31 +346,36 @@ static bool bundle_dir_path(const char* name, char* out, size_t out_size) {
     return stat(out, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// True if the bundle named `name` has a skipped.txt marker inside it.
+static bool bundle_is_skipped(const char* name) {
+    char skip_path[320];
+    snprintf(skip_path, sizeof(skip_path), "%s/%s/skipped.txt", BUNDLE_ROOT, name);
+    return access(skip_path, F_OK) == 0;
+}
+
 bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
     if (!Settings_getCollectCrashReports()) return false;
 
     DIR* dir = opendir(BUNDLE_ROOT);
     if (!dir) return false;
 
+    // Track the newest *unskipped* bundle. Skipping the newest must not hide the
+    // ones behind it, so the skipped check belongs inside the loop — filtering
+    // only the max would make every older unsent bundle permanently unreachable.
     char newest[64] = {0};
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
         char path[320];
         if (!bundle_dir_path(ent->d_name, path, sizeof(path))) continue;
+        if (strcmp(ent->d_name, newest) <= 0) continue;  // not newer than best
+        if (bundle_is_skipped(ent->d_name)) continue;    // dismissed, keep looking
 
-        if (strcmp(ent->d_name, newest) > 0) {
-            strncpy(newest, ent->d_name, sizeof(newest) - 1);
-            newest[sizeof(newest) - 1] = '\0';
-        }
+        strncpy(newest, ent->d_name, sizeof(newest) - 1);
+        newest[sizeof(newest) - 1] = '\0';
     }
     closedir(dir);
 
     if (newest[0] == '\0') return false;
-
-    // Check skipped marker on the newest.
-    char skip_path[320];
-    snprintf(skip_path, sizeof(skip_path), "%s/%s/skipped.txt", BUNDLE_ROOT, newest);
-    if (access(skip_path, F_OK) == 0) return false;
 
     if (out_path && out_size > 0) {
         snprintf(out_path, out_size, "%s/%s", BUNDLE_ROOT, newest);
@@ -387,12 +398,23 @@ int CrashHandler_convertPendingScreenshots(void) {
         snprintf(bmp, sizeof(bmp), "%s/screen.bmp", bundle);
         snprintf(png, sizeof(png), "%s/screen.png", bundle);
 
-        if (access(bmp, F_OK) != 0) continue;       // no BMP: incomplete or already converted
         if (access(png, F_OK) == 0) continue;       // already converted
+
+        struct stat bst;
+        if (stat(bmp, &bst) != 0) continue;         // no BMP: incomplete or already converted
+        if (bst.st_size == 0) {
+            // Empty BMP — a failed capture from an older build that didn't clean
+            // up after itself. Unloadable; remove it so it stops being retried.
+            unlink(bmp);
+            continue;
+        }
 
         SDL_Surface* surf = SDL_LoadBMP(bmp);
         if (!surf) {
-            LOG_warn("crash_handler: SDL_LoadBMP(%s) failed: %s\n", bmp, SDL_GetError());
+            // Corrupt or truncated BMP. It will never load, so deleting it is the
+            // only way to stop warning about it on every launch.
+            LOG_warn("crash_handler: SDL_LoadBMP(%s) failed: %s; removing\n", bmp, SDL_GetError());
+            unlink(bmp);
             continue;
         }
 

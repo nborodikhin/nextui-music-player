@@ -31,11 +31,12 @@ void CrashHandler_setCollectionEnabled(bool enabled);
 // Find the newest non-skipped crash bundle on disk.
 // Returns true iff:
 //   - Settings_getCollectCrashReports() is true, AND
-//   - at least one subdirectory exists under crash-reports/, AND
-//   - the newest such subdirectory (by name; timestamps sort lexicographically)
-//     does NOT contain a skipped.txt file.
-// On true, out_path (if non-NULL) is filled with the absolute path of that bundle.
-// Older non-skipped bundles do not resurface (newest-only model).
+//   - at least one subdirectory exists under crash-reports/ that does NOT
+//     contain a skipped.txt file.
+// On true, out_path (if non-NULL) is filled with the absolute path of the
+// newest such bundle (by name; timestamps sort lexicographically). Skipping the
+// newest bundle surfaces the next-newest unskipped one, rather than hiding all
+// older bundles.
 bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size);
 
 // Mark the bundle at bundle_path as skipped by creating an empty skipped.txt

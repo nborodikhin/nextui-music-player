@@ -20,8 +20,15 @@ bool FbCapture_init(void);
 // Write the currently visible page of /dev/fb0 to fd as a top-down 32-bit
 // BGRA BMP. Async-signal-safe: open/read/write/lseek/close + a hand-rolled
 // integer parser for the pan offset. No malloc, no printf.
-// Returns bytes written, 0 if uninitialized or fb0 unavailable.
+// Returns the byte count on a COMPLETE capture (full header + every declared
+// row). Returns 0 if uninitialized, if fb0 is unavailable, or if the image is
+// incomplete — in which case the caller must discard any file it created, since
+// a truncated BMP is unloadable and would be retried on every launch.
 ssize_t FbCapture_writeBmp(int fd);
+
+// True once FbCapture_init() has succeeded. Lets the crash handler skip creating
+// screen.bmp entirely when capture is unavailable.
+bool FbCapture_isAvailable(void);
 
 // Framebuffer dimensions read at init. 0 if FbCapture_init() has not succeeded.
 int FbCapture_width(void);

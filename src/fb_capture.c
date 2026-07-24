@@ -148,9 +148,10 @@ static void write_all(int fd, const void* buf, size_t len) {
     }
 }
 
-int FbCapture_width(void)  { return fb_width; }
-int FbCapture_height(void) { return fb_height; }
-int FbCapture_bpp(void)    { return initialized ? (int)BMP_BPP : 0; }
+int  FbCapture_width(void)     { return fb_width; }
+int  FbCapture_height(void)    { return fb_height; }
+int  FbCapture_bpp(void)       { return initialized ? (int)BMP_BPP : 0; }
+bool FbCapture_isAvailable(void) { return initialized != 0; }
 
 ssize_t FbCapture_writeBmp(int fd) {
     if (!initialized) return 0;
@@ -173,7 +174,7 @@ ssize_t FbCapture_writeBmp(int fd) {
     write_all(fd, bmp_header, BMP_HEADER_SIZE);
 
     // Stream scanlines.
-    ssize_t total = BMP_HEADER_SIZE;
+    int rows = 0;
     for (int y = 0; y < fb_height; ++y) {
         ssize_t got = read(fb_fd, scanline, fb_stride);
         if (got <= 0) break;
@@ -183,9 +184,16 @@ ssize_t FbCapture_writeBmp(int fd) {
             memset(scanline + got, 0, fb_stride - (size_t)got);
         }
         write_all(fd, scanline, fb_stride);
-        total += (ssize_t)fb_stride;
+        rows++;
     }
 
     close(fb_fd);
-    return total;
+
+    // The header declares fb_height rows. A file with fewer rows is a truncated
+    // BMP that SDL_LoadBMP will reject at next startup — and, since the source is
+    // never deleted on a failed conversion, it would be retried on every launch
+    // forever. Signal "no usable image" so the caller discards the file instead.
+    if (rows < fb_height) return 0;
+
+    return (ssize_t)BMP_HEADER_SIZE + (ssize_t)rows * (ssize_t)fb_stride;
 }

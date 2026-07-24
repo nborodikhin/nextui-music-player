@@ -65,6 +65,22 @@ void RingLog_append(const char* data, size_t len) {
     spin_unlock();
 }
 
+// Write all `len` bytes of `buf`, looping on short writes. Returns the count
+// written (== len) or -1 on a hard error. Regular-file writes to the SD card can
+// legitimately return short, and sa_flags=0 (no SA_RESTART) makes an EINTR short
+// write possible too — a single write() would silently truncate and, in the
+// wrapped case, splice the two segments out of order.
+static ssize_t write_all(int fd, const char* buf, size_t len) {
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0) return -1;
+        if (n == 0) break;  // no progress; give up rather than spin
+        off += (size_t)n;
+    }
+    return (ssize_t)off;
+}
+
 ssize_t RingLog_dump(int fd) {
     // Signal-handler discipline: best-effort lock with one retry, then dump anyway.
     int locked = spin_trylock();
@@ -74,7 +90,7 @@ ssize_t RingLog_dump(int fd) {
 
     if (total_appended < RING_LOG_SIZE) {
         // Not yet wrapped: ring[0 .. total_appended] is everything ever written.
-        ssize_t n = write(fd, ring, total_appended);
+        ssize_t n = write_all(fd, ring, total_appended);
         if (n < 0) {
             if (locked) spin_unlock();
             return -1;
@@ -83,7 +99,7 @@ ssize_t RingLog_dump(int fd) {
     } else {
         // Wrapped: oldest byte is at `head`, newest is just before `head`.
         // Write [head .. end), then [0 .. head).
-        ssize_t n1 = write(fd, ring + head, RING_LOG_SIZE - head);
+        ssize_t n1 = write_all(fd, ring + head, RING_LOG_SIZE - head);
         if (n1 < 0) {
             if (locked) spin_unlock();
             return -1;
@@ -91,7 +107,7 @@ ssize_t RingLog_dump(int fd) {
         total += n1;
 
         if (head > 0) {
-            ssize_t n2 = write(fd, ring, head);
+            ssize_t n2 = write_all(fd, ring, head);
             if (n2 < 0) {
                 if (locked) spin_unlock();
                 return -1;

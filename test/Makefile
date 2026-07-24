@@ -25,8 +25,11 @@ all: run
 $(BIN):
 	mkdir -p $(BIN)
 
+# ring_log.c is compiled with -Dwrite=rl_test_write so the test can intercept
+# write() and force short writes deterministically (see test_ring_log.c). The
+# override applies only to the ring_log.c compile, not the test driver.
 $(BIN)/test_ring_log: test_ring_log.c $(SRC)/ring_log.c test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_ring_log.c $(SRC)/ring_log.c $(LDLIBS)
+	$(CC) $(CFLAGS) $(INC) -Dwrite=rl_test_write -o $@ test_ring_log.c $(SRC)/ring_log.c $(LDLIBS)
 
 $(BIN)/test_watchdog: test_watchdog.c $(SRC)/watchdog.c $(SRC)/watchdog.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_watchdog.c $(SRC)/watchdog.c $(LDLIBS)
