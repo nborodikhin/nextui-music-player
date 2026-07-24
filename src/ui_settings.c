@@ -10,15 +10,14 @@
 #include "album_art.h"
 #include "selfupdate.h"
 #include "downloader.h"
-#include "crash_handler.h"
 
-int settings_build_visible_items(int* out, int max_count) {
+int settings_build_visible_items(int* out, int max_count, bool has_crash_bundles) {
     int n = 0;
     if (n < max_count) out[n++] = SETTINGS_ITEM_SCREEN_OFF;
     if (n < max_count) out[n++] = SETTINGS_ITEM_BASS_FILTER;
     if (n < max_count) out[n++] = SETTINGS_ITEM_SOFT_LIMITER;
     if (n < max_count) out[n++] = SETTINGS_ITEM_COLLECT_CRASH;
-    if (CrashHandler_hasAnyBundle()) {
+    if (has_crash_bundles) {
         if (n < max_count) out[n++] = SETTINGS_ITEM_DELETE_CRASH;
     }
     if (n < max_count) out[n++] = SETTINGS_ITEM_CLEAR_CACHE;
@@ -38,7 +37,8 @@ static void format_cache_size(long bytes, char* buf, int buf_size) {
     }
 }
 
-void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll) {
+void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected,
+                          int menu_scroll, bool has_crash_bundles) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -50,7 +50,8 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     int start_y = layout.list_y;
 
     int visible_items[SETTINGS_VISIBLE_MAX];
-    int visible_count = settings_build_visible_items(visible_items, SETTINGS_VISIBLE_MAX);
+    int visible_count = settings_build_visible_items(visible_items, SETTINGS_VISIBLE_MAX,
+                                                     has_crash_bundles);
 
     // Clamp scroll to valid range (defensive — caller should already adjust)
     int max_scroll = (visible_count > layout.items_per_page)

@@ -7,11 +7,16 @@
 // Static buffer; allocated by the loader at app start, never freed.
 static char ring[RING_LOG_SIZE];
 
-// Next-write offset, [0, RING_LOG_SIZE).
-static size_t head = 0;
+// Next-write offset, [0, RING_LOG_SIZE). Atomic because RingLog_dump reads it
+// without the lock whenever its try-lock fails — exactly the dump-anyway case
+// the design is built around. On ARM64 aligned word loads are atomic in
+// practice, but a plain size_t is formally a data race the compiler may fuse or
+// reload; relaxed atomics compile to the same ldr/str here, so this is free.
+static _Atomic size_t head = 0;
 
-// Monotonic total. When >= RING_LOG_SIZE, the buffer has wrapped.
-static size_t total_appended = 0;
+// Monotonic total. When >= RING_LOG_SIZE, the buffer has wrapped. Atomic for the
+// same lock-free-dump reason as head.
+static _Atomic size_t total_appended = 0;
 
 // Spinlock. Held briefly for each append; the signal-handler dump uses
 // try-acquire so a deadlocked or crashed writer can't keep us out.
@@ -34,8 +39,8 @@ static void spin_unlock(void) {
 }
 
 void RingLog_init(void) {
-    head = 0;
-    total_appended = 0;
+    atomic_store_explicit(&head, 0, memory_order_relaxed);
+    atomic_store_explicit(&total_appended, 0, memory_order_relaxed);
     atomic_flag_clear(&ring_lock);
 }
 
@@ -50,17 +55,23 @@ void RingLog_append(const char* data, size_t len) {
 
     spin_lock();
 
-    size_t first_chunk = RING_LOG_SIZE - head;
+    // Writers are serialized by the lock, so a plain relaxed load/store pair is
+    // enough — the atomicity is only for the lock-free reader in RingLog_dump.
+    size_t h = atomic_load_explicit(&head, memory_order_relaxed);
+    size_t first_chunk = RING_LOG_SIZE - h;
     if (len <= first_chunk) {
-        memcpy(ring + head, data, len);
-        head += len;
-        if (head == RING_LOG_SIZE) head = 0;
+        memcpy(ring + h, data, len);
+        h += len;
+        if (h == RING_LOG_SIZE) h = 0;
     } else {
-        memcpy(ring + head, data, first_chunk);
+        memcpy(ring + h, data, first_chunk);
         memcpy(ring, data + first_chunk, len - first_chunk);
-        head = len - first_chunk;
+        h = len - first_chunk;
     }
-    total_appended += len;
+    atomic_store_explicit(&head, h, memory_order_relaxed);
+
+    size_t total = atomic_load_explicit(&total_appended, memory_order_relaxed);
+    atomic_store_explicit(&total_appended, total + len, memory_order_relaxed);
 
     spin_unlock();
 }
@@ -88,26 +99,32 @@ ssize_t RingLog_dump(int fd) {
 
     ssize_t total = 0;
 
-    if (total_appended < RING_LOG_SIZE) {
-        // Not yet wrapped: ring[0 .. total_appended] is everything ever written.
-        ssize_t n = write_all(fd, ring, total_appended);
+    // Snapshot the atomics once. Without the lock these can race a concurrent
+    // writer, but the dump is a best-effort crash snapshot and the values are
+    // internally consistent enough (a torn tail beats no log).
+    size_t appended = atomic_load_explicit(&total_appended, memory_order_relaxed);
+    size_t h = atomic_load_explicit(&head, memory_order_relaxed);
+
+    if (appended < RING_LOG_SIZE) {
+        // Not yet wrapped: ring[0 .. appended] is everything ever written.
+        ssize_t n = write_all(fd, ring, appended);
         if (n < 0) {
             if (locked) spin_unlock();
             return -1;
         }
         total += n;
     } else {
-        // Wrapped: oldest byte is at `head`, newest is just before `head`.
-        // Write [head .. end), then [0 .. head).
-        ssize_t n1 = write_all(fd, ring + head, RING_LOG_SIZE - head);
+        // Wrapped: oldest byte is at `h`, newest is just before `h`.
+        // Write [h .. end), then [0 .. h).
+        ssize_t n1 = write_all(fd, ring + h, RING_LOG_SIZE - h);
         if (n1 < 0) {
             if (locked) spin_unlock();
             return -1;
         }
         total += n1;
 
-        if (head > 0) {
-            ssize_t n2 = write_all(fd, ring, head);
+        if (h > 0) {
+            ssize_t n2 = write_all(fd, ring, h);
             if (n2 < 0) {
                 if (locked) spin_unlock();
                 return -1;
@@ -121,5 +138,5 @@ ssize_t RingLog_dump(int fd) {
 }
 
 size_t RingLog_totalAppended(void) {
-    return total_appended;
+    return atomic_load_explicit(&total_appended, memory_order_relaxed);
 }

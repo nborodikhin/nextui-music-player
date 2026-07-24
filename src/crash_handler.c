@@ -48,6 +48,7 @@
 
 #include "defines.h"     // SHARED_USERDATA_PATH — must come before api.h
 #include "api.h"         // LOG_*
+#include "log_trace.h"   // LogTrace_uptimeMs / LogTrace_setCaptureEnabled (after api.h)
 #include "background.h"
 #include "fb_capture.h"
 #include "player.h"
@@ -80,10 +81,6 @@ static atomic_int handler_installed = 0;
 // with a strnlen cap, the same trade-off documented for audio_track below.
 static char last_input_button[24] = "";
 static _Atomic uint32_t last_input_ms = 0;
-
-// App-start tick captured at init so meta.txt can report uptime in ms.
-// CLOCK_MONOTONIC ms (not SDL) so the handler stays async-signal-safe.
-static uint32_t app_start_ms = 0;
 
 // Async-signal-safe millisecond clock — replaces SDL_GetTicks() in the handler.
 static uint32_t monotonic_ms(void) {
@@ -172,7 +169,8 @@ static void build_bundle_dir(void) {
 // "Collect crash reports" opt-in as the rest of the bundle.
 static size_t format_meta(int signo) {
     uint32_t now = monotonic_ms();
-    uint32_t uptime = now - app_start_ms;
+    // uptime shares LogTrace's epoch so it agrees with log.txt's timestamps.
+    uint32_t uptime = LogTrace_uptimeMs();
     uint32_t hb = (uint32_t)Watchdog_lastHeartbeatMs();
     uint32_t hb_age = (hb == 0) ? 0 : (now - hb);
 
@@ -272,6 +270,16 @@ static void write_bundle(int signo) {
         return;
     }
 
+    // Dead-man's switch. The bundle writes up to ~3 MB to the SD card on a
+    // blocking fd, and the very hang the watchdog just caught may BE a wedged SD
+    // card (a flaky card stalls the VFS layer). Without this, the handler would
+    // block in write() with fatal signals masked and never reach _exit(1) — the
+    // device appears bricked until the user holds power. SIGALRM keeps its
+    // default disposition (terminate), so if we don't finish within the budget
+    // the process dies without a bundle instead of hanging forever. Disarmed at
+    // the end so the returning SIGUSR1 path doesn't get killed later.
+    alarm(10);
+
     mkdir_p(PARENT_DIR);
     mkdir(BUNDLE_ROOT, 0755);
     build_bundle_dir();
@@ -307,6 +315,8 @@ static void write_bundle(int signo) {
         close(meta_fd);
     }
 
+    alarm(0);   // completed in time — disarm the dead-man's switch
+
     // Only matters for the SIGUSR1 path, which returns and may dump again.
     // The fatal path _exit(1)s before this is ever observed.
     atomic_store_explicit(&bundle_in_progress, 0, memory_order_release);
@@ -335,6 +345,9 @@ static void diagnostic_handler(int signo) {
 
 void CrashHandler_setCollectionEnabled(bool enabled) {
     atomic_store_explicit(&collection_enabled, enabled ? 1 : 0, memory_order_relaxed);
+    // Ring capture keys off the same setting: when collection is off the ring
+    // can never be dumped, so there is no reason to pay for populating it.
+    LogTrace_setCaptureEnabled(enabled);
 }
 
 // True if `name` is a non-dotfile entry under BUNDLE_ROOT that stats as a
@@ -528,8 +541,6 @@ void CrashHandler_init(const char* version) {
         strncpy(app_version, version, sizeof(app_version) - 1);
         app_version[sizeof(app_version) - 1] = '\0';
     }
-
-    app_start_ms = monotonic_ms();
 
     // Pre-read framebuffer dimensions and pre-build the BMP header so the
     // signal handler does not have to do any heavyweight work.

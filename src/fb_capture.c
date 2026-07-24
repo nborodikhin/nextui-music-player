@@ -7,9 +7,11 @@
 #include "fb_capture.h"
 
 #include <fcntl.h>
+#include <linux/fb.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #define BMP_HEADER_SIZE       122u   // 14 + 108
@@ -22,7 +24,9 @@
 
 static int fb_width = 0;
 static int fb_height = 0;
-static size_t fb_stride = 0;
+static int fb_bpp = 0;         // actual panel bits-per-pixel, for meta.txt
+static size_t fb_stride = 0;   // bytes per physical row (fb line_length, may be padded)
+static size_t fb_row_bytes = 0;// visible bytes per row written to the BMP (w * 4)
 static int initialized = 0;
 
 static uint8_t bmp_header[BMP_HEADER_SIZE];
@@ -86,23 +90,45 @@ static void build_header(int w, int h) {
 bool FbCapture_init(void) {
     if (initialized) return true;
 
-    int w = 0, h = 0;
-    FILE* f = fopen("/sys/class/graphics/fb0/modes", "r");
-    if (f) {
-        char line[64] = {0};
-        if (fgets(line, sizeof(line), f)) {
-            // Expected format: "U:1024x768p-60" or similar
-            sscanf(line, "%*[^:]:%dx%d", &w, &h);
-        }
-        fclose(f);
+    // Query the framebuffer authoritatively via ioctls rather than parsing
+    // /sys/.../modes and assuming stride == w*4. FBIOGET_VSCREENINFO gives the
+    // real geometry and bit depth; FBIOGET_FSCREENINFO gives line_length, which
+    // may be padded beyond w*4 for alignment (a wrong assumption would shear the
+    // screenshot diagonally). Runs at init, so ioctl's signal-unsafety is moot.
+    int fd = open("/dev/fb0", O_RDONLY);
+    if (fd < 0) return false;
+
+    struct fb_var_screeninfo vinfo;
+    struct fb_fix_screeninfo finfo;
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) != 0 ||
+        ioctl(fd, FBIOGET_FSCREENINFO, &finfo) != 0) {
+        close(fd);
+        return false;
     }
+    close(fd);
+
+    int w = (int)vinfo.xres;
+    int h = (int)vinfo.yres;
+    fb_bpp = (int)vinfo.bits_per_pixel;   // recorded even if we can't capture
+
     if (w <= 0 || h <= 0 || w > MAX_WIDTH || h > MAX_HEIGHT) {
         return false;
+    }
+    // The BMP writer emits 32-bit BGRA. On a non-32bpp panel (e.g. RGB565) the
+    // bytes would be misinterpreted, so skip capture rather than write garbage.
+    // fb_bpp is still populated above so meta.txt can report the real depth.
+    if (vinfo.bits_per_pixel != BMP_BPP) {
+        return false;
+    }
+
+    fb_row_bytes = (size_t)w * BMP_BYTES_PER_PIXEL;
+    fb_stride    = finfo.line_length ? (size_t)finfo.line_length : fb_row_bytes;
+    if (fb_stride < fb_row_bytes) {
+        return false;   // implausible; refuse rather than read past each row
     }
 
     fb_width  = w;
     fb_height = h;
-    fb_stride = (size_t)w * BMP_BYTES_PER_PIXEL;
     build_header(w, h);
     initialized = 1;
     return true;
@@ -150,7 +176,7 @@ static void write_all(int fd, const void* buf, size_t len) {
 
 int  FbCapture_width(void)     { return fb_width; }
 int  FbCapture_height(void)    { return fb_height; }
-int  FbCapture_bpp(void)       { return initialized ? (int)BMP_BPP : 0; }
+int  FbCapture_bpp(void)       { return fb_bpp; }   // real panel depth, from FBIOGET_VSCREENINFO
 bool FbCapture_isAvailable(void) { return initialized != 0; }
 
 ssize_t FbCapture_writeBmp(int fd) {
@@ -173,18 +199,25 @@ ssize_t FbCapture_writeBmp(int fd) {
     // Header first.
     write_all(fd, bmp_header, BMP_HEADER_SIZE);
 
-    // Stream scanlines.
+    // Stream scanlines. Only the visible fb_row_bytes (w*4) go into the BMP; any
+    // per-row stride padding (fb_stride - fb_row_bytes) is skipped, so a padded
+    // line_length no longer shears the image.
+    size_t pad = fb_stride - fb_row_bytes;
     int rows = 0;
     for (int y = 0; y < fb_height; ++y) {
-        ssize_t got = read(fb_fd, scanline, fb_stride);
+        ssize_t got = read(fb_fd, scanline, fb_row_bytes);
         if (got <= 0) break;
-        if ((size_t)got < fb_stride) {
+        if ((size_t)got < fb_row_bytes) {
             // Short read: pad the remainder with zeros so the file size matches
             // the header. The pad buffer lives in BSS so it's already zero.
-            memset(scanline + got, 0, fb_stride - (size_t)got);
+            memset(scanline + got, 0, fb_row_bytes - (size_t)got);
         }
-        write_all(fd, scanline, fb_stride);
+        write_all(fd, scanline, fb_row_bytes);
         rows++;
+        if (pad > 0 && y + 1 < fb_height) {
+            // Advance past the row padding to the start of the next row.
+            if (lseek(fb_fd, (off_t)pad, SEEK_CUR) == (off_t)-1) break;
+        }
     }
 
     close(fb_fd);
@@ -195,5 +228,5 @@ ssize_t FbCapture_writeBmp(int fd) {
     // forever. Signal "no usable image" so the caller discards the file instead.
     if (rows < fb_height) return 0;
 
-    return (ssize_t)BMP_HEADER_SIZE + (ssize_t)rows * (ssize_t)fb_stride;
+    return (ssize_t)BMP_HEADER_SIZE + (ssize_t)rows * (ssize_t)fb_row_bytes;
 }

@@ -44,6 +44,13 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
     int dirty = 1;
     int show_setting = 0;
 
+    // Scan the SD card for crash bundles ONCE per settings entry, not per frame.
+    // CrashHandler_hasAnyBundle() is an opendir + per-entry stat; the settings
+    // loop runs ~60x/s and both the input loop and render need the answer, so a
+    // per-call scan was ~120 filesystem sweeps a second on slow storage. The set
+    // can only shrink from here (via Delete Crash Reports), which we track below.
+    bool has_crash_bundles = CrashHandler_hasAnyBundle();
+
     while (1) {
         GFX_startFrame();
         PAD_poll();
@@ -62,11 +69,12 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
             continue;
         }
 
-        // Rebuild visible-item list each frame so it tracks runtime state
-        // (e.g. Delete Crash Reports row appears the moment a bundle exists
-        // and disappears the moment the user confirms a wipe).
+        // Rebuild visible-item list each frame from the cached bundle flag so it
+        // tracks runtime state (the Delete Crash Reports row disappears the
+        // moment the user confirms a wipe) without per-frame SD I/O.
         int visible_items[SETTINGS_VISIBLE_MAX];
-        int visible_count = settings_build_visible_items(visible_items, SETTINGS_VISIBLE_MAX);
+        int visible_count = settings_build_visible_items(visible_items, SETTINGS_VISIBLE_MAX,
+                                                         has_crash_bundles);
         if (menu_selected >= visible_count) menu_selected = visible_count - 1;
         if (menu_selected < 0) menu_selected = 0;
         int selected_id = visible_items[menu_selected];
@@ -207,6 +215,7 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                 if (PAD_justPressed(BTN_A)) {
                     LOG_trace("dialog exit: delete_crash_confirm action=delete");
                     CrashHandler_deleteAllBundles();
+                    has_crash_bundles = false;   // row goes away without a rescan
                     state = SETTINGS_STATE_MENU;
                     dirty = 1;
                 }
@@ -304,14 +313,14 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
         if (dirty) {
             switch (state) {
                 case SETTINGS_STATE_MENU:
-                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll);
+                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll, has_crash_bundles);
                     break;
                 case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
-                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll);
+                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll, has_crash_bundles);
                     render_confirmation_dialog(screen, NULL, "Clear album art cache?");
                     break;
                 case SETTINGS_STATE_DELETE_CRASH_CONFIRM:
-                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll);
+                    render_settings_menu(screen, show_setting, menu_selected, menu_scroll, has_crash_bundles);
                     render_confirmation_dialog(screen, delete_crash_path_buf,
                                                "Delete crash reports?");
                     break;

@@ -2,5 +2,16 @@
 #define __API_H__
 // Host-test stub. The real api.h includes sdl.h/platform.h/scaler.h/config.h,
 // none of which exist (or are wanted) on the host. watchdog.c only needs
-// LOG_trace, which the stub log_trace.h provides, so this can stay empty.
+// LOG_trace, provided by the genuine src/log_trace.h.
+//
+// The real api.h defines the LOG_* family before log_trace.h is included, and
+// log_trace.h now enforces that order with an #error on LOG_info. Mirror just
+// enough of that contract here — no-op level macros — so the guard is satisfied
+// when the real log_trace.h is compiled against this stub.
+#define LOG_note(level, ...) ((void)0)
+#define LOG_debug(...)       ((void)0)
+#define LOG_info(...)        ((void)0)
+#define LOG_warn(...)        ((void)0)
+#define LOG_error(...)       ((void)0)
+
 #endif

@@ -10,9 +10,32 @@
 //
 // Music-player files only — never include from NextUI translation units.
 
-// Initialize subsystem (records app-start time used in log timestamps).
-// Call once after RingLog_init() and SDL_GetTicks() is usable.
+// Enforce the include order. LOG_debug/info/warn/error are defined by api.h; if
+// this header is included first, api.h's own LOG_note wins and that file's LOG_*
+// silently bypass the ring — a per-file, invisible failure that has bitten this
+// codebase before (12 engine/network files once missed the include). A compile
+// error is cheaper than another silent gap.
+#ifndef LOG_info
+#error "include api.h before log_trace.h (LOG_* must be defined first)"
+#endif
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// Initialize subsystem (records the monotonic app-start epoch used in log
+// timestamps). Call once, right after RingLog_init().
 void LogTrace_init(void);
+
+// Milliseconds since LogTrace_init(), on CLOCK_MONOTONIC. Async-signal-safe.
+// The crash handler reports meta.txt's uptime_ms from this so it agrees with
+// the [mm:ss.mmm] stamps in log.txt.
+uint32_t LogTrace_uptimeMs(void);
+
+// Enable/disable ring capture. When disabled, LOG_* still reach NextUI's sink
+// but nothing is appended to the ring (it could never be dumped anyway). Wired
+// to the "Collect crash reports" setting; defaults to enabled so early-startup
+// logs are kept until the setting is seeded.
+void LogTrace_setCaptureEnabled(bool enabled);
 
 // Internal: emit a wrapped LOG_note. Forwards to NextUI's original LOG_note
 // (preserving its destination) AND appends a timestamped line to the ring.

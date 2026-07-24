@@ -7,14 +7,17 @@
 // Framebuffer-to-BMP capture used by the crash handler.
 // See spec/crash-reporting.md.
 //
-// Init reads /sys/class/graphics/fb0/modes to size the BMP header and
-// scanline buffer, then pre-builds the 122-byte BITMAPV4HEADER. At crash
-// time, FbCapture_writeBmp() opens /dev/fb0, re-reads the pan offset,
-// writes the pre-built header, then streams scanlines into fd.
+// Init queries /dev/fb0 via FBIOGET_VSCREENINFO / FBIOGET_FSCREENINFO for the
+// real geometry, bit depth, and line_length, then pre-builds the 122-byte
+// BITMAPV4HEADER. At crash time, FbCapture_writeBmp() opens /dev/fb0, re-reads
+// the pan offset from /sys/class/graphics/fb0/pan, writes the pre-built header,
+// then streams scanlines into fd (skipping any stride padding).
 
-// Initialize: read framebuffer dimensions, allocate static scratch, build
-// the BMP header. Idempotent. Returns true on success.
-// On false, FbCapture_writeBmp is a no-op.
+// Initialize: query framebuffer geometry/depth/stride via ioctl, build the BMP
+// header. Idempotent. Returns true only when capture is possible — false if
+// /dev/fb0 or the ioctls fail, the dimensions are out of range, or the panel is
+// not 32bpp (the BMP writer emits BGRA32). On false, FbCapture_writeBmp is a
+// no-op, but FbCapture_bpp()/width()/height() may still report what was read.
 bool FbCapture_init(void);
 
 // Write the currently visible page of /dev/fb0 to fd as a top-down 32-bit
@@ -30,7 +33,10 @@ ssize_t FbCapture_writeBmp(int fd);
 // screen.bmp entirely when capture is unavailable.
 bool FbCapture_isAvailable(void);
 
-// Framebuffer dimensions read at init. 0 if FbCapture_init() has not succeeded.
+// Framebuffer geometry and depth read at init (via ioctl). width/height are 0
+// until the ioctls succeed. FbCapture_bpp() reports the panel's real
+// bits_per_pixel — which may be non-32 even when capture is unavailable — so
+// meta.txt can record it; it is 0 only if the query never ran.
 int FbCapture_width(void);
 int FbCapture_height(void);
 int FbCapture_bpp(void);

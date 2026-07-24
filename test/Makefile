@@ -17,7 +17,7 @@ LDLIBS   = -lpthread
 SRC      = ../src
 BIN      = bin
 
-TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog $(BIN)/test_utc_time
+TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog $(BIN)/test_utc_time $(BIN)/test_log_trace
 
 .PHONY: all run clean
 all: run
@@ -36,6 +36,11 @@ $(BIN)/test_watchdog: test_watchdog.c $(SRC)/watchdog.c $(SRC)/watchdog.h test.h
 
 $(BIN)/test_utc_time: test_utc_time.c $(SRC)/utc_time.c $(SRC)/utc_time.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utc_time.c $(SRC)/utc_time.c $(LDLIBS)
+
+# log_trace.c compiles against the stub api.h (LOG_note is a no-op there) plus
+# the real ring_log.c. SDL is no longer on the log path, so no SDL stub needed.
+$(BIN)/test_log_trace: test_log_trace.c $(SRC)/log_trace.c $(SRC)/ring_log.c $(SRC)/log_trace.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_log_trace.c $(SRC)/log_trace.c $(SRC)/ring_log.c $(LDLIBS)
 
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \
