@@ -11,7 +11,6 @@
 #include "background.h"
 #include "crash_handler.h"
 #include "settings.h"
-#include "watchdog.h"
 #include "log_trace.h"
 
 // Toast message state
@@ -60,10 +59,7 @@ int MenuModule_run(SDL_Surface* screen) {
         crash_bundle_path, sizeof(crash_bundle_path));
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle background player updates (track advancement, resume saving)
         Background_tick();

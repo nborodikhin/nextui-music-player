@@ -400,6 +400,13 @@ void ModuleCommon_traceButtons(void) {
     }
 }
 
+void ModuleCommon_frameBegin(void) {
+    GFX_startFrame();
+    PAD_poll();
+    Watchdog_heartbeat();
+    ModuleCommon_traceButtons();
+}
+
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     if (hid_event != USB_HID_EVENT_VOLUME_UP && hid_event != USB_HID_EVENT_VOLUME_DOWN) {
         return false;

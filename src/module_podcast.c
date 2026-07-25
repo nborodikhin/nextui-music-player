@@ -16,7 +16,6 @@
 #include "ui_utils.h"
 #include "wifi.h"
 #include "background.h"
-#include "watchdog.h"
 #include "log_trace.h"
 
 // Internal states
@@ -131,10 +130,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     }
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle confirmation dialog
         if (show_confirm) {

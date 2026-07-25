@@ -81,4 +81,15 @@ void ModuleCommon_handleHardwareVolume(void);
 // crash-report ring log to capture user input leading up to a stall/crash.
 void ModuleCommon_traceButtons(void);
 
+// Begin one module-loop iteration: start the frame timer, poll input, then run
+// the per-frame crash-report instrumentation (watchdog heartbeat + button
+// trace). MUST be the first statement of every module's loop body.
+//
+// The heartbeat is a liveness contract, not an optimization: the watchdog
+// aborts the app (producing a hang bundle) if the main loop stops calling it.
+// Bundling it with PAD_poll() is deliberate — a module that forgets frameBegin()
+// also loses all input, which is immediately obvious, whereas a forgotten bare
+// heartbeat is invisible until the watchdog fires a spurious hang report.
+void ModuleCommon_frameBegin(void);
+
 #endif

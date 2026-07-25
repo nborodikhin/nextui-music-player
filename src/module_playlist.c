@@ -14,7 +14,6 @@
 #include "ui_playlist.h"
 #include "ui_main.h"
 #include "ui_utils.h"
-#include "watchdog.h"
 #include "log_trace.h"
 
 // Internal states
@@ -75,10 +74,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle confirmation dialog
         if (show_confirm) {

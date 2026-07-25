@@ -11,7 +11,6 @@
 #include "ui_system.h"
 #include "wifi.h"
 #include "album_art.h"
-#include "watchdog.h"
 #include "log_trace.h"
 #include "crash_handler.h"
 
@@ -52,10 +51,7 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
     bool has_crash_bundles = CrashHandler_hasAnyBundle();
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle global input first
         int app_state = (state == SETTINGS_STATE_MENU) ? SETTINGS_INTERNAL_MENU : SETTINGS_INTERNAL_ABOUT;

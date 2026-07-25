@@ -66,7 +66,6 @@ int main(int argc, char* argv[]) {
     RingLog_init();
     LogTrace_init();
     LOG_info("Music Player starting; ring log initialized\n");
-    LOG_trace("smoke: LOG_trace alive\n");
 
     // Show splash screen immediately while heavy subsystems initialize
     {

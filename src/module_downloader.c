@@ -12,7 +12,6 @@
 #include "ui_downloader.h"
 #include "ui_utils.h"
 #include "wifi.h"
-#include "watchdog.h"
 #include "log_trace.h"
 
 // Menu count
@@ -75,10 +74,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     }
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle global input
         int app_state_for_help;

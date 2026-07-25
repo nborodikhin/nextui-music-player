@@ -10,7 +10,6 @@
 #include "module_downloader.h"
 #include "ui_utils.h"
 #include "ui_fonts.h"
-#include "watchdog.h"
 #include "log_trace.h"
 
 // Library submenu items
@@ -54,10 +53,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
-        Watchdog_heartbeat();
-        ModuleCommon_traceButtons();
+        ModuleCommon_frameBegin();
 
         // Handle global input
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, LIBRARY_MENU_HELP_STATE);
