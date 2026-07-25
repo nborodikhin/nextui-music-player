@@ -17,7 +17,15 @@ LDLIBS   = -lpthread
 SRC      = ../src
 BIN      = bin
 
-TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog $(BIN)/test_utc_time $(BIN)/test_log_trace
+TESTS    = $(BIN)/test_ring_log $(BIN)/test_watchdog $(BIN)/test_utc_time $(BIN)/test_log_trace \
+           $(BIN)/test_crash_meta $(BIN)/test_crash_handler
+
+# crash_handler.c is the one TU under test that genuinely needs SDL headers (for
+# the BMP->PNG conversion, which is off the crash path). Everything else it
+# pulls in — player/background/fb_capture/settings/watchdog — is satisfied by
+# link-time stubs inside test_crash_handler.c.
+SDL_CFLAGS := $(shell pkg-config --cflags sdl2 SDL2_image 2>/dev/null)
+SDL_LIBS   := $(shell pkg-config --libs sdl2 SDL2_image 2>/dev/null)
 
 .PHONY: all run clean
 all: run
@@ -41,6 +49,20 @@ $(BIN)/test_utc_time: test_utc_time.c $(SRC)/utc_time.c $(SRC)/utc_time.h test.h
 # the real ring_log.c. SDL is no longer on the log path, so no SDL stub needed.
 $(BIN)/test_log_trace: test_log_trace.c $(SRC)/log_trace.c $(SRC)/ring_log.c $(SRC)/log_trace.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_log_trace.c $(SRC)/log_trace.c $(SRC)/ring_log.c $(LDLIBS)
+
+# crash_meta.c is dependency-free by design (stdio + signal.h only), so it needs
+# no stubs — that is exactly why format_meta() was split in two.
+$(BIN)/test_crash_meta: test_crash_meta.c $(SRC)/crash_meta.c $(SRC)/crash_meta.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_crash_meta.c $(SRC)/crash_meta.c $(LDLIBS)
+
+# End-to-end bundle writer test. Forks a child that raises a real SIGSEGV, so it
+# needs the genuine ring_log/log_trace/utc_time/crash_meta alongside crash_handler.
+$(BIN)/test_crash_handler: test_crash_handler.c $(SRC)/crash_handler.c $(SRC)/ring_log.c \
+                           $(SRC)/log_trace.c $(SRC)/utc_time.c $(SRC)/crash_meta.c \
+                           $(SRC)/crash_handler.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) $(SDL_CFLAGS) -o $@ test_crash_handler.c \
+	    $(SRC)/crash_handler.c $(SRC)/ring_log.c $(SRC)/log_trace.c \
+	    $(SRC)/utc_time.c $(SRC)/crash_meta.c $(LDLIBS) $(SDL_LIBS)
 
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \

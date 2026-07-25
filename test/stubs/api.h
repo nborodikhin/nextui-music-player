@@ -14,4 +14,11 @@
 #define LOG_warn(...)        ((void)0)
 #define LOG_error(...)       ((void)0)
 
+// crash_handler.c is compiled with -DPLATFORM=... in the real build; mirror a
+// default so the host test doesn't have to special-case meta.txt's platform
+// line. test_crash_handler.c asserts against this exact value.
+#ifndef PLATFORM
+#define PLATFORM "hosttest"
+#endif
+
 #endif

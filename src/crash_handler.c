@@ -50,6 +50,7 @@
 #include "api.h"         // LOG_*
 #include "log_trace.h"   // LogTrace_uptimeMs / LogTrace_setCaptureEnabled (after api.h)
 #include "background.h"
+#include "crash_meta.h"
 #include "fb_capture.h"
 #include "player.h"
 #include "ring_log.h"
@@ -57,8 +58,24 @@
 #include "utc_time.h"
 #include "watchdog.h"
 
-#define BUNDLE_ROOT      SHARED_USERDATA_PATH "/music-player/crash-reports"
-#define PARENT_DIR       SHARED_USERDATA_PATH "/music-player"
+#define BUNDLE_ROOT_DEFAULT  SHARED_USERDATA_PATH "/music-player/crash-reports"
+
+// Root directory holding every crash bundle. A mutable file-static rather than a
+// macro so host tests can retarget it at a temp dir (see
+// CrashHandler_setBundleRootForTesting) — that is the only supported override.
+//
+// Read from the signal handler, so it must never be written once handlers are
+// installed; the setter enforces that. Sized so bundle_dir[256] can always hold
+// "<bundle_root>/yyyy-mm-dd_HH-MM-SS" without truncation.
+#define BUNDLE_ROOT_MAX 160
+static char bundle_root[BUNDLE_ROOT_MAX] = BUNDLE_ROOT_DEFAULT;
+
+// "<bundle_root>/<dirent name>" — bundle_root is a runtime value now, so the
+// path buffers are sized against its declared maximum plus NAME_MAX rather than
+// against the (much shorter) compile-time default.
+#define BUNDLE_PATH_MAX (BUNDLE_ROOT_MAX + 1 + 255 + 1)
+// The same, plus room for a "/screen.bmp"-sized leaf.
+#define BUNDLE_FILE_MAX (BUNDLE_PATH_MAX + 32)
 
 // App version recorded in meta.txt. Captured at CrashHandler_init() from the
 // value SelfUpdate already read out of state/app_version.txt. "unknown" until
@@ -66,7 +83,7 @@
 static char app_version[32] = "unknown";
 
 // Pre-allocated buffers — all writable from the handler, never freed.
-static char bundle_dir[256];     // BUNDLE_ROOT "/yyyy-mm-dd_HH-MM-SS"
+static char bundle_dir[256];     // bundle_root "/yyyy-mm-dd_HH-MM-SS"
 static char log_path[320];       // bundle_dir "/log.txt"
 static char meta_path[320];      // bundle_dir "/meta.txt"
 static char screen_path[320];    // bundle_dir "/screen.bmp"
@@ -89,24 +106,27 @@ static uint32_t monotonic_ms(void) {
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
+bool CrashHandler_setBundleRootForTesting(const char* path) {
+    // Refuse once handlers are live: bundle_root is read from the signal
+    // handler, and a concurrent write would be a data race in exactly the
+    // context that cannot tolerate one.
+    if (atomic_load_explicit(&handler_installed, memory_order_acquire)) return false;
+    if (!path || !path[0]) return false;
+
+    size_t n = strnlen(path, sizeof(bundle_root));
+    if (n >= sizeof(bundle_root)) return false;   // would truncate — reject loudly
+
+    memcpy(bundle_root, path, n);
+    bundle_root[n] = '\0';
+    return true;
+}
+
 void CrashHandler_noteInput(const char* label) {
     if (!label || !label[0]) return;
     size_t n = strnlen(label, sizeof(last_input_button) - 1);
     memcpy(last_input_button, label, n);
     last_input_button[n] = '\0';
     atomic_store_explicit(&last_input_ms, monotonic_ms(), memory_order_relaxed);
-}
-
-static const char* signal_name(int signo) {
-    switch (signo) {
-        case SIGSEGV: return "SIGSEGV";
-        case SIGABRT: return "SIGABRT";
-        case SIGBUS:  return "SIGBUS";
-        case SIGFPE:  return "SIGFPE";
-        case SIGILL:  return "SIGILL";
-        case SIGUSR1: return "SIGUSR1";
-        default:      return "SIGNAL";
-    }
 }
 
 static const char* player_state_name(PlayerState s) {
@@ -130,8 +150,12 @@ static const char* background_name(BackgroundPlayerType t) {
 
 // Recursively mkdir each path component. mkdir() is async-signal-safe.
 // We tolerate EEXIST since the chain may partially exist already.
+//
+// Sized to BUNDLE_ROOT_MAX because bundle_root is the only thing ever passed
+// here — keeping the strnlen bound at or below the source size is what stops
+// -Wstringop-overread from firing.
 static void mkdir_p(const char* path) {
-    char tmp[320];
+    char tmp[BUNDLE_ROOT_MAX];
     size_t len = strnlen(path, sizeof(tmp) - 1);
     memcpy(tmp, path, len);
     tmp[len] = '\0';
@@ -146,7 +170,7 @@ static void mkdir_p(const char* path) {
     mkdir(tmp, 0755);
 }
 
-// Build "<BUNDLE_ROOT>/yyyy-mm-dd_HH-MM-SS" into bundle_dir, in UTC.
+// Build "<bundle_root>/yyyy-mm-dd_HH-MM-SS" into bundle_dir, in UTC.
 //
 // UTC rather than local time on purpose: it keeps the handler allocation-free
 // (see the file header), and the names stay ISO-sortable, which is what
@@ -157,11 +181,16 @@ static void build_bundle_dir(void) {
     UtcTime_fromUnix((int64_t)time(NULL), &t);
 
     snprintf(bundle_dir, sizeof(bundle_dir),
-             BUNDLE_ROOT "/%04d-%02d-%02d_%02d-%02d-%02d",
-             t.year, t.mon, t.day, t.hour, t.min, t.sec);
+             "%s/%04d-%02d-%02d_%02d-%02d-%02d",
+             bundle_root, t.year, t.mon, t.day, t.hour, t.min, t.sec);
 }
 
-// Format meta.txt into meta_buf. Returns the length (excluding trailing NUL).
+// Gather the live subsystem state into a CrashMeta and format it into meta_buf.
+// Returns the length (excluding trailing NUL).
+//
+// This is the *gathering* half only — the exact bytes are produced by the pure
+// CrashMeta_format() in crash_meta.c, which is host-testable. Keep it that way:
+// no formatting decisions belong here.
 //
 // Audio fields are best-effort racy snapshots — the player getters are simple
 // reads with no mutex, so a torn read is possible but won't deadlock or crash.
@@ -169,15 +198,8 @@ static void build_bundle_dir(void) {
 // "Collect crash reports" opt-in as the rest of the bundle.
 static size_t format_meta(int signo) {
     uint32_t now = monotonic_ms();
-    // uptime shares LogTrace's epoch so it agrees with log.txt's timestamps.
-    uint32_t uptime = LogTrace_uptimeMs();
     uint32_t hb = (uint32_t)Watchdog_lastHeartbeatMs();
-    uint32_t hb_age = (hb == 0) ? 0 : (now - hb);
-
-    PlayerState ps = Player_getState();
-    BackgroundPlayerType bg = Background_getActive();
-    int pos_ms = Player_getPosition();
-    int dur_ms = Player_getDuration();
+    uint32_t last_in = atomic_load_explicit(&last_input_ms, memory_order_relaxed);
 
     // Snapshot the track path into a local fixed buffer before printing it.
     // The source is a fixed-size, always-NUL-terminated struct field
@@ -200,44 +222,29 @@ static size_t format_meta(int signo) {
     size_t blen = strnlen(last_input_button, sizeof(btn_buf) - 1);
     memcpy(btn_buf, last_input_button, blen);
     btn_buf[blen] = '\0';
-    uint32_t last_in = atomic_load_explicit(&last_input_ms, memory_order_relaxed);
-    uint32_t input_age = (last_in == 0) ? 0 : (now - last_in);
 
-    int n = snprintf(meta_buf, sizeof(meta_buf),
-        "version: %s\n"
-        "platform: " PLATFORM "\n"
-        "signal: %s (%d)\n"
-        "uptime_ms: %u\n"
-        "last_input_button: %s\n"
-        "last_input_age_ms: %u\n"
-        "heartbeat_age_ms: %u\n"
-        "ring_total_bytes: %zu\n"
-        "screen_width: %d\n"
-        "screen_height: %d\n"
-        "screen_bpp: %d\n"
-        "audio_state: %s\n"
-        "audio_background: %s\n"
-        "audio_position_ms: %d\n"
-        "audio_duration_ms: %d\n"
-        "audio_track: %s\n",
-        app_version,
-        signal_name(signo), signo,
-        uptime,
-        btn_buf[0] ? btn_buf : "none",
-        input_age,
-        hb_age,
-        RingLog_totalAppended(),
-        FbCapture_width(),
-        FbCapture_height(),
-        FbCapture_bpp(),
-        player_state_name(ps),
-        background_name(bg),
-        pos_ms,
-        dur_ms,
-        track_buf
-    );
-    if (n < 0) return 0;
-    return (size_t)n < sizeof(meta_buf) ? (size_t)n : sizeof(meta_buf) - 1;
+    CrashMeta m = {
+        .version           = app_version,
+        .platform          = PLATFORM,
+        .signal_name       = CrashMeta_signalName(signo),
+        .signal_number     = signo,
+        // uptime shares LogTrace's epoch so it agrees with log.txt's timestamps.
+        .uptime_ms         = LogTrace_uptimeMs(),
+        .last_input_button = btn_buf,
+        .last_input_age_ms = (last_in == 0) ? 0 : (now - last_in),
+        .heartbeat_age_ms  = (hb == 0) ? 0 : (now - hb),
+        .ring_total_bytes  = RingLog_totalAppended(),
+        .screen_width      = FbCapture_width(),
+        .screen_height     = FbCapture_height(),
+        .screen_bpp        = FbCapture_bpp(),
+        .audio_state       = player_state_name(Player_getState()),
+        .audio_background  = background_name(Background_getActive()),
+        .audio_position_ms = Player_getPosition(),
+        .audio_duration_ms = Player_getDuration(),
+        .audio_track       = track_buf,
+    };
+
+    return CrashMeta_format(&m, meta_buf, sizeof(meta_buf));
 }
 
 // Write all of buf or as much as the kernel accepts in one go. Async-signal-safe.
@@ -280,8 +287,7 @@ static void write_bundle(int signo) {
     // the end so the returning SIGUSR1 path doesn't get killed later.
     alarm(10);
 
-    mkdir_p(PARENT_DIR);
-    mkdir(BUNDLE_ROOT, 0755);
+    mkdir_p(bundle_root);
     build_bundle_dir();
     mkdir(bundle_dir, 0755);
 
@@ -350,26 +356,26 @@ void CrashHandler_setCollectionEnabled(bool enabled) {
     LogTrace_setCaptureEnabled(enabled);
 }
 
-// True if `name` is a non-dotfile entry under BUNDLE_ROOT that stats as a
-// directory; on success fills `out` with "<BUNDLE_ROOT>/<name>".
+// True if `name` is a non-dotfile entry under bundle_root that stats as a
+// directory; on success fills `out` with "<bundle_root>/<name>".
 static bool bundle_dir_path(const char* name, char* out, size_t out_size) {
     if (name[0] == '.') return false;
-    snprintf(out, out_size, "%s/%s", BUNDLE_ROOT, name);
+    snprintf(out, out_size, "%s/%s", bundle_root, name);
     struct stat st;
     return stat(out, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 // True if the bundle named `name` has a skipped.txt marker inside it.
 static bool bundle_is_skipped(const char* name) {
-    char skip_path[320];
-    snprintf(skip_path, sizeof(skip_path), "%s/%s/skipped.txt", BUNDLE_ROOT, name);
+    char skip_path[BUNDLE_FILE_MAX];
+    snprintf(skip_path, sizeof(skip_path), "%s/%s/skipped.txt", bundle_root, name);
     return access(skip_path, F_OK) == 0;
 }
 
 bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
     if (!Settings_getCollectCrashReports()) return false;
 
-    DIR* dir = opendir(BUNDLE_ROOT);
+    DIR* dir = opendir(bundle_root);
     if (!dir) return false;
 
     // Track the newest *unskipped* bundle. Skipping the newest must not hide the
@@ -391,23 +397,23 @@ bool CrashHandler_findUnsentBundle(char* out_path, size_t out_size) {
     if (newest[0] == '\0') return false;
 
     if (out_path && out_size > 0) {
-        snprintf(out_path, out_size, "%s/%s", BUNDLE_ROOT, newest);
+        snprintf(out_path, out_size, "%s/%s", bundle_root, newest);
     }
     return true;
 }
 
 int CrashHandler_convertPendingScreenshots(void) {
-    DIR* dir = opendir(BUNDLE_ROOT);
+    DIR* dir = opendir(bundle_root);
     if (!dir) return -1;
 
     int converted = 0;
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
-        char bundle[320];
+        char bundle[BUNDLE_PATH_MAX];
         if (!bundle_dir_path(ent->d_name, bundle, sizeof(bundle))) continue;
 
-        char bmp[384];
-        char png[384];
+        char bmp[BUNDLE_FILE_MAX];
+        char png[BUNDLE_FILE_MAX];
         snprintf(bmp, sizeof(bmp), "%s/screen.bmp", bundle);
         snprintf(png, sizeof(png), "%s/screen.png", bundle);
 
@@ -451,13 +457,13 @@ int CrashHandler_convertPendingScreenshots(void) {
 }
 
 bool CrashHandler_hasAnyBundle(void) {
-    DIR* dir = opendir(BUNDLE_ROOT);
+    DIR* dir = opendir(bundle_root);
     if (!dir) return false;
 
     bool found = false;
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
-        char p[320];
+        char p[BUNDLE_PATH_MAX];
         if (bundle_dir_path(ent->d_name, p, sizeof(p))) {
             found = true;
             break;
@@ -479,7 +485,7 @@ static void delete_bundle_dir(const char* path) {
             (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0'))) {
             continue;
         }
-        char filepath[384];
+        char filepath[BUNDLE_FILE_MAX + 256];
         snprintf(filepath, sizeof(filepath), "%s/%s", path, ent->d_name);
         unlink(filepath);
     }
@@ -488,14 +494,14 @@ static void delete_bundle_dir(const char* path) {
 }
 
 int CrashHandler_deleteAllBundles(void) {
-    DIR* dir = opendir(BUNDLE_ROOT);
+    DIR* dir = opendir(bundle_root);
     if (!dir) return -1;
 
     struct dirent* ent;
     while ((ent = readdir(dir)) != NULL) {
         if (ent->d_name[0] == '.') continue;
-        char p[320];
-        snprintf(p, sizeof(p), "%s/%s", BUNDLE_ROOT, ent->d_name);
+        char p[BUNDLE_PATH_MAX];
+        snprintf(p, sizeof(p), "%s/%s", bundle_root, ent->d_name);
         struct stat st;
         if (stat(p, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
@@ -505,13 +511,13 @@ int CrashHandler_deleteAllBundles(void) {
         }
     }
     closedir(dir);
-    rmdir(BUNDLE_ROOT);
+    rmdir(bundle_root);
     return 0;
 }
 
 void CrashHandler_getBundleRootDisplayPath(char* out, size_t out_size) {
     if (!out || out_size == 0) return;
-    const char* full = BUNDLE_ROOT;
+    const char* full = bundle_root;
     const char* userdata = strstr(full, ".userdata/");
     const char* src = userdata ? userdata : full;
     size_t n = strnlen(src, out_size - 1);

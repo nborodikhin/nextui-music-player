@@ -17,6 +17,15 @@
 // "unknown". The string is copied, so the caller need not keep it alive.
 void CrashHandler_init(const char* app_version);
 
+// TEST ONLY — retarget the crash-bundle root directory (default:
+// <SHARED_USERDATA_PATH>/music-player/crash-reports) so host tests can write
+// bundles into a temp dir. Production code must never call this.
+//
+// Returns false, changing nothing, if CrashHandler_init() has already run
+// (bundle_root is read from the signal handler, so writing it afterwards would
+// be a data race), if `path` is empty/NULL, or if it would not fit.
+bool CrashHandler_setBundleRootForTesting(const char* path);
+
 // Record the most recent button press for meta.txt's last_input_button /
 // last_input_age_ms fields. Called from ModuleCommon_traceButtons() on every
 // press; `label` is copied (truncated to 23 chars). Cheap — a bounded memcpy
