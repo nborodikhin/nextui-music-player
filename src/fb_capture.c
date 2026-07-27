@@ -31,6 +31,12 @@ static int initialized = 0;
 
 static uint8_t bmp_header[BMP_HEADER_SIZE];
 
+// Desktop only: when non-NULL, scanlines come from this borrowed SDL software
+// surface instead of /dev/fb0. See FbCapture_useSurface() in the header for why
+// the host cannot use the fbdev path, and why reading this from the signal
+// handler is safe.
+static const uint8_t* surface_pixels = NULL;
+
 // Scanline scratch — one row, allocated by the loader at app start.
 static uint8_t scanline[MAX_WIDTH * BMP_BYTES_PER_PIXEL];
 
@@ -85,6 +91,25 @@ static void build_header(int w, int h) {
 
     put_u32(dib + 56, 0x73524742);                // CSType = 'sRGB' (LCS_sRGB)
     // Endpoints (36) + gamma R/G/B (12) left zero.
+}
+
+bool FbCapture_useSurface(const void* pixels, int width, int height, int pitch) {
+    if (!pixels) return false;
+    if (width <= 0 || height <= 0 || width > MAX_WIDTH || height > MAX_HEIGHT) return false;
+
+    size_t row_bytes = (size_t)width * BMP_BYTES_PER_PIXEL;
+    if (pitch < 0 || (size_t)pitch < row_bytes) return false;   // would read past each row
+
+    surface_pixels = (const uint8_t*)pixels;
+    fb_width     = width;
+    fb_height    = height;
+    fb_bpp       = (int)BMP_BPP;   // the surface is 32bpp by contract
+    fb_row_bytes = row_bytes;
+    fb_stride    = (size_t)pitch;
+
+    build_header(width, height);
+    initialized = 1;
+    return true;
 }
 
 bool FbCapture_init(void) {
@@ -181,6 +206,18 @@ bool FbCapture_isAvailable(void) { return initialized != 0; }
 
 ssize_t FbCapture_writeBmp(int fd) {
     if (!initialized) return 0;
+
+    // Desktop: stream straight out of the borrowed SDL surface. Just header +
+    // memory reads + write() — no open/lseek, and no SDL call, so this stays
+    // async-signal-safe. Rows are copied one at a time so a padded pitch is
+    // skipped exactly as the fbdev path skips line_length padding.
+    if (surface_pixels) {
+        write_all(fd, bmp_header, BMP_HEADER_SIZE);
+        for (int y = 0; y < fb_height; ++y) {
+            write_all(fd, surface_pixels + (size_t)y * fb_stride, fb_row_bytes);
+        }
+        return (ssize_t)BMP_HEADER_SIZE + (ssize_t)fb_height * (ssize_t)fb_row_bytes;
+    }
 
     int pan_y = read_pan_y();
 

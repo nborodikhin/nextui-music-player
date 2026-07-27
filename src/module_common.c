@@ -400,11 +400,105 @@ void ModuleCommon_traceButtons(void) {
     }
 }
 
+#ifdef CRASH_TEST_HOOKS
+#include <stdio.h>    // snprintf
+#include <stdlib.h>   // abort
+#include <unistd.h>   // access, unlink, sleep
+
+// Debug-only crash injection for verifying spec/crash-reporting.md end to end.
+// Compiled ONLY with -DCRASH_TEST_HOOKS; a shipping build has none of this.
+//
+// Triggered by creating a sentinel file:
+//
+//     touch /tmp/music-player-crash-<kind>          # desktop / host
+//     adb shell 'touch /tmp/music-player-crash-<kind>'   # device
+//
+// where <kind> is a name from crash_triggers[] below. A file rather than a
+// button chord so the crash paths can be driven from a script, identically on
+// the host desktop build and on the device — and so new kinds are one table row.
+//
+// Checked in frameBegin(), so it fires from any screen, including mid-playback
+// — the interesting case (audio thread live, real track in meta.txt, spectrum
+// in screen.bmp).
+#define CRASH_TRIGGER_PREFIX  "/tmp/music-player-crash-"
+
+// Watchdog threshold is 5 s (DEFAULT_THRESHOLD_MS in watchdog.c); overshoot it.
+#define CRASH_TEST_STALL_S    7
+
+// Sentinel checks are access() syscalls and the loop runs at ~60fps, so poll at
+// roughly 4 Hz instead of every frame. /tmp is tmpfs on device (no disk I/O),
+// but there is no reason for a test hook to cost anything in the hot path.
+#define CRASH_TEST_POLL_FRAMES 15
+
+typedef enum {
+    CRASH_KIND_SEGV,
+    CRASH_KIND_ABORT,
+    CRASH_KIND_WATCHDOG,
+} CrashTestKind;
+
+// Add new ways to crash here — the filename suffix is the table key.
+static const struct {
+    const char*   name;
+    CrashTestKind kind;
+} crash_triggers[] = {
+    { "segv",     CRASH_KIND_SEGV     },   // null write  -> SIGSEGV -> bundle, exits
+    { "abort",    CRASH_KIND_ABORT    },   // abort()     -> SIGABRT -> bundle, exits
+    { "watchdog", CRASH_KIND_WATCHDOG },   // main-loop stall -> watchdog -> SIGABRT
+};
+
+// A volatile file-static rather than a local NULL so the compiler cannot prove
+// the store is undefined and fold it into a trap instruction — we want a real
+// faulting store that the installed SIGSEGV handler sees.
+static volatile int* crash_test_null_ptr = NULL;
+
+static void crash_test_fire(CrashTestKind kind) {
+    switch (kind) {
+        case CRASH_KIND_SEGV:
+            LOG_error("CRASH TEST: forcing SIGSEGV via null write\n");
+            *crash_test_null_ptr = 1;
+            break;
+        case CRASH_KIND_ABORT:
+            LOG_error("CRASH TEST: forcing abort()\n");
+            abort();
+            break;
+        case CRASH_KIND_WATCHDOG:
+            // Blocking here is the point — it is what a real main-thread hang
+            // looks like, and the one case an external signal cannot reproduce.
+            LOG_error("CRASH TEST: stalling main loop %ds to trip the watchdog\n",
+                      CRASH_TEST_STALL_S);
+            sleep(CRASH_TEST_STALL_S);
+            break;
+    }
+}
+
+static void crash_test_hooks(void) {
+    static int frames = 0;
+    if (++frames < CRASH_TEST_POLL_FRAMES) return;
+    frames = 0;
+
+    for (size_t i = 0; i < sizeof(crash_triggers) / sizeof(crash_triggers[0]); i++) {
+        char path[128];
+        snprintf(path, sizeof(path), CRASH_TRIGGER_PREFIX "%s", crash_triggers[i].name);
+        if (access(path, F_OK) != 0) continue;
+
+        // Unlink BEFORE crashing. The sentinel outlives the process, so leaving
+        // it in place would re-trigger on the next launch and wedge the app in a
+        // crash loop that is awkward to break on a handheld.
+        unlink(path);
+        crash_test_fire(crash_triggers[i].kind);
+        return;   // only the watchdog kind returns; the others never get here
+    }
+}
+#endif
+
 void ModuleCommon_frameBegin(void) {
     GFX_startFrame();
     PAD_poll();
     Watchdog_heartbeat();
     ModuleCommon_traceButtons();
+#ifdef CRASH_TEST_HOOKS
+    crash_test_hooks();
+#endif
 }
 
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {

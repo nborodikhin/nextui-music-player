@@ -36,6 +36,7 @@
 #include "ring_log.h"
 #include "log_trace.h"   // Must come AFTER api.h — wraps LOG_note into the ring
 #include "crash_handler.h"
+#include "fb_capture.h"
 #include "watchdog.h"
 
 // Global quit flag
@@ -66,6 +67,25 @@ int main(int argc, char* argv[]) {
     RingLog_init();
     LogTrace_init();
     LOG_info("Music Player starting; ring log initialized\n");
+
+#ifdef PLATFORM_DESKTOP
+    // On a desktop host /dev/fb0 is either absent or reads back all-zero (the
+    // fbdev mapping is not the live scanout under a compositor), so point the
+    // capture at the SDL software framebuffer instead — otherwise the
+    // screenshot half of a crash bundle can't be exercised off-device.
+    //
+    // Guarded on the format because the BMP writer emits BGRA, which is exactly
+    // ARGB8888's little-endian byte order; anything else would be misread.
+    // Must run before CrashHandler_init(), which calls FbCapture_init().
+    if (screen && screen->format->format == SDL_PIXELFORMAT_ARGB8888) {
+        if (!FbCapture_useSurface(screen->pixels, screen->w, screen->h, screen->pitch)) {
+            LOG_warn("fb_capture: SDL surface rejected; screenshots disabled\n");
+        }
+    } else {
+        LOG_warn("fb_capture: unexpected screen format %s; screenshots disabled\n",
+                 screen ? SDL_GetPixelFormatName(screen->format->format) : "(null)");
+    }
+#endif
 
     // Show splash screen immediately while heavy subsystems initialize
     {

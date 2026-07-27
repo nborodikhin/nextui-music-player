@@ -20,6 +20,28 @@
 // no-op, but FbCapture_bpp()/width()/height() may still report what was read.
 bool FbCapture_init(void);
 
+// DESKTOP ONLY — capture from an SDL-managed software framebuffer instead of
+// /dev/fb0. On a desktop host /dev/fb0 is either absent or, when present (e.g.
+// `i915drmfb` under X11), reads back as all-zero: the legacy fbdev mapping is
+// not the live scanout, since the compositor drives DRM planes. Either way the
+// on-device capture path yields nothing useful on a host, which makes the
+// screenshot half of a crash bundle untestable there.
+//
+// `pixels` must point at a 32-bit surface whose in-memory byte order is B,G,R,A
+// (SDL_PIXELFORMAT_ARGB8888 on little-endian) — that is what the BMP writer
+// emits, so no conversion is needed. `pitch` is the surface's row stride in
+// bytes and may exceed width*4.
+//
+// The buffer is borrowed, never copied or freed, and is read directly from the
+// signal handler. That is a plain memory read of a malloc'd buffer — no SDL
+// call — so it stays async-signal-safe. A torn read mid-render is possible and
+// acceptable, the same trade-off the /dev/fb0 path already makes.
+//
+// Call after GFX_init() and before CrashHandler_init(); it takes precedence
+// over the /dev/fb0 path and makes FbCapture_init() a no-op. Returns false
+// (changing nothing) if the arguments are implausible.
+bool FbCapture_useSurface(const void* pixels, int width, int height, int pitch);
+
 // Write the currently visible page of /dev/fb0 to fd as a top-down 32-bit
 // BGRA BMP. Async-signal-safe: open/read/write/lseek/close + a hand-rolled
 // integer parser for the pan offset. No malloc, no printf.
