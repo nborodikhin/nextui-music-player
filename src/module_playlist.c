@@ -72,7 +72,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
+        ModuleCommon_startFrame();
         PAD_poll();
 
         // Handle confirmation dialog
@@ -115,7 +115,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
             const char* confirm_title = (confirm_action == 0) ? "Delete Playlist?" : "Remove Track?";
             render_confirmation_dialog(screen, confirm_name, confirm_title);
             GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
             continue;
         }
 
@@ -127,7 +127,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
             continue;
         }
 
@@ -301,7 +301,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
 
             ModuleCommon_tickToast(playlist_toast_message, playlist_toast_time, &dirty);
         } else {
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
         }
     }
 }

@@ -51,7 +51,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
+        ModuleCommon_startFrame();
         PAD_poll();
 
         // Handle global input
@@ -61,7 +61,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
             continue;
         }
 
@@ -127,7 +127,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
             ModuleCommon_tickToast(library_toast_message, library_toast_time, &dirty);
         } else {
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
         }
     }
 }

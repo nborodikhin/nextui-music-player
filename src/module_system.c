@@ -18,6 +18,7 @@ ModuleExitReason SystemModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
+        ModuleCommon_startFrame();
         PAD_poll();
 
         // Handle global input first
@@ -28,7 +29,7 @@ ModuleExitReason SystemModule_run(SDL_Surface* screen) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
             continue;
         }
 
@@ -104,7 +105,7 @@ ModuleExitReason SystemModule_run(SDL_Surface* screen) {
             GFX_flip(screen);
             dirty = 0;
         } else {
-            GFX_sync();
+            ModuleCommon_adaptiveSync();
         }
     }
 }
