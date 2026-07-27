@@ -422,8 +422,18 @@ void ModuleCommon_traceButtons(void) {
 // in screen.bmp).
 #define CRASH_TRIGGER_PREFIX  "/tmp/music-player-crash-"
 
-// Watchdog threshold is 5 s (DEFAULT_THRESHOLD_MS in watchdog.c); overshoot it.
-#define CRASH_TEST_STALL_S    7
+// Must outlast the watchdog threshold (5 s, DEFAULT_THRESHOLD_MS in watchdog.c)
+// *plus* the time the handler spends writing the bundle — on device that is a
+// ~3 MB screen.bmp to SD, measured at ~3.5 s.
+//
+// It is not enough to merely trip the watchdog. A real hang never ends, so the
+// heartbeat stays stale and meta.txt's heartbeat_age_ms correctly reports the
+// stall. A bounded sleep does end: with 7 s the main thread woke and refreshed
+// the heartbeat while the handler was still writing the screenshot, and
+// format_meta() — which runs last — sampled heartbeat_age_ms as 3 ms instead of
+// ~5000, making a genuine watchdog abort look healthy in the bundle. Stay above
+// trip + write so the injected hang reads like the real thing.
+#define CRASH_TEST_STALL_S    20
 
 // Sentinel checks are access() syscalls and the loop runs at ~60fps, so poll at
 // roughly 4 Hz instead of every frame. /tmp is tmpfs on device (no disk I/O),
