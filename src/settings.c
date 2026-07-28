@@ -26,11 +26,15 @@ static const float soft_limiter_thresholds[] = {0.0f, 0.7f, 0.6f, 0.5f};
 
 // Current settings
 static struct {
-    int screen_off_timeout;  // seconds, 0 = off
-    bool lyrics_enabled;     // true = show lyrics
-    int bass_filter_hz;      // 0=off, 80, 100, 120, 150, 200
-    int soft_limiter_index;  // 0=off, 1=mild, 2=medium, 3=strong
+    int screen_off_timeout;        // seconds, 0 = off
+    bool lyrics_enabled;           // true = show lyrics
+    int bass_filter_hz;            // 0=off, 80, 100, 120, 150, 200
+    int soft_limiter_index;        // 0=off, 1=mild, 2=medium, 3=strong
+    bool collect_crash_reports;    // false = off (default), true = on
 } current_settings;
+
+// Listener invoked when collect_crash_reports changes (crash handler registers here).
+static void (*collect_crash_reports_listener)(bool enabled) = NULL;
 
 // Find index of current screen off value in the values array
 static int get_screen_off_index(void) {
@@ -58,6 +62,7 @@ void Settings_init(void) {
     current_settings.lyrics_enabled = true;
     current_settings.bass_filter_hz = bass_filter_values[DEFAULT_BASS_FILTER_INDEX];
     current_settings.soft_limiter_index = DEFAULT_SOFT_LIMITER_INDEX;
+    current_settings.collect_crash_reports = false;  // opt-in by default
 
     // Try to load from file
     FILE* f = fopen(SETTINGS_FILE, "r");
@@ -90,6 +95,9 @@ void Settings_init(void) {
             if (value >= 0 && value < SOFT_LIMITER_VALUE_COUNT) {
                 current_settings.soft_limiter_index = value;
             }
+        }
+        if (sscanf(line, "collect_crash_reports=%d", &value) == 1) {
+            current_settings.collect_crash_reports = (value != 0);
         }
     }
     fclose(f);
@@ -152,6 +160,7 @@ void Settings_save(void) {
     fprintf(f, "lyrics_enabled=%d\n", current_settings.lyrics_enabled ? 1 : 0);
     fprintf(f, "bass_filter_hz=%d\n", current_settings.bass_filter_hz);
     fprintf(f, "soft_limiter=%d\n", current_settings.soft_limiter_index);
+    fprintf(f, "collect_crash_reports=%d\n", current_settings.collect_crash_reports ? 1 : 0);
     fclose(f);
 }
 
@@ -225,4 +234,31 @@ const char* Settings_getSoftLimiterDisplayStr(void) {
         case 3:  return "Strong";
         default: return "Medium";
     }
+}
+
+// --- Collect crash reports ---
+
+bool Settings_getCollectCrashReports(void) {
+    return current_settings.collect_crash_reports;
+}
+
+void Settings_setCollectCrashReports(bool enabled) {
+    if (current_settings.collect_crash_reports == enabled) return;
+    current_settings.collect_crash_reports = enabled;
+    Settings_save();
+    if (collect_crash_reports_listener) {
+        collect_crash_reports_listener(enabled);
+    }
+}
+
+void Settings_toggleCollectCrashReports(void) {
+    Settings_setCollectCrashReports(!current_settings.collect_crash_reports);
+}
+
+const char* Settings_getCollectCrashReportsDisplayStr(void) {
+    return current_settings.collect_crash_reports ? "Yes" : "No";
+}
+
+void Settings_setCollectCrashReportsListener(void (*listener)(bool enabled)) {
+    collect_crash_reports_listener = listener;
 }

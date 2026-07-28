@@ -1,4 +1,5 @@
 #include "selfupdate.h"
+#include "watchdog.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -202,7 +203,10 @@ int SelfUpdate_init(const char* path) {
 void SelfUpdate_cleanup(void) {
     if (update_running) {
         update_cancel = true;
+        // Worker may be inside a multi-MB wget; cancel doesn't return instantly.
+        Watchdog_pause(WATCHDOG_REASON_HTTP_FETCH, true);
         pthread_join(update_thread, NULL);
+        Watchdog_resume(WATCHDOG_REASON_HTTP_FETCH, true);
     }
 }
 

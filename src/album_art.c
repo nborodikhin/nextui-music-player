@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "album_art.h"
 #include "wget_fetch.h"
+#include "watchdog.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 #include "include/parson/parson.h"
 
 #include <SDL2/SDL.h>
@@ -376,9 +378,12 @@ void album_art_fetch(const char* artist, const char* title) {
         return;  // Already fetched
     }
 
-    // Wait for any previous thread to finish
+    // Wait for any previous thread to finish. The worker may be blocked in
+    // a wget on a slow network, which would otherwise trip the watchdog.
     if (art_ctx.thread_active) {
+        Watchdog_pause(WATCHDOG_REASON_HTTP_FETCH, true);
         pthread_join(art_ctx.fetch_thread, NULL);
+        Watchdog_resume(WATCHDOG_REASON_HTTP_FETCH, true);
         art_ctx.thread_active = false;
         // Discard any pending result from previous fetch
         if (art_ctx.pending_art) {

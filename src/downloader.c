@@ -2,6 +2,7 @@
 #include "downloader.h"
 #include "keyboard.h"
 #include "display_helper.h"
+#include "watchdog.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // Paths
 static char ytdlp_path[512] = "";
@@ -156,6 +158,7 @@ int Downloader_init(void) {
     if (strcmp(current_version, "unknown") == 0) {
         char cmd[600];
         snprintf(cmd, sizeof(cmd), "%s --version 2>/dev/null", ytdlp_path);
+        Watchdog_pause(WATCHDOG_REASON_SUBPROCESS, true);
         FILE* pipe = popen(cmd, "r");
         if (pipe) {
             if (fgets(current_version, sizeof(current_version), pipe)) {
@@ -170,6 +173,7 @@ int Downloader_init(void) {
             }
             pclose(pipe);
         }
+        Watchdog_resume(WATCHDOG_REASON_SUBPROCESS, true);
     }
 
     // Load queue from file

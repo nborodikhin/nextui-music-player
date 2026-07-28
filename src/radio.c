@@ -23,6 +23,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // SDL for rendering
 #include <SDL2/SDL.h>

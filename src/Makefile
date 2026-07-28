@@ -129,7 +129,7 @@ LOCAL_SRC = \
     downloader.c selfupdate.c display_helper.c \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c wifi.c keyboard.c settings.c resume.c \
-    add_to_playlist.c background.c \
+    add_to_playlist.c background.c ring_log.c log_trace.c watchdog.c crash_handler.c crash_meta.c fb_capture.c utc_time.c \
     module_common.c module_menu.c module_library.c module_player.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_system.c module_settings.c \
@@ -175,11 +175,20 @@ MY_CFLAGS += $(INCDIR) -DPLATFORM=\"$(PLATFORM)\" -std=gnu99
 MY_CFLAGS += -DUSE_SDL2 -DGL_GLEXT_PROTOTYPES
 MY_CFLAGS += -MMD -MP
 
+# Escape hatch for local/debug builds, e.g. on-device crash-report verification:
+#   make PLATFORM=tg5040 EXTRA_CFLAGS=-DCRASH_TEST_HOOKS
+# Never set in a shipping build.
+MY_CFLAGS += $(EXTRA_CFLAGS)
+
 # Desktop uses full OpenGL; devices use GLES. Neither macro is read by this
 # repo's sources today (the GL context profile is picked at runtime via
 # PLAT_getModel()), but keep them matching the platform's makefile.env.
 ifeq ($(PLATFORM), desktop)
 MY_CFLAGS += -DUSE_GL
+# PLATFORM is a string literal, so the preprocessor can't test it. Code that
+# must differ on the host (e.g. fb_capture reading the SDL surface instead of
+# /dev/fb0) keys off this instead.
+MY_CFLAGS += -DPLATFORM_DESKTOP
 else
 MY_CFLAGS += -DUSE_GLES
 endif

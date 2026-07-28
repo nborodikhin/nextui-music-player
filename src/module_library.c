@@ -10,6 +10,7 @@
 #include "module_downloader.h"
 #include "ui_utils.h"
 #include "ui_fonts.h"
+#include "log_trace.h"
 
 // Library submenu items
 #define LIBRARY_FILES       0
@@ -46,13 +47,13 @@ void LibraryModule_setToast(const char* message) {
 }
 
 ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
+    LOG_trace("LibraryModule_run: enter");
     int menu_selected = 0;
     int dirty = 1;
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle global input
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, LIBRARY_MENU_HELP_STATE);

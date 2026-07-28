@@ -23,6 +23,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
 
 // SSL context for HTTPS downloads
 typedef struct {

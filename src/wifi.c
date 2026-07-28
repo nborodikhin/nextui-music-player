@@ -7,6 +7,7 @@
 #include "wifi.h"
 #include "ui_fonts.h"
 #include "ui_podcast.h"  // For Podcast_clearTitleScroll
+#include "watchdog.h"
 
 // WiFi connection timeout (in 500ms intervals)
 #define WIFI_CONNECT_TIMEOUT_INTERVALS 10  // 5 seconds total
@@ -47,6 +48,11 @@ bool Wifi_ensureConnected(SDL_Surface* scr, int show_setting) {
         return true;
     }
 
+    // The slow path that follows can spend up to ~7s (1s enable + 5s connect
+    // timeout + 1.5s DHCP wait) and runs synchronously on whatever thread the
+    // caller is on. Pause the watchdog for the whole window.
+    Watchdog_pause(WATCHDOG_REASON_HTTP_FETCH, true);
+
     // Only render if screen is provided (not from background thread)
     if (scr) {
         render_connecting_screen(scr, show_setting);
@@ -72,6 +78,7 @@ bool Wifi_ensureConnected(SDL_Surface* scr, int show_setting) {
             system("killall udhcpc 2>/dev/null; udhcpc -i wlan0 -b 2>/dev/null &");
             // Wait briefly for DHCP to complete
             usleep(1500000);  // 1.5 seconds
+            Watchdog_resume(WATCHDOG_REASON_HTTP_FETCH, true);
             return true;
         }
         usleep(500000);  // 500ms
@@ -88,7 +95,9 @@ bool Wifi_ensureConnected(SDL_Surface* scr, int show_setting) {
         // Request IP via DHCP
         system("killall udhcpc 2>/dev/null; udhcpc -i wlan0 -b 2>/dev/null &");
         usleep(1500000);  // 1.5 seconds
+        Watchdog_resume(WATCHDOG_REASON_HTTP_FETCH, true);
         return true;
     }
+    Watchdog_resume(WATCHDOG_REASON_HTTP_FETCH, true);
     return false;
 }

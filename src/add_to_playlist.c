@@ -11,6 +11,7 @@
 #include "ui_utils.h"
 #include "module_common.h"
 #include "display_helper.h"
+#include "log_trace.h"
 
 // Internal state
 static bool active = false;
@@ -60,6 +61,7 @@ void AddToPlaylist_open(const char* path, const char* display_name) {
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
     selected = 0;
     scroll = 0;
+    LOG_trace("dialog enter: add_to_playlist files=1");
     active = true;
 }
 
@@ -74,6 +76,7 @@ void AddToPlaylist_openDir(const char* dir_path) {
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
     selected = 0;
     scroll = 0;
+    LOG_trace("dialog enter: add_to_playlist files=%d dir=%s", file_count, dir_path);
     active = true;
 }
 
@@ -85,6 +88,7 @@ int AddToPlaylist_handleInput(void) {
     if (!active) return 1;
 
     if (PAD_justPressed(BTN_B)) {
+        LOG_trace("dialog exit: add_to_playlist action=cancel");
         free_file_list();
         active = false;
         return 1;
@@ -121,6 +125,7 @@ int AddToPlaylist_handleInput(void) {
                 }
                 free(name);
             }
+            LOG_trace("dialog exit: add_to_playlist action=new_playlist");
             free_file_list();
             active = false;
             return 1;
@@ -138,6 +143,7 @@ int AddToPlaylist_handleInput(void) {
                          added, file_count, playlists[idx].name);
                 toast_time = SDL_GetTicks();
             }
+            LOG_trace("dialog exit: add_to_playlist action=existing");
             free_file_list();
             active = false;
             return 1;

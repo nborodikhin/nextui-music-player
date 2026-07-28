@@ -1,6 +1,8 @@
 #include "keyboard.h"
 #include "defines.h"
 #include "api.h"
+#include "log_trace.h"
+#include "watchdog.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +43,13 @@ char* Keyboard_open(const char* prompt) {
     char cmd[1024];
     snprintf(cmd, sizeof(cmd), "%s \"%s\" 2>/dev/null", keyboard_path, font_path);
 
+    // Pause the watchdog: the external keyboard subprocess blocks the main
+    // thread synchronously for as long as the user types, with no heartbeat.
+    Watchdog_pause(WATCHDOG_REASON_KEYBOARD, true);
+
     FILE* pipe = popen(cmd, "r");
     if (!pipe) {
+        Watchdog_resume(WATCHDOG_REASON_KEYBOARD, true);
         return NULL;
     }
 
@@ -62,5 +69,6 @@ char* Keyboard_open(const char* prompt) {
     }
 
     pclose(pipe);
+    Watchdog_resume(WATCHDOG_REASON_KEYBOARD, true);
     return result;
 }

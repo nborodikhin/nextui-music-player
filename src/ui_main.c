@@ -20,6 +20,10 @@ static const char* menu_items_no_first[] = {"Library", "Online Radio", "Podcasts
 // Cached first_item_mode for callbacks
 static int current_first_item_mode = MENU_FIRST_NONE;
 
+// Tracks whether the "Send Crash Report" row is currently in the menu, so
+// label/badge callbacks can compute the correct Settings index.
+static bool current_show_crash_row = false;
+
 // Scroll state for Resume track name
 static ScrollTextState resume_scroll = {0};
 
@@ -52,8 +56,9 @@ static const char* main_menu_get_label(int index, const char* default_label,
         }
     }
 
-    // Settings item: show update badge
-    int settings_index = has_first ? 4 : 3;
+    // Settings item: show update badge. Settings is always the LAST row,
+    // shifted by 1 when the conditional crash report row is present.
+    int settings_index = (has_first ? 4 : 3) + (current_show_crash_row ? 1 : 0);
     if (index == settings_index) {
         const SelfUpdateStatus* status = SelfUpdate_getStatus();
         if (status->update_available) {
@@ -123,8 +128,10 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 
 // Render the main menu
 void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                 char* toast_message, uint32_t toast_time, int first_item_mode) {
+                 char* toast_message, uint32_t toast_time, int first_item_mode,
+                 bool show_crash_row) {
     current_first_item_mode = first_item_mode;
+    current_show_crash_row = show_crash_row;
     bool has_first = (first_item_mode != MENU_FIRST_NONE);
 
     // Update the first item label based on mode
@@ -134,12 +141,19 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
         menu_items_with_first[0] = "Resume";
     }
 
-    const char** items = has_first ? menu_items_with_first : menu_items_no_first;
-    int count = has_first ? 5 : 4;
+    // Build the items array. With crash row, insert "Send Crash Report" just
+    // before Settings (the last item).
+    const char* items_buf[8];
+    int base_count = has_first ? 5 : 4;
+    const char** base = has_first ? menu_items_with_first : menu_items_no_first;
+    int count = 0;
+    for (int i = 0; i < base_count - 1; i++) items_buf[count++] = base[i];
+    if (show_crash_row) items_buf[count++] = "Send Crash Report";
+    items_buf[count++] = base[base_count - 1];  // Settings
 
     SimpleMenuConfig config = {
         .title = "Music Player",
-        .items = items,
+        .items = items_buf,
         .item_count = count,
         .btn_b_label = "EXIT",
         .get_label = main_menu_get_label,
@@ -541,10 +555,30 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
     }
 }
 
-// Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
+// Render confirmation dialog overlay (title + optional content + "A: Yes  B: No").
+// content may contain a single '\n' to force a two-line break (each line
+// truncated independently); useful for paths that won't fit on one line.
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title) {
     bool has_content = content && content[0];
-    int box_h = has_content ? SCALE1(110) : SCALE1(90);
+
+    // Detect optional two-line content.
+    const char* line1 = content;
+    const char* line2 = NULL;
+    char line1_buf[128];
+    if (has_content) {
+        const char* nl = strchr(content, '\n');
+        if (nl) {
+            size_t n = (size_t)(nl - content);
+            if (n >= sizeof(line1_buf)) n = sizeof(line1_buf) - 1;
+            memcpy(line1_buf, content, n);
+            line1_buf[n] = '\0';
+            line1 = line1_buf;
+            line2 = nl + 1;
+        }
+    }
+
+    int extra_line_h = line2 ? SCALE1(15) : 0;
+    int box_h = (has_content ? SCALE1(110) : SCALE1(90)) + extra_line_h;
     DialogBox db = render_dialog_box(screen, SCALE1(280), box_h);
     int hw = screen->w;
 
@@ -557,24 +591,147 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
         SDL_FreeSurface(title_surf);
     }
 
-    // Content text (truncated if needed)
+    // Content text (truncated if needed). Two lines stacked when line2 is set.
     if (has_content) {
-        char truncated[64];
-        GFX_truncateText(Fonts_getSmall(), content, truncated, db.box_w - SCALE1(20), 0);
-        SDL_Surface* name_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_GRAY);
-        if (name_surf) {
-            SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){(hw - name_surf->w) / 2, db.box_y + SCALE1(45)});
-            SDL_FreeSurface(name_surf);
+        TTF_Font* font = Fonts_getSmall();
+        int line_h = TTF_FontHeight(font);
+        int y = db.box_y + SCALE1(45);
+
+        char truncated[128];
+        GFX_truncateText(font, line1, truncated, db.box_w - SCALE1(20), 0);
+        SDL_Surface* s = TTF_RenderUTF8_Blended(font, truncated, COLOR_GRAY);
+        if (s) {
+            SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){(hw - s->w) / 2, y});
+            SDL_FreeSurface(s);
+        }
+
+        if (line2) {
+            y += line_h + SCALE1(2);
+            GFX_truncateText(font, line2, truncated, db.box_w - SCALE1(20), 0);
+            SDL_Surface* s2 = TTF_RenderUTF8_Blended(font, truncated, COLOR_GRAY);
+            if (s2) {
+                SDL_BlitSurface(s2, NULL, screen, &(SDL_Rect){(hw - s2->w) / 2, y});
+                SDL_FreeSurface(s2);
+            }
         }
     }
 
     // Button hints
-    int hint_y = has_content ? db.box_y + SCALE1(75) : db.box_y + SCALE1(55);
+    int hint_y = (has_content ? db.box_y + SCALE1(75) : db.box_y + SCALE1(55)) + extra_line_h;
     const char* hint = "A: Yes   B: No";
     SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), hint, COLOR_GRAY);
     if (hint_surf) {
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(hw - hint_surf->w) / 2, hint_y});
         SDL_FreeSurface(hint_surf);
+    }
+}
+
+void render_crash_report_dialog(SDL_Surface* screen, const char* bundle_path,
+                                int selected_action) {
+    int hw = screen->w;
+
+    TTF_Font* font_title = Fonts_getMedium();
+    TTF_Font* font_body  = Fonts_getSmall();
+    TTF_Font* font_path  = Fonts_getTiny();
+    TTF_Font* font_action = Fonts_getMedium();
+
+    int title_h  = TTF_FontHeight(font_title);
+    int path_h   = TTF_FontHeight(font_path);
+    int body_h   = TTF_FontHeight(font_body);
+    int action_h = TTF_FontHeight(font_action);
+
+    // Inter-block spacing.
+    const int gap_after_title  = SCALE1(6);
+    const int gap_between_path = SCALE1(2);
+    const int gap_after_path   = SCALE1(6);
+    const int gap_after_body   = SCALE1(10);
+    const int gap_between_acts = SCALE1(2);
+
+    // Total content height (title + 2 path lines + body + 3 actions + inter-gaps).
+    int content_h = title_h + gap_after_title
+                  + path_h + gap_between_path
+                  + path_h + gap_after_path
+                  + body_h + gap_after_body
+                  + action_h + gap_between_acts
+                  + action_h + gap_between_acts
+                  + action_h;
+
+    // Symmetric top/bottom padding inside the dialog box border.
+    const int pad = SCALE1(12);
+    int box_w = SCALE1(300);
+    int box_h = pad * 2 + content_h;
+    DialogBox db = render_dialog_box(screen, box_w, box_h);
+
+    int y = db.box_y + pad;
+
+    // Title — now serves as both heading and label for the path.
+    SDL_Surface* title = TTF_RenderUTF8_Blended(font_title, "Crash report data saved to:", COLOR_WHITE);
+    if (title) {
+        SDL_BlitSurface(title, NULL, screen, &(SDL_Rect){(hw - title->w) / 2, y});
+        SDL_FreeSurface(title);
+    }
+    y += title_h + gap_after_title;
+
+    // Path split at the last '/': base on first line (no trailing slash), leaf on
+    // second line starting with '/'.
+    const char* short_path = bundle_path ? bundle_path : "";
+    if (bundle_path) {
+        const char* userdata = strstr(bundle_path, ".userdata/");
+        if (userdata) short_path = userdata;
+    }
+    const char* slash = strrchr(short_path, '/');
+    char base_line[256];
+    const char* leaf = NULL;
+    if (slash && slash[1] != '\0') {
+        size_t base_len = (size_t)(slash - short_path);
+        if (base_len >= sizeof(base_line)) base_len = sizeof(base_line) - 1;
+        memcpy(base_line, short_path, base_len);
+        base_line[base_len] = '\0';
+        leaf = slash;
+    } else {
+        snprintf(base_line, sizeof(base_line), "%s", short_path);
+    }
+    SDL_Surface* sp_base = TTF_RenderUTF8_Blended(font_path, base_line, COLOR_WHITE);
+    if (sp_base) {
+        SDL_BlitSurface(sp_base, NULL, screen, &(SDL_Rect){(hw - sp_base->w) / 2, y});
+        SDL_FreeSurface(sp_base);
+    }
+    y += path_h + gap_between_path;
+
+    if (leaf) {
+        SDL_Surface* sp_leaf = TTF_RenderUTF8_Blended(font_path, leaf, COLOR_WHITE);
+        if (sp_leaf) {
+            SDL_BlitSurface(sp_leaf, NULL, screen, &(SDL_Rect){(hw - sp_leaf->w) / 2, y});
+            SDL_FreeSurface(sp_leaf);
+        }
+    }
+    y += path_h + gap_after_path;
+
+    // "Please report to maintainers (see About)"
+    SDL_Surface* s3 = TTF_RenderUTF8_Blended(font_body,
+        "Please report to maintainers (see About)", COLOR_GRAY);
+    if (s3) {
+        SDL_BlitSurface(s3, NULL, screen, &(SDL_Rect){(hw - s3->w) / 2, y});
+        SDL_FreeSurface(s3);
+    }
+    y += body_h + gap_after_body;
+
+    // Actions — color change is the selection indicator, no '>' prefix.
+    static const char* actions[CRASH_DIALOG_ACTION_COUNT] = {
+        "Close",
+        "Skip this report",
+        "Never collect crash data",
+    };
+    for (int i = 0; i < CRASH_DIALOG_ACTION_COUNT; i++) {
+        bool sel = (i == selected_action);
+        SDL_Color color = sel ? COLOR_WHITE : COLOR_GRAY;
+        SDL_Surface* a = TTF_RenderUTF8_Blended(font_action, actions[i], color);
+        if (a) {
+            SDL_BlitSurface(a, NULL, screen, &(SDL_Rect){(hw - a->w) / 2, y});
+            SDL_FreeSurface(a);
+        }
+        y += action_h;
+        if (i < CRASH_DIALOG_ACTION_COUNT - 1) y += gap_between_acts;
     }
 }
 

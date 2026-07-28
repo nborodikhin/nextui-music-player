@@ -33,6 +33,11 @@
 #include "resume.h"
 #include "background.h"
 #include "display_helper.h"
+#include "ring_log.h"
+#include "log_trace.h"   // Must come AFTER api.h — wraps LOG_note into the ring
+#include "crash_handler.h"
+#include "fb_capture.h"
+#include "watchdog.h"
 
 // Global quit flag
 static bool quit = false;
@@ -57,6 +62,30 @@ int main(int argc, char* argv[]) {
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
+
+    // Crash-report ring + LOG wrapper (before any LOG_* call).
+    RingLog_init();
+    LogTrace_init();
+    LOG_info("Music Player starting; ring log initialized\n");
+
+#ifdef PLATFORM_DESKTOP
+    // On a desktop host /dev/fb0 is either absent or reads back all-zero (the
+    // fbdev mapping is not the live scanout under a compositor), so point the
+    // capture at the SDL software framebuffer instead — otherwise the
+    // screenshot half of a crash bundle can't be exercised off-device.
+    //
+    // Guarded on the format because the BMP writer emits BGRA, which is exactly
+    // ARGB8888's little-endian byte order; anything else would be misread.
+    // Must run before CrashHandler_init(), which calls FbCapture_init().
+    if (screen && screen->format->format == SDL_PIXELFORMAT_ARGB8888) {
+        if (!FbCapture_useSurface(screen->pixels, screen->w, screen->h, screen->pitch)) {
+            LOG_warn("fb_capture: SDL surface rejected; screenshots disabled\n");
+        }
+    } else {
+        LOG_warn("fb_capture: unexpected screen format %s; screenshots disabled\n",
+                 screen ? SDL_GetPixelFormatName(screen->format->format) : "(null)");
+    }
+#endif
 
     // Show splash screen immediately while heavy subsystems initialize
     {
@@ -123,6 +152,22 @@ int main(int argc, char* argv[]) {
 
     // Initialize app-specific settings
     Settings_init();
+
+    // Install the crash signal handler. Must come AFTER Settings_init so the
+    // collection_enabled atomic is seeded from the persisted setting and the
+    // settings listener is registered for runtime toggles. The version recorded
+    // in meta.txt comes from SelfUpdate (which read state/app_version.txt at
+    // SelfUpdate_init above); falls back to "unknown" if it wasn't readable.
+    CrashHandler_init(SelfUpdate_getVersion());
+
+    // Convert any pending screen.bmp left by a previous crash into screen.png.
+    // The signal handler can only emit raw BMP (async-signal-safe); PNG is far
+    // smaller and friendlier to attach to a GitHub issue.
+    CrashHandler_convertPendingScreenshots();
+
+    // Start the watchdog AFTER the crash handler is installed so any SIGABRT
+    // it raises is captured into a bundle. Default 5s stall threshold.
+    Watchdog_init(0);
 
     // Initialize resume state
     Resume_init();
@@ -195,6 +240,7 @@ int main(int argc, char* argv[]) {
     }
 
 cleanup:
+    Watchdog_quit();
     Background_stopAll();
     Downloader_cleanup();
     Settings_quit();
