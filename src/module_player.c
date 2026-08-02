@@ -380,15 +380,15 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         ModuleCommon_handleHardwareVolume();
         Player_update();
 
-        // SELECT+A during hint -> full wake
-        if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+        // Only A button during hint -> full wake
+        if (PAD_justPressed(BTN_A)) {
             ModuleCommon_resetScreenOffHint();
             ModuleCommon_recordInputTime();
             *dirty = 1;
             return true;  // skip this frame's input so A doesn't toggle pause
         } else {
             // Any other button resets the hint timer
-            if (PAD_anyPressed()) {
+            if (ModuleCommon_isAnyWakeButtonPressed()) {
                 ModuleCommon_startScreenOffHint();
             }
             if (ModuleCommon_processScreenOffHintTimeout()) {
@@ -408,7 +408,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         Player_update();
 
         // Any button -> show hint
-        if (PAD_anyPressed()) {
+        if (ModuleCommon_isAnyWakeButtonPressed()) {
             screen_off = false;
             PLAT_enableBacklight(1);
             ModuleCommon_startScreenOffHint();
@@ -434,7 +434,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
 
     // Normal input handling
-    if (PAD_anyPressed()) {
+    if (ModuleCommon_isAnyWakeButtonPressed()) {
         ModuleCommon_recordInputTime();
     }
 
@@ -578,6 +578,7 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        ModuleCommon_updateSleepTimer();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -777,6 +778,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        ModuleCommon_updateSleepTimer();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -817,13 +819,13 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
         if (ModuleCommon_isScreenOffHintActive()) {
             handle_hid_events();
             ModuleCommon_handleHardwareVolume();
-            if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+            if (PAD_justPressed(BTN_A)) {
                 ModuleCommon_resetScreenOffHint();
                 ModuleCommon_recordInputTime();
                 dirty = 1;
                 continue;  // skip this frame's input so A doesn't toggle pause
             } else {
-                if (PAD_anyPressed()) {
+                if (ModuleCommon_isAnyWakeButtonPressed()) {
                     ModuleCommon_startScreenOffHint();
                 }
                 if (ModuleCommon_processScreenOffHintTimeout()) {
@@ -839,7 +841,30 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
 
         // Handle screen off mode
         if (screen_off) {
-            if (PAD_anyPressed()) {
+            bool wake_screen = false;
+            
+            if (ModuleCommon_isAnyWakeButtonPressed()) {
+                if (Settings_getLockscreenControls() && 
+                   (PAD_justPressed(BTN_PLUS) || PAD_justPressed(BTN_MINUS) ||
+                    PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) ||
+                    PAD_justPressed(BTN_L2) || PAD_justPressed(BTN_R2))) {
+                    
+                    // Allow specific controls without waking
+                    if (PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_L2)) {
+                        PlayerModule_prevTrack();
+                        dirty = 1;
+                    } else if (PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_R2)) {
+                        PlayerModule_nextTrack();
+                        dirty = 1;
+                    }
+                    // Volume is handled by ModuleCommon_handleHardwareVolume()
+                } else {
+                    // Any other button wakes the screen
+                    wake_screen = true;
+                }
+            }
+
+            if (wake_screen) {
                 screen_off = false;
                 PLAT_enableBacklight(1);
                 ModuleCommon_startScreenOffHint();
@@ -867,7 +892,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
         }
 
         // Normal input handling
-        if (PAD_anyPressed()) {
+        if (ModuleCommon_isAnyWakeButtonPressed()) {
             ModuleCommon_recordInputTime();
         }
 
@@ -1068,6 +1093,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
         while (1) {
             GFX_startFrame();
             PAD_poll();
+            ModuleCommon_updateSleepTimer();
 
             // Handle add-to-playlist dialog overlay
             if (AddToPlaylist_isActive()) {
@@ -1210,3 +1236,4 @@ void PlayerModule_backgroundTick(void) {
         }
     }
 }
+

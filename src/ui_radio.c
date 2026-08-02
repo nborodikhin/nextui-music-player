@@ -5,6 +5,7 @@
 #include "api.h"
 #include "ui_radio.h"
 #include "ui_fonts.h"
+#include "ui_main.h"
 #include "ui_utils.h"
 #include "ui_album_art.h"
 #include "album_art.h"
@@ -300,6 +301,9 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
             SDL_FreeSurface(err_text);
         }
     }
+
+    // Sleep timer overlay
+    render_sleep_timer_overlay(screen);
 }
 
 // Render add stations - country selection screen

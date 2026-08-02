@@ -6,6 +6,9 @@ A comprehensive music playback application for NextUI featuring local file playb
 > This is a fork of [mohammadsyuhada/nextui-music-player](https://github.com/mohammadsyuhada/nextui-music-player)<br>
 > [Support](https://ko-fi.com/Y8Y61SI04B) the original author on ko-fi.
 
+✨ **Highlight Feature: Advanced Sleep Timer**  
+This fork introduces a robust, highly requested **Sleep Timer**! Set the timer directly from the player menu. It works flawlessly in the background, accurately tracking your time even when the screen is turned off (lockscreen mode), and automatically suspends your device when the time is up. Perfect for listening to music, podcasts, or radio as you fall asleep!
+
 ## Supported Platforms
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
@@ -40,6 +43,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 ### General
 - Support Bluetooth/USB-C devices for output and media controls.
 - Automatic screen off (Follow system screen timeout).
+- Sleep timer with automatic device suspension (tracks accurately even in lockscreen mode).
 
 ### Library
 - Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `AAC` and `OPUS` formats

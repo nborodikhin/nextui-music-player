@@ -4,7 +4,6 @@
 #include "module_settings.h"
 #include "ui_main.h"
 #include "settings.h"
-#include "selfupdate.h"
 #include "downloader.h"
 #include "ui_settings.h"
 #include "ui_utils.h"
@@ -17,18 +16,19 @@ typedef enum {
     SETTINGS_STATE_MENU,
     SETTINGS_STATE_CLEAR_CACHE_CONFIRM,
     SETTINGS_STATE_ABOUT,
-    SETTINGS_STATE_UPDATING,
     SETTINGS_STATE_UPDATING_YTDLP
 } SettingsState;
 
 // Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
+#define SETTINGS_ITEM_SCREEN_OFF         0
+#define SETTINGS_ITEM_SLEEP_TIMER        1
+#define SETTINGS_ITEM_BASS_FILTER        2
+#define SETTINGS_ITEM_SOFT_LIMITER       3
+#define SETTINGS_ITEM_LOCKSCREEN_CONTROLS 4
+#define SETTINGS_ITEM_CLEAR_CACHE        5
+#define SETTINGS_ITEM_UPDATE_YTDLP       6
+#define SETTINGS_ITEM_ABOUT              7
+#define SETTINGS_ITEM_COUNT              8
 
 // Internal app state constants for controls help
 // These match the pattern used in ui_main.c
@@ -75,11 +75,17 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF) {
                         Settings_cycleScreenOffPrev();
                         dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_SLEEP_TIMER) {
+                        Settings_cycleSleepTimerPrev();
+                        dirty = 1;
                     } else if (menu_selected == SETTINGS_ITEM_BASS_FILTER) {
                         Settings_cycleBassFilterPrev();
                         dirty = 1;
                     } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
                         Settings_cycleSoftLimiterPrev();
+                        dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_LOCKSCREEN_CONTROLS) {
+                        Settings_toggleLockscreenControls();
                         dirty = 1;
                     } else {
                         int items_per_page = calc_list_layout(screen).items_per_page;
@@ -91,11 +97,17 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF) {
                         Settings_cycleScreenOffNext();
                         dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_SLEEP_TIMER) {
+                        Settings_cycleSleepTimerNext();
+                        dirty = 1;
                     } else if (menu_selected == SETTINGS_ITEM_BASS_FILTER) {
                         Settings_cycleBassFilterNext();
                         dirty = 1;
                     } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
                         Settings_cycleSoftLimiterNext();
+                        dirty = 1;
+                    } else if (menu_selected == SETTINGS_ITEM_LOCKSCREEN_CONTROLS) {
+                        Settings_toggleLockscreenControls();
                         dirty = 1;
                     } else {
                         int items_per_page = calc_list_layout(screen).items_per_page;
@@ -111,12 +123,20 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                             Settings_cycleScreenOffNext();
                             dirty = 1;
                             break;
+                        case SETTINGS_ITEM_SLEEP_TIMER:
+                            Settings_cycleSleepTimerNext();
+                            dirty = 1;
+                            break;
                         case SETTINGS_ITEM_BASS_FILTER:
                             Settings_cycleBassFilterNext();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_SOFT_LIMITER:
                             Settings_cycleSoftLimiterNext();
+                            dirty = 1;
+                            break;
+                        case SETTINGS_ITEM_LOCKSCREEN_CONTROLS:
+                            Settings_toggleLockscreenControls();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_CLEAR_CACHE:
@@ -157,58 +177,10 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                 break;
 
             case SETTINGS_STATE_ABOUT:
-                SelfUpdate_update();
-                const SelfUpdateStatus* status = SelfUpdate_getStatus();
-
-                // Keep refreshing while checking for updates
-                if (status->state == SELFUPDATE_STATE_CHECKING) {
-                    dirty = 1;
-                }
-
-                if (PAD_justPressed(BTN_A)) {
-                    if (status->update_available) {
-                        SelfUpdate_startUpdate();
-                        state = SETTINGS_STATE_UPDATING;
-                        dirty = 1;
-                    } else if (status->state != SELFUPDATE_STATE_CHECKING) {
-                        if (Wifi_ensureConnected(screen, show_setting)) {
-                            SelfUpdate_checkForUpdate();
-                        }
-                        dirty = 1;
-                    }
-                }
-                else if (PAD_justPressed(BTN_B)) {
+                if (PAD_justPressed(BTN_B)) {
                     state = SETTINGS_STATE_MENU;
                     dirty = 1;
                 }
-                break;
-
-            case SETTINGS_STATE_UPDATING:
-                // Disable autosleep during update
-                ModuleCommon_setAutosleepDisabled(true);
-
-                SelfUpdate_update();
-                const SelfUpdateStatus* update_status = SelfUpdate_getStatus();
-                SelfUpdateState update_state = update_status->state;
-
-                if (update_state == SELFUPDATE_STATE_COMPLETED) {
-                    if (PAD_justPressed(BTN_A)) {
-                        // Quit to apply update
-                        ModuleCommon_setAutosleepDisabled(false);
-                        return MODULE_EXIT_QUIT;
-                    }
-                }
-                else if (PAD_justPressed(BTN_B)) {
-                    if (update_state == SELFUPDATE_STATE_DOWNLOADING) {
-                        SelfUpdate_cancelUpdate();
-                    }
-                    ModuleCommon_setAutosleepDisabled(false);
-                    state = SETTINGS_STATE_ABOUT;
-                    dirty = 1;
-                }
-
-                // Always redraw during update
-                dirty = 1;
                 break;
 
             case SETTINGS_STATE_UPDATING_YTDLP:
@@ -245,9 +217,6 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     break;
                 case SETTINGS_STATE_ABOUT:
                     render_about(screen, show_setting);
-                    break;
-                case SETTINGS_STATE_UPDATING:
-                    render_app_updating(screen, show_setting);
                     break;
                 case SETTINGS_STATE_UPDATING_YTDLP:
                     render_ytdlp_updating(screen, show_setting);

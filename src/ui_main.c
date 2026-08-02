@@ -7,15 +7,16 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
-#include "selfupdate.h"
 #include "module_common.h"
 #include "module_menu.h"
 #include "resume.h"
 #include "background.h"
+#include "settings.h"
+#include <time.h>
 
 // Menu items variants (first entry is mutable for Resume/Now Playing swap)
-static const char* menu_items_with_first[] = {"Resume", "Library", "Online Radio", "Podcasts", "Settings"};
-static const char* menu_items_no_first[] = {"Library", "Online Radio", "Podcasts", "Settings"};
+static const char* menu_items_with_first[] = {"Resume", "Library", "Videos", "Online Radio", "Podcasts", "Settings"};
+static const char* menu_items_no_first[] = {"Library", "Videos", "Online Radio", "Podcasts", "Settings"};
 
 // Cached first_item_mode for callbacks
 static int current_first_item_mode = MENU_FIRST_NONE;
@@ -33,9 +34,10 @@ static const char* get_now_playing_label(void) {
     }
 }
 
-// Label callback for first item label and Settings update badge
+// Label callback for first item label
 static const char* main_menu_get_label(int index, const char* default_label,
                                         char* buffer, int buffer_size) {
+    (void)default_label;
     bool has_first = (current_first_item_mode != MENU_FIRST_NONE);
 
     // First item: return full label for pill sizing
@@ -52,15 +54,6 @@ static const char* main_menu_get_label(int index, const char* default_label,
         }
     }
 
-    // Settings item: show update badge
-    int settings_index = has_first ? 4 : 3;
-    if (index == settings_index) {
-        const SelfUpdateStatus* status = SelfUpdate_getStatus();
-        if (status->update_available) {
-            snprintf(buffer, buffer_size, "Settings (Update available)");
-            return buffer;
-        }
-    }
     return NULL;  // Use default label
 }
 
@@ -135,7 +128,7 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
     }
 
     const char** items = has_first ? menu_items_with_first : menu_items_no_first;
-    int count = has_first ? 5 : 4;
+    int count = has_first ? 6 : 5;
 
     SimpleMenuConfig config = {
         .title = "Music Player",
@@ -593,10 +586,35 @@ void render_screen_off_hint(SDL_Surface* screen) {
     SDL_FillRect(screen, NULL, RGB_BLACK);
 
     // Render hint message centered
-    const char* msg = "Press SELECT + A to wake screen";
+    const char* msg = "Press A to unlock";
     SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
     if (msg_surf) {
         SDL_BlitSurface(msg_surf, NULL, screen, &(SDL_Rect){(hw - msg_surf->w) / 2, (hh - msg_surf->h) / 2});
         SDL_FreeSurface(msg_surf);
+    }
+    
+    // Also render sleep timer if active
+    render_sleep_timer_overlay(screen);
+}
+
+void render_sleep_timer_overlay(SDL_Surface* screen) {
+    time_t end = Settings_getSleepTimerEnd();
+    if (end == 0) return;
+    
+    time_t now = time(NULL);
+    if (now >= end) return;
+    
+    int remaining = end - now;
+    int mins = remaining / 60;
+    int secs = remaining % 60;
+    
+    char buf[16];
+    snprintf(buf, sizeof(buf), "ZZZ %d:%02d", mins, secs);
+    
+    SDL_Surface* txt = TTF_RenderUTF8_Blended(Fonts_getSmall(), buf, COLOR_WHITE);
+    if (txt) {
+        SDL_Rect rect = {(screen->w - txt->w) / 2, SCALE1(10), txt->w, txt->h};
+        SDL_BlitSurface(txt, NULL, screen, &rect);
+        SDL_FreeSurface(txt);
     }
 }

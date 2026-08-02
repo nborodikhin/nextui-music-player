@@ -23,6 +23,7 @@
 #include "module_common.h"
 #include "module_menu.h"
 #include "module_library.h"
+#include "module_video.h"
 #include "module_player.h"
 #include "module_radio.h"
 #include "module_podcast.h"
@@ -35,7 +36,7 @@
 #include "display_helper.h"
 
 // Global quit flag
-static bool quit = false;
+static volatile sig_atomic_t quit = 0;
 static SDL_Surface* screen;
 
 static void sigHandler(int sig) {
@@ -54,7 +55,6 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     screen = GFX_init(MODE_MAIN);
-    PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
 
@@ -62,30 +62,51 @@ int main(int argc, char* argv[]) {
     {
         GFX_clear(screen);
         SDL_Surface* title = TTF_RenderUTF8_Blended(Fonts_getTitle(), "Music Player", COLOR_WHITE);
+        SDL_Surface* sub = TTF_RenderUTF8_Blended(Fonts_getSmall(), "by Addek-Labs", COLOR_GRAY);
+        SDL_Surface* loading = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Loading...", COLOR_GRAY);
+
+        int title_h = title ? title->h : 0;
+        int sub_h = sub ? sub->h : 0;
+        int load_h = loading ? loading->h : 0;
+        int gap1 = SCALE1(2);
+        int gap2 = SCALE1(12);
+        int total_h = title_h + gap1 + sub_h + gap2 + load_h;
+        int cur_y = (screen->h - total_h) / 2;
+
         if (title) {
             SDL_BlitSurface(title, NULL, screen, &(SDL_Rect){
                 (screen->w - title->w) / 2,
-                screen->h / 2 - title->h
+                cur_y
             });
+            cur_y += title_h + gap1;
             SDL_FreeSurface(title);
         }
-        SDL_Surface* loading = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Loading...", COLOR_GRAY);
+        if (sub) {
+            SDL_BlitSurface(sub, NULL, screen, &(SDL_Rect){
+                (screen->w - sub->w) / 2,
+                cur_y
+            });
+            cur_y += sub_h + gap2;
+            SDL_FreeSurface(sub);
+        }
         if (loading) {
             SDL_BlitSurface(loading, NULL, screen, &(SDL_Rect){
                 (screen->w - loading->w) / 2,
-                screen->h / 2 + SCALE1(4)
+                cur_y
             });
             SDL_FreeSurface(loading);
         }
         GFX_flip(screen);
     }
 
+    PWR_pinToCores(CPU_CORE_PERFORMANCE);
+
     InitSettings();
     PAD_init();
+    Icons_init();
     PWR_init();
     WIFI_init();
     psa_crypto_init();
-    Icons_init();
 
     signal(SIGINT, sigHandler);
     signal(SIGTERM, sigHandler);
@@ -114,10 +135,6 @@ int main(int argc, char* argv[]) {
 	// Restore hardware volume after audio device is open and stable
 	SetVolume(GetVolume());
 
-    // Initialize self-update module
-    SelfUpdate_init(".");
-    SelfUpdate_checkForUpdate();
-
     // Initialize common module (global input handling)
     ModuleCommon_init();
 
@@ -127,7 +144,7 @@ int main(int argc, char* argv[]) {
     // Initialize resume state
     Resume_init();
 
-    // Initialize YouTube downloader (loads queue, auto-resumes pending downloads)
+    // Initialize YouTube downloader
     Downloader_init();
 
     // Main application loop
@@ -172,6 +189,9 @@ int main(int argc, char* argv[]) {
             case MENU_LIBRARY:
                 reason = LibraryModule_run(screen);
                 break;
+            case MENU_VIDEOS:
+                reason = VideoModule_run(screen);
+                break;
             case MENU_RADIO:
                 reason = RadioModule_run(screen);
                 break;
@@ -195,11 +215,11 @@ int main(int argc, char* argv[]) {
     }
 
 cleanup:
+    ; // Empty statement for label
     Background_stopAll();
     Downloader_cleanup();
     Settings_quit();
     ModuleCommon_quit();
-    SelfUpdate_cleanup();
     Player_quit();
     Icons_quit();
     Fonts_unload();

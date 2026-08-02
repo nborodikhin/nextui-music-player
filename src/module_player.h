@@ -3,6 +3,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+#include <signal.h>
 #include "module_common.h"
 #include "playlist.h"
 #include "resume.h"
@@ -24,6 +25,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
 
 // Run player with resume state (restores folder/playlist, seeks to position)
 ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* resume);
+
 
 // Set the M3U playlist path for resume tracking (call before runWithPlaylist)
 void PlayerModule_setResumePlaylistPath(const char* m3u_path);

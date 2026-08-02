@@ -30,7 +30,14 @@ static struct {
     bool lyrics_enabled;     // true = show lyrics
     int bass_filter_hz;      // 0=off, 80, 100, 120, 150, 200
     int soft_limiter_index;  // 0=off, 1=mild, 2=medium, 3=strong
+    bool lockscreen_controls;// true = allow vol/skip when screen off
 } current_settings;
+
+// Sleep timer (runtime only, not saved)
+static const int sleep_timer_values[] = {0, 15, 30, 45, 60, 90, 120};
+#define SLEEP_TIMER_VALUE_COUNT 7
+static int current_sleep_timer_index = 0;
+static time_t sleep_timer_end = 0;
 
 // Find index of current screen off value in the values array
 static int get_screen_off_index(void) {
@@ -58,6 +65,7 @@ void Settings_init(void) {
     current_settings.lyrics_enabled = true;
     current_settings.bass_filter_hz = bass_filter_values[DEFAULT_BASS_FILTER_INDEX];
     current_settings.soft_limiter_index = DEFAULT_SOFT_LIMITER_INDEX;
+    current_settings.lockscreen_controls = true;
 
     // Try to load from file
     FILE* f = fopen(SETTINGS_FILE, "r");
@@ -90,6 +98,9 @@ void Settings_init(void) {
             if (value >= 0 && value < SOFT_LIMITER_VALUE_COUNT) {
                 current_settings.soft_limiter_index = value;
             }
+        }
+        if (sscanf(line, "lockscreen_controls=%d", &value) == 1) {
+            current_settings.lockscreen_controls = (value != 0);
         }
     }
     fclose(f);
@@ -139,6 +150,15 @@ const char* Settings_getScreenOffDisplayStr(void) {
     }
 }
 
+bool Settings_getLockscreenControls(void) {
+    return current_settings.lockscreen_controls;
+}
+
+void Settings_toggleLockscreenControls(void) {
+    current_settings.lockscreen_controls = !current_settings.lockscreen_controls;
+    Settings_save();
+}
+
 void Settings_save(void) {
     // Ensure directory exists
     char mkdir_cmd[512];
@@ -152,7 +172,59 @@ void Settings_save(void) {
     fprintf(f, "lyrics_enabled=%d\n", current_settings.lyrics_enabled ? 1 : 0);
     fprintf(f, "bass_filter_hz=%d\n", current_settings.bass_filter_hz);
     fprintf(f, "soft_limiter=%d\n", current_settings.soft_limiter_index);
+    fprintf(f, "lockscreen_controls=%d\n", current_settings.lockscreen_controls ? 1 : 0);
     fclose(f);
+}
+
+// Sleep timer
+time_t Settings_getSleepTimerEnd(void) {
+    return sleep_timer_end;
+}
+
+void Settings_setSleepTimerMinutes(int minutes) {
+    for (int i = 0; i < SLEEP_TIMER_VALUE_COUNT; i++) {
+        if (sleep_timer_values[i] == minutes) {
+            current_sleep_timer_index = i;
+            if (minutes == 0) {
+                sleep_timer_end = 0;
+            } else {
+                sleep_timer_end = time(NULL) + (minutes * 60);
+            }
+            return;
+        }
+    }
+}
+
+void Settings_cycleSleepTimerNext(void) {
+    current_sleep_timer_index = (current_sleep_timer_index + 1) % SLEEP_TIMER_VALUE_COUNT;
+    int mins = sleep_timer_values[current_sleep_timer_index];
+    if (mins == 0) {
+        sleep_timer_end = 0;
+    } else {
+        sleep_timer_end = time(NULL) + (mins * 60);
+    }
+}
+
+void Settings_cycleSleepTimerPrev(void) {
+    current_sleep_timer_index = (current_sleep_timer_index - 1 + SLEEP_TIMER_VALUE_COUNT) % SLEEP_TIMER_VALUE_COUNT;
+    int mins = sleep_timer_values[current_sleep_timer_index];
+    if (mins == 0) {
+        sleep_timer_end = 0;
+    } else {
+        sleep_timer_end = time(NULL) + (mins * 60);
+    }
+}
+
+const char* Settings_getSleepTimerDisplayStr(void) {
+    int mins = sleep_timer_values[current_sleep_timer_index];
+    if (mins == 0) return "Off";
+    if (mins == 15) return "15m";
+    if (mins == 30) return "30m";
+    if (mins == 45) return "45m";
+    if (mins == 60) return "60m";
+    if (mins == 90) return "90m";
+    if (mins == 120) return "120m";
+    return "Off";
 }
 
 bool Settings_getLyricsEnabled(void) {

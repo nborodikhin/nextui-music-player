@@ -5,6 +5,7 @@
 #include "api.h"
 #include "ui_music.h"
 #include "ui_fonts.h"
+#include "ui_main.h"
 #include "ui_icons.h"
 #include "ui_utils.h"
 #include "ui_album_art.h"
@@ -316,6 +317,8 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
             SDL_FreeSurface(lyric_surf);
         }
     }
+
+    render_sleep_timer_overlay(screen);
 }
 
 // Check if browser list has active scrolling (for refresh optimization)

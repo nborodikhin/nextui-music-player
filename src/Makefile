@@ -130,11 +130,11 @@ LOCAL_SRC = \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
-    module_common.c module_menu.c module_library.c module_player.c \
+    module_common.c module_menu.c module_library.c module_video.c module_player.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_system.c module_settings.c \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
-    ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
+    ui_main.c ui_music.c ui_video.c ui_radio.c ui_downloader.c ui_podcast.c \
     ui_playlist.c ui_system.c ui_settings.c \
     spectrum.c \
     audio/kiss_fft.c audio/kiss_fftr.c \

@@ -196,10 +196,8 @@ void render_about(SDL_Surface* screen, int show_setting) {
 
     render_screen_header(screen, "About", show_setting);
 
-    // App name with version
-    const char* version = SelfUpdate_getVersion();
-    char app_name[128];
-    snprintf(app_name, sizeof(app_name), "Music Player (%s)", version);
+    // App name
+    const char* app_name = "Music Player";
     SDL_Surface* name_text = TTF_RenderUTF8_Blended(Fonts_getLarge(), app_name, COLOR_WHITE);
     if (name_text) {
         SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){(hw - name_text->w) / 2, SCALE1(PADDING + PILL_SIZE)});
@@ -221,41 +219,6 @@ void render_about(SDL_Surface* screen, int show_setting) {
         SDL_FreeSurface(tagline_text2);
     }
 
-    // Show update status
-    const SelfUpdateStatus* status = SelfUpdate_getStatus();
-    SelfUpdateState state = status->state;
-    int status_y = info_y + SCALE1(40);
-
-    if (status->update_available) {
-        char update_msg[128];
-        snprintf(update_msg, sizeof(update_msg), "Update available: %s", status->latest_version);
-        SDL_Surface* update_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), update_msg, (SDL_Color){100, 255, 100, 255});
-        if (update_text) {
-            SDL_BlitSurface(update_text, NULL, screen, &(SDL_Rect){(hw - update_text->w) / 2, status_y});
-            SDL_FreeSurface(update_text);
-        }
-    } else if (state == SELFUPDATE_STATE_CHECKING) {
-        SDL_Surface* check_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Checking for updates...", (SDL_Color){200, 200, 200, 255});
-        if (check_text) {
-            SDL_BlitSurface(check_text, NULL, screen, &(SDL_Rect){(hw - check_text->w) / 2, status_y});
-            SDL_FreeSurface(check_text);
-        }
-    } else if (state == SELFUPDATE_STATE_ERROR) {
-        const char* err = strlen(status->error_message) > 0 ? status->error_message : "Update check failed";
-        SDL_Surface* err_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), err, (SDL_Color){255, 100, 100, 255});
-        if (err_text) {
-            SDL_BlitSurface(err_text, NULL, screen, &(SDL_Rect){(hw - err_text->w) / 2, status_y});
-            SDL_FreeSurface(err_text);
-        }
-    } else if (state == SELFUPDATE_STATE_IDLE && !status->update_available && strlen(status->latest_version) > 0) {
-        // Check completed, no update (latest_version is set when check completes)
-        SDL_Surface* uptodate_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "You're up to date", (SDL_Color){150, 150, 150, 255});
-        if (uptodate_text) {
-            SDL_BlitSurface(uptodate_text, NULL, screen, &(SDL_Rect){(hw - uptodate_text->w) / 2, status_y});
-            SDL_FreeSurface(uptodate_text);
-        }
-    }
-
     // GitHub QR Code
     SDL_RWops* rw = SDL_RWFromConstMem(qr_code_png, qr_code_png_len);
     if (rw) {
@@ -270,13 +233,7 @@ void render_about(SDL_Surface* screen, int show_setting) {
         }
     }
 
-    // Button hints - show UPDATE button if update available, CHECK if not checking
+    // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    if (status->update_available) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UPDATE", NULL}, 1, screen, 1);
-    } else if (status->state == SELFUPDATE_STATE_CHECKING) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
-    } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CHECK UPDATE", NULL}, 1, screen, 1);
-    }
+    GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
 }

@@ -15,6 +15,8 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "resume.h"
+#include "settings.h"
 #include "background.h"
 
 // Internal states
@@ -130,6 +132,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        ModuleCommon_updateSleepTimer();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -910,15 +913,14 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 ModuleCommon_handleHardwareVolume();
                 Podcast_update();
 
-                // SELECT+A during hint -> full wake
-                if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+                if (PAD_justPressed(BTN_A)) {
                     ModuleCommon_resetScreenOffHint();
                     ModuleCommon_recordInputTime();
                     dirty = 1;
                     continue;
                 } else {
                     // Any other button resets the hint timer
-                    if (PAD_anyPressed()) {
+                    if (ModuleCommon_isAnyWakeButtonPressed()) {
                         ModuleCommon_startScreenOffHint();
                     }
                     if (ModuleCommon_processScreenOffHintTimeout()) {
@@ -936,7 +938,29 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 Podcast_update();
 
                 // Any button -> show hint
-                if (PAD_anyPressed()) {
+                bool wake_screen = false;
+                if (ModuleCommon_isAnyWakeButtonPressed()) {
+                    if (Settings_getLockscreenControls() && 
+                       (PAD_justPressed(BTN_PLUS) || PAD_justPressed(BTN_MINUS) ||
+                        PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) ||
+                        PAD_justPressed(BTN_L2) || PAD_justPressed(BTN_R2))) {
+                        
+                        if (PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_L2)) {
+                            int pos_ms = Player_getPosition();
+                            Player_seek(pos_ms - 15000 < 0 ? 0 : pos_ms - 15000);
+                            dirty = 1;
+                        } else if (PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_R2)) {
+                            int pos_ms = Player_getPosition();
+                            int dur_ms = Player_getDuration();
+                            Player_seek(pos_ms + 15000 > dur_ms ? dur_ms : pos_ms + 15000);
+                            dirty = 1;
+                        }
+                    } else {
+                        wake_screen = true;
+                    }
+                }
+
+                if (wake_screen) {
                     screen_off = false;
                     PLAT_enableBacklight(1);
                     ModuleCommon_startScreenOffHint();

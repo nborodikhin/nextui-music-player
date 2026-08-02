@@ -52,7 +52,7 @@ int MenuModule_run(SDL_Surface* screen) {
             first_item_mode = MENU_FIRST_RESUME;
         }
         bool has_first = (first_item_mode != MENU_FIRST_NONE);
-        int item_count = has_first ? 5 : 4;
+        int item_count = has_first ? 6 : 5;
 
         // Handle global input first (volume, START dialogs, power)
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);

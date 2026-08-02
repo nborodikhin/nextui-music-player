@@ -7,9 +7,10 @@
 #define MENU_RESUME         0
 #define MENU_NOW_PLAYING    0  // Same slot as RESUME — routed differently
 #define MENU_LIBRARY        1
-#define MENU_RADIO          2
-#define MENU_PODCAST        3
-#define MENU_SETTINGS       4
+#define MENU_VIDEOS         2
+#define MENU_RADIO          3
+#define MENU_PODCAST        4
+#define MENU_SETTINGS       5
 #define MENU_QUIT          -1
 
 // First-item mode for the menu

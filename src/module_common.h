@@ -41,6 +41,12 @@ void ModuleCommon_setAutosleepDisabled(bool disabled);
 // Check if screen off hint is active
 bool ModuleCommon_isScreenOffHintActive(void);
 
+// Check if any wake button is currently pressed (excluding volume buttons)
+bool ModuleCommon_isAnyWakeButtonPressed(void);
+
+// Check if any wake button was just pressed (excluding volume buttons)
+bool ModuleCommon_isAnyWakeButtonJustPressed(void);
+
 // Start screen off hint countdown
 void ModuleCommon_startScreenOffHint(void);
 
@@ -69,6 +75,8 @@ void ModuleCommon_quit(void);
 // PWR_update wrapper with overlay auto-hide on button release
 // Call this instead of PWR_update directly in modules
 void ModuleCommon_PWR_update(int* dirty, int* show_setting);
+
+void ModuleCommon_updateSleepTimer(void);
 
 // Handle a single HID volume event. Returns true if the event was a volume event.
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);

@@ -17,6 +17,7 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "settings.h"
 #include "background.h"
 
 // Internal states
@@ -138,6 +139,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
     while (1) {
         GFX_startFrame();
         PAD_poll();
+        ModuleCommon_updateSleepTimer();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -274,15 +276,14 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 ModuleCommon_handleHardwareVolume();
                 Radio_update();
 
-                // SELECT+A during hint -> full wake
-                if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+                if (PAD_justPressed(BTN_A)) {
                     ModuleCommon_resetScreenOffHint();
                     ModuleCommon_recordInputTime();
                     dirty = 1;
                     continue;
                 } else {
                     // Any other button resets the hint timer
-                    if (PAD_anyPressed()) {
+                    if (ModuleCommon_isAnyWakeButtonPressed()) {
                         ModuleCommon_startScreenOffHint();
                     }
                     if (ModuleCommon_processScreenOffHintTimeout()) {
@@ -302,7 +303,37 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 Radio_update();
 
                 // Any button -> show hint
-                if (PAD_anyPressed()) {
+                bool wake_screen = false;
+                if (ModuleCommon_isAnyWakeButtonPressed()) {
+                    if (Settings_getLockscreenControls() && 
+                       (PAD_justPressed(BTN_PLUS) || PAD_justPressed(BTN_MINUS) ||
+                        PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) ||
+                        PAD_justPressed(BTN_L2) || PAD_justPressed(BTN_R2))) {
+                        
+                        RadioStation* stations;
+                        int station_count = Radio_getStations(&stations);
+                        
+                        if (PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_L2)) {
+                            if (station_count > 1) {
+                                radio_selected = (radio_selected - 1 + station_count) % station_count;
+                                Radio_stop();
+                                Radio_play(stations[radio_selected].url);
+                                dirty = 1;
+                            }
+                        } else if (PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_R2)) {
+                            if (station_count > 1) {
+                                radio_selected = (radio_selected + 1) % station_count;
+                                Radio_stop();
+                                Radio_play(stations[radio_selected].url);
+                                dirty = 1;
+                            }
+                        }
+                    } else {
+                        wake_screen = true;
+                    }
+                }
+
+                if (wake_screen) {
                     screen_off = false;
                     PLAT_enableBacklight(1);
                     ModuleCommon_startScreenOffHint();
@@ -315,7 +346,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
             }
 
             // Reset input timer on any button press
-            if (PAD_anyPressed()) {
+            if (ModuleCommon_isAnyWakeButtonPressed()) {
                 ModuleCommon_recordInputTime();
             }
 

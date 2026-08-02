@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 #include <msettings.h>
 #include "defines.h"
@@ -254,6 +255,26 @@ bool ModuleCommon_isScreenOffHintActive(void) {
     return screen_off_hint_active;
 }
 
+bool ModuleCommon_isAnyWakeButtonPressed(void) {
+    return PAD_isPressed(BTN_A) || PAD_isPressed(BTN_B) || PAD_isPressed(BTN_X) ||
+           PAD_isPressed(BTN_Y) || PAD_isPressed(BTN_START) || PAD_isPressed(BTN_SELECT) ||
+           PAD_isPressed(BTN_UP) || PAD_isPressed(BTN_DOWN) ||
+           PAD_isPressed(BTN_LEFT) || PAD_isPressed(BTN_RIGHT) ||
+           PAD_isPressed(BTN_L1) || PAD_isPressed(BTN_R1) || PAD_isPressed(BTN_L2) ||
+           PAD_isPressed(BTN_R2) || PAD_isPressed(BTN_L3) || PAD_isPressed(BTN_R3) ||
+           PAD_isPressed(BTN_MENU);
+}
+
+bool ModuleCommon_isAnyWakeButtonJustPressed(void) {
+    return PAD_justPressed(BTN_A) || PAD_justPressed(BTN_B) || PAD_justPressed(BTN_X) ||
+           PAD_justPressed(BTN_Y) || PAD_justPressed(BTN_START) || PAD_justPressed(BTN_SELECT) ||
+           PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_DOWN) ||
+           PAD_justPressed(BTN_LEFT) || PAD_justPressed(BTN_RIGHT) ||
+           PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_L2) ||
+           PAD_justPressed(BTN_R2) || PAD_justPressed(BTN_L3) || PAD_justPressed(BTN_R3) ||
+           PAD_justPressed(BTN_MENU);
+}
+
 void ModuleCommon_startScreenOffHint(void) {
     screen_off_hint_active = true;
     screen_off_hint_start = SDL_GetTicks();
@@ -335,6 +356,21 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     }
 
     overlay_buttons_were_active = overlay_buttons_active;
+}
+
+void ModuleCommon_updateSleepTimer(void) {
+    // Check Sleep Timer
+    time_t sleep_end = Settings_getSleepTimerEnd();
+    if (sleep_end > 0 && time(NULL) >= sleep_end) {
+        // Sleep timer expired!
+        Settings_setSleepTimerMinutes(0); // clear it
+        
+        // Stop audio playback (this also saves resume state)
+        Background_stopAll();
+        
+        // Full shutdown of the device
+        system("sync; poweroff");
+    }
 }
 
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {

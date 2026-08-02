@@ -12,6 +12,7 @@
 #include "player.h"
 #include "ui_podcast.h"
 #include "ui_fonts.h"
+#include "ui_main.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
 #include "ui_album_art.h"
@@ -1815,6 +1816,8 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     // Set position for GPU rendering (actual rendering happens in main loop)
     PodcastProgress_setPosition(bar_margin, bar_y, bar_w, bar_h, time_y, hw, duration);
 
+    // Sleep timer overlay
+    render_sleep_timer_overlay(screen);
 }
 
 // Render loading screen

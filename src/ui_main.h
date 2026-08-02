@@ -17,6 +17,7 @@ void render_controls_help(SDL_Surface* screen, int app_state);
 
 // Render screen off hint message
 void render_screen_off_hint(SDL_Surface* screen);
+void render_sleep_timer_overlay(SDL_Surface* screen);
 
 // Check if Resume scroll needs continuous redraw (software scroll mode)
 bool menu_needs_scroll_redraw(void);
