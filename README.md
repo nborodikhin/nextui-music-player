@@ -129,7 +129,19 @@ A comprehensive music playback application for NextUI featuring local file playb
 
 ### Prerequisites
 - Cross-compilation toolchain for ARM64
-- NextUI workspace with platform dependencies
+- A NextUI workspace checkout with platform dependencies (`all/`, `tg5040/`,
+  `tg5050/`) somewhere on disk
+- A `.nextui-workspace` symlink at this repo's root pointing at that
+  checkout's `workspace/` directory, e.g.:
+  ```bash
+  ln -s /path/to/NextUI/workspace .nextui-workspace
+  ```
+  `run-docker.sh` (used by `build-tg5040.sh`, `build-tg5050.sh`, `dev.sh`, and
+  `deploy.sh`) mounts that workspace and bind-mounts this repo over its
+  `nextui-music-player/` slot, so builds always use whatever checkout or
+  worktree you're actually running from — no need to physically nest this
+  repo inside the NextUI tree. It fails fast with a clear error if the
+  symlink is missing or broken.
 
 ### Build Commands
 
@@ -143,6 +155,43 @@ cd ~/workspace/nextui-music-player/src
 # Build for TrimUI Brick (tg5040)
 make clean && make PLATFORM=tg5040
 ```
+
+### Packaging a Release Folder
+
+Once binaries are built (`sh build-tg5040.sh` / `sh build-tg5050.sh`), assemble a
+deployable pak folder locally:
+
+```bash
+python3 create_dist.py            # both platforms -> dist/Music Player.pak/
+python3 create_dist.py --zip      # also write dist/Music.Player.pak.zip
+```
+
+Copy `dist/Music Player.pak/` straight to `/Tools/<PLATFORM>/` on the SD card —
+no zip/extract/rename round trip needed. The script only copies the runtime
+payload (`bin/`, `res/`, `state/`, `stations/`, `pak.json`, `launch.sh`), so
+source, docs, and build scripts never leak into the shipped pak. Run
+`python3 create_dist.py --help` for platform selection and other flags.
+
+### Iterating on a Connected Device
+
+Two scripts wrap the build + adb push cycle, for different points in a change:
+
+```bash
+sh dev.sh [tg5040|tg5050]      # code-only iteration: build, push the binary,
+                                # kill + relaunch on-device, tail its log
+sh deploy.sh [tg5040|tg5050|all]  # full resync: build, package via
+                                   # create_dist.py, push the whole pak folder
+```
+
+`dev.sh` is the tight loop while hacking on `src/*.c` — it only refreshes
+`musicplayer.elf` on top of a pak that's already installed, so it's fast but
+assumes `res/`, `stations/`, `pak.json`, etc. are already current on the card.
+`deploy.sh` pushes the complete folder (same payload `create_dist.py`
+produces), so run it after touching anything besides source, or before
+handing a build to someone else to test. Both require `adb` connected to the
+device. The relaunch/log-tail steps in `dev.sh` assume standard NextUI SD
+card paths — adjust `PAK_DIR`/log discovery in the script if your setup
+differs.
 
 ### Project Structure
 
