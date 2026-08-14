@@ -599,8 +599,11 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
         return;
     }
 
+    ListLayout layout = calc_list_layout(screen);
+    ListLayout pill_layout = layout;  // Keep original PILL_SIZE item_h for pill rendering
+
     // Item dimensions (both sections use rich pill height)
-    int sub_item_h = SCALE1(PILL_SIZE) * 3 / 2;
+    int sub_item_h = layout.rich_item_h;
     int cl_item_h = sub_item_h;
     int section_header_h = SCALE1(16);
     int section_gap = SCALE1(4);  // Gap between section header and first item
@@ -609,9 +612,6 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     // We'll compute item positions in a flat array
     int item_y[PODCAST_MAX_CONTINUE_LISTENING + PODCAST_MAX_SUBSCRIPTIONS + 4];  // generous
     int content_y = 0;
-
-    ListLayout layout = calc_list_layout(screen);
-    ListLayout pill_layout = layout;  // Keep original PILL_SIZE item_h for pill rendering
     // Start content right after page title pill (no extra margin)
     int base_y = SCALE1(PADDING + PILL_SIZE + 1);
     int hh = screen->h;
@@ -811,7 +811,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
 
 // Render the podcast management menu (Y button opens this)
 void render_podcast_manage(SDL_Surface* screen, int show_setting,
-                           int menu_selected, int subscription_count) {
+                           int menu_selected, int menu_scroll, int subscription_count) {
     GFX_clear(screen);
 
     char truncated[256];
@@ -822,17 +822,24 @@ void render_podcast_manage(SDL_Surface* screen, int show_setting,
     // Use common list layout
     ListLayout layout = calc_list_layout(screen);
 
-    for (int i = 0; i < PODCAST_MANAGE_COUNT; i++) {
+    adjust_list_scroll(menu_selected, &menu_scroll, layout.items_per_page);
+
+    for (int i = menu_scroll;
+         i < PODCAST_MANAGE_COUNT && i - menu_scroll < layout.items_per_page;
+         i++) {
         bool selected = (i == menu_selected);
         const char* item_label = podcast_manage_items[i];
 
         // Render menu item pill
-        MenuItemPos pos = render_menu_item_pill(screen, &layout, item_label, truncated, i, selected, 0);
+        MenuItemPos pos = render_menu_item_pill(screen, &layout, item_label, truncated,
+                                                i - menu_scroll, selected, 0);
 
         // Render text using standard list item text (consistent colors and font)
         render_list_item_text(screen, NULL, truncated, Fonts_getLarge(),
                               pos.text_x, pos.text_y, layout.max_width, selected);
     }
+
+    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, PODCAST_MANAGE_COUNT);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -881,8 +888,8 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
 
     // List layout (rich 2-row items)
     ListLayout layout = calc_list_layout(screen);
-    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
-    layout.items_per_page = layout.list_h / layout.item_h;
+    layout.item_h = layout.rich_item_h;
+    layout.items_per_page = layout.rich_items_per_page;
     adjust_list_scroll(selected, scroll, layout.items_per_page);
 
     int thumb_size = SCALE1(PILL_SIZE) * 3 / 2 - SCALE1(4) * 2;  // same as image_size in pill_rich
@@ -965,8 +972,8 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
 
     // List layout (rich 2-row items)
     ListLayout layout = calc_list_layout(screen);
-    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
-    layout.items_per_page = layout.list_h / layout.item_h;
+    layout.item_h = layout.rich_item_h;
+    layout.items_per_page = layout.rich_items_per_page;
     adjust_list_scroll(selected, scroll, layout.items_per_page);
 
     // Check if selected item is already subscribed
@@ -1034,7 +1041,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
 
     // Content dimensions (info area + episodes — all scrollable together)
     int info_area_h = SCALE1(PILL_SIZE) * 9 / 2 - base_y;
-    int item_h = SCALE1(PILL_SIZE) * 3 / 2;
+    int item_h = calc_list_layout(screen).rich_item_h;
     // First episode sits at bottom of viewport when scroll=0
     int episodes_start = viewport_h - item_h;
     int total_content_h = episodes_start + count * item_h;
@@ -1464,9 +1471,8 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
 
     // List layout — use taller item height for two-row pills (title + subtitle)
     ListLayout layout = calc_list_layout(screen);
-    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
-    layout.items_per_page = layout.list_h / layout.item_h;
-    if (layout.items_per_page > 5) layout.items_per_page = 5;
+    layout.item_h = layout.rich_item_h;
+    layout.items_per_page = layout.rich_items_per_page;
     adjust_list_scroll(selected, scroll, layout.items_per_page);
 
     for (int i = 0; i < layout.items_per_page && *scroll + i < queue_count; i++) {

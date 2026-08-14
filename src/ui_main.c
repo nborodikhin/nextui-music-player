@@ -13,12 +13,22 @@
 #include "resume.h"
 #include "background.h"
 
-// Menu items variants (first entry is mutable for Resume/Now Playing swap)
-static const char* menu_items_with_first[] = {"Resume", "Library", "Online Radio", "Podcasts", "Settings"};
-static const char* menu_items_no_first[] = {"Library", "Online Radio", "Podcasts", "Settings"};
+static const char* menu_label(MenuSelection selection) {
+    switch (selection) {
+        case MENU_RESUME:      return "Resume";
+        case MENU_NOW_PLAYING: return "Now Playing";
+        case MENU_LIBRARY:     return "Library";
+        case MENU_RADIO:       return "Online Radio";
+        case MENU_PODCAST:     return "Podcasts";
+        case MENU_SETTINGS:    return "Settings";
+        default:               return "";
+    }
+}
 
-// Cached first_item_mode for callbacks
-static int current_first_item_mode = MENU_FIRST_NONE;
+// Row map for the frame being rendered. render_simple_menu's label and text
+// callbacks take an index and nothing else, so the map has to reach them from
+// file scope.
+static MenuRows current_rows;
 
 // Scroll state for Resume track name
 static ScrollTextState resume_scroll = {0};
@@ -36,30 +46,28 @@ static const char* get_now_playing_label(void) {
 // Label callback for first item label and Settings update badge
 static const char* main_menu_get_label(int index, const char* default_label,
                                         char* buffer, int buffer_size) {
-    bool has_first = (current_first_item_mode != MENU_FIRST_NONE);
-
-    // First item: return full label for pill sizing
-    if (has_first && index == 0) {
-        if (current_first_item_mode == MENU_FIRST_NOW_PLAYING) {
+    switch (MenuRows_selectionAt(&current_rows, index)) {
+        case MENU_NOW_PLAYING:
             snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
             return buffer;
+        case MENU_RESUME: {
+            const char* label = Resume_getLabel();
+            if (label) {
+                snprintf(buffer, buffer_size, "%s", label);
+                return buffer;
+            }
+            break;
         }
-        // Resume mode
-        const char* label = Resume_getLabel();
-        if (label) {
-            snprintf(buffer, buffer_size, "%s", label);
-            return buffer;
+        case MENU_SETTINGS: {
+            const SelfUpdateStatus* status = SelfUpdate_getStatus();
+            if (status->update_available) {
+                snprintf(buffer, buffer_size, "Settings (Update available)");
+                return buffer;
+            }
+            break;
         }
-    }
-
-    // Settings item: show update badge
-    int settings_index = has_first ? 4 : 3;
-    if (index == settings_index) {
-        const SelfUpdateStatus* status = SelfUpdate_getStatus();
-        if (status->update_available) {
-            snprintf(buffer, buffer_size, "Settings (Update available)");
-            return buffer;
-        }
+        default:
+            break;
     }
     return NULL;  // Use default label
 }
@@ -67,7 +75,8 @@ static const char* main_menu_get_label(int index, const char* default_label,
 // Custom text rendering for first item: fixed prefix + scrolling text
 static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
                                    int text_x, int text_y, int max_text_width) {
-    if (current_first_item_mode == MENU_FIRST_NONE || index != 0) return false;
+    MenuSelection sel = MenuRows_selectionAt(&current_rows, index);
+    if (sel != MENU_RESUME && sel != MENU_NOW_PLAYING) return false;
 
     // Only custom-render when selected (for scrolling); default rendering handles non-selected
     if (!selected) return false;
@@ -75,7 +84,7 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
     const char* track_name;
     const char* prefix;
 
-    if (current_first_item_mode == MENU_FIRST_NOW_PLAYING) {
+    if (sel == MENU_NOW_PLAYING) {
         prefix = "Now Playing: ";
         track_name = get_now_playing_label();
     } else {
@@ -122,32 +131,26 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 }
 
 // Render the main menu
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                 char* toast_message, uint32_t toast_time, int first_item_mode) {
-    current_first_item_mode = first_item_mode;
-    bool has_first = (first_item_mode != MENU_FIRST_NONE);
+void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll,
+                 char* toast_message, uint32_t toast_time, const MenuRows* rows) {
+    current_rows = *rows;
 
-    // Update the first item label based on mode
-    if (first_item_mode == MENU_FIRST_NOW_PLAYING) {
-        menu_items_with_first[0] = "Now Playing";
-    } else {
-        menu_items_with_first[0] = "Resume";
+    const char* items[MENU_ROWS_MAX];
+    for (int i = 0; i < rows->count; i++) {
+        items[i] = menu_label(MenuRows_selectionAt(rows, i));
     }
-
-    const char** items = has_first ? menu_items_with_first : menu_items_no_first;
-    int count = has_first ? 5 : 4;
 
     SimpleMenuConfig config = {
         .title = "Music Player",
         .items = items,
-        .item_count = count,
+        .item_count = rows->count,
         .btn_b_label = "EXIT",
         .get_label = main_menu_get_label,
         .render_badge = NULL,
         .get_icon = NULL,
         .render_text = main_menu_render_text
     };
-    render_simple_menu(screen, show_setting, menu_selected, &config);
+    render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
 
     // Toast notification
     render_toast(screen, toast_message, toast_time);

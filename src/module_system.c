@@ -18,7 +18,7 @@ ModuleExitReason SystemModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle global input first
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting,

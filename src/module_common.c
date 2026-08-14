@@ -337,6 +337,11 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     overlay_buttons_were_active = overlay_buttons_active;
 }
 
+void ModuleCommon_frameBegin(void) {
+    GFX_startFrame();
+    PAD_poll();
+}
+
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     if (hid_event != USB_HID_EVENT_VOLUME_UP && hid_event != USB_HID_EVENT_VOLUME_DOWN) {
         return false;

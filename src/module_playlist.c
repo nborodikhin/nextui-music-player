@@ -14,6 +14,8 @@
 #include "ui_playlist.h"
 #include "ui_main.h"
 #include "ui_utils.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
 
 // Internal states
 typedef enum {
@@ -24,14 +26,22 @@ typedef enum {
 // List state
 static PlaylistInfo playlists[MAX_PLAYLISTS];
 static int playlist_count = 0;
-static int list_selected = 0;
-static int list_scroll = 0;
+static ListNav list_nav = {
+    .selected = 0,
+    .scroll = 0,
+    .count = 0,
+    .items_per_page = 1,
+};
 
 // Detail state
 static PlaylistTrack detail_tracks[PLAYLIST_MAX_TRACKS];
 static int detail_track_count = 0;
-static int detail_selected = 0;
-static int detail_scroll = 0;
+static ListNav detail_nav = {
+    .selected = 0,
+    .scroll = 0,
+    .count = 0,
+    .items_per_page = 1,
+};
 static int current_playlist_index = -1;  // Index into playlists[] for current detail view
 
 // Toast
@@ -72,8 +82,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -84,9 +93,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                     if (idx >= 0 && idx < playlist_count) {
                         M3U_delete(playlists[idx].path);
                         refresh_playlists();
-                        // Adjust selection
-                        if (list_selected >= playlist_count) list_selected = playlist_count - 1;
-                        if (list_selected < 0) list_selected = 0;
+                        ListNav_onItemRemoved(&list_nav, idx);
                         show_toast("Playlist deleted");
                     }
                 } else if (confirm_action == 1) {
@@ -97,8 +104,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                         refresh_detail();
                         // Update parent count
                         playlists[current_playlist_index].track_count = detail_track_count;
-                        if (detail_selected >= detail_track_count) detail_selected = detail_track_count - 1;
-                        if (detail_selected < 0) detail_selected = 0;
+                        ListNav_onItemRemoved(&detail_nav, idx);
                         show_toast("Track removed");
                     }
                 }
@@ -132,36 +138,22 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
         }
 
         if (state == PLAYLIST_INTERNAL_LIST) {
-            int total_items = playlist_count;
-            int items_per_page = calc_list_layout(screen).items_per_page;
+            list_nav.items_per_page = calc_list_layout(screen).items_per_page;
+            if (ListNav_reconcile(&list_nav, playlist_count).moved) dirty = 1;
 
             if (PAD_justPressed(BTN_B)) {
                 GFX_clearLayers(LAYER_SCROLLTEXT);
                 return MODULE_EXIT_TO_MENU;
             }
-            else if (total_items > 0 && PAD_justRepeated(BTN_UP)) {
-                list_selected = (list_selected > 0) ? list_selected - 1 : total_items - 1;
-                dirty = 1;
-            }
-            else if (total_items > 0 && PAD_justRepeated(BTN_DOWN)) {
-                list_selected = (list_selected < total_items - 1) ? list_selected + 1 : 0;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT)) {
-                list_page_up(&list_selected, &list_scroll, playlist_count, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT)) {
-                list_page_down(&list_selected, &list_scroll, playlist_count, items_per_page);
+            else if (ListNav_step(&list_nav, ListNavPad_read()).moved) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_A)) {
                 // Enter playlist detail
-                if (list_selected >= 0 && list_selected < playlist_count) {
-                    current_playlist_index = list_selected;
+                if (list_nav.selected >= 0 && list_nav.selected < playlist_count) {
+                    current_playlist_index = list_nav.selected;
                     refresh_detail();
-                    detail_selected = 0;
-                    detail_scroll = 0;
+                    ListNav_scrollToTop(&detail_nav);
                     state = PLAYLIST_INTERNAL_DETAIL;
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     dirty = 1;
@@ -192,10 +184,10 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
             }
             else if (PAD_justPressed(BTN_X)) {
                 // Delete playlist
-                if (list_selected >= 0 && list_selected < playlist_count) {
-                    snprintf(confirm_name, sizeof(confirm_name), "%s", playlists[list_selected].name);
+                if (list_nav.selected >= 0 && list_nav.selected < playlist_count) {
+                    snprintf(confirm_name, sizeof(confirm_name), "%s", playlists[list_nav.selected].name);
                     confirm_action = 0;
-                    confirm_target = list_selected;
+                    confirm_target = list_nav.selected;
                     show_confirm = true;
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     dirty = 1;
@@ -209,8 +201,8 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
             if (playlist_list_scroll_needs_render()) dirty = 1;
 
         } else if (state == PLAYLIST_INTERNAL_DETAIL) {
-            int total_items = detail_track_count;
-            int items_per_page = calc_list_layout(screen).items_per_page;
+            detail_nav.items_per_page = calc_list_layout(screen).items_per_page;
+            if (ListNav_reconcile(&detail_nav, detail_track_count).moved) dirty = 1;
 
             if (PAD_justPressed(BTN_B)) {
                 GFX_clearLayers(LAYER_SCROLLTEXT);
@@ -218,20 +210,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                 state = PLAYLIST_INTERNAL_LIST;
                 dirty = 1;
             }
-            else if (total_items > 0 && PAD_justRepeated(BTN_UP)) {
-                detail_selected = (detail_selected > 0) ? detail_selected - 1 : total_items - 1;
-                dirty = 1;
-            }
-            else if (total_items > 0 && PAD_justRepeated(BTN_DOWN)) {
-                detail_selected = (detail_selected < total_items - 1) ? detail_selected + 1 : 0;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT)) {
-                list_page_up(&detail_selected, &detail_scroll, detail_track_count, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT)) {
-                list_page_down(&detail_selected, &detail_scroll, detail_track_count, items_per_page);
+            else if (ListNav_step(&detail_nav, ListNavPad_read()).moved) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_A)) {
@@ -239,21 +218,20 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                     // Play the playlist starting from selected track
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     PlayerModule_setResumePlaylistPath(playlists[current_playlist_index].path);
-                    PlayerModule_runWithPlaylist(screen, detail_tracks, detail_track_count, detail_selected);
+                    PlayerModule_runWithPlaylist(screen, detail_tracks, detail_track_count, detail_nav.selected);
                     PlayerModule_setResumePlaylistPath(NULL);
                     // On return, refresh and go back to detail
                     refresh_detail();
-                    if (detail_selected >= detail_track_count) detail_selected = detail_track_count - 1;
-                    if (detail_selected < 0) detail_selected = 0;
+                    ListNav_reconcile(&detail_nav, detail_track_count);
                     dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_X)) {
                 // Remove track
-                if (detail_selected >= 0 && detail_selected < detail_track_count) {
-                    snprintf(confirm_name, sizeof(confirm_name), "%s", detail_tracks[detail_selected].name);
+                if (detail_nav.selected >= 0 && detail_nav.selected < detail_track_count) {
+                    snprintf(confirm_name, sizeof(confirm_name), "%s", detail_tracks[detail_nav.selected].name);
                     confirm_action = 1;
-                    confirm_target = detail_selected;
+                    confirm_target = detail_nav.selected;
                     show_confirm = true;
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     dirty = 1;
@@ -279,14 +257,10 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
             }
 
             if (state == PLAYLIST_INTERNAL_LIST) {
-                int items_per_page = calc_list_layout(screen).items_per_page;
-                adjust_list_scroll(list_selected, &list_scroll, items_per_page);
-                render_playlist_list(screen, show_setting, playlists, playlist_count, list_selected, list_scroll);
+                render_playlist_list(screen, show_setting, playlists, playlist_count, list_nav.selected, list_nav.scroll);
             } else {
-                int items_per_page = calc_list_layout(screen).items_per_page;
-                adjust_list_scroll(detail_selected, &detail_scroll, items_per_page);
                 render_playlist_detail(screen, show_setting, playlists[current_playlist_index].name,
-                                       detail_tracks, detail_track_count, detail_selected, detail_scroll);
+                                       detail_tracks, detail_track_count, detail_nav.selected, detail_nav.scroll);
             }
 
             // Toast

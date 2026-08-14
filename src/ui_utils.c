@@ -5,6 +5,7 @@
 #include "ui_fonts.h"
 #include "ui_icons.h"
 #include "module_common.h"
+#include "list_nav.h"
 
 // Format duration as MM:SS
 void format_time(char* buf, int ms) {
@@ -288,86 +289,21 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     }
 }
 
-// Adjust scroll offset to keep selected item visible
+// Adjust scroll offset to keep selected item visible. Forwards to list_nav.c,
+// which owns the window math (see list_page_up/down below for the same shape).
 void adjust_list_scroll(int selected, int* scroll, int items_per_page) {
-    if (selected < *scroll) {
-        *scroll = selected;
-    }
-    if (selected >= *scroll + items_per_page) {
-        *scroll = selected - items_per_page + 1;
-    }
+    ListNav_adjustScroll(selected, scroll, items_per_page);
 }
 
+// Page math lives in list_nav.c, which has no platform includes and is unit
+// tested on the host. These remain so the pre-ListNav call sites keep working;
+// they are the same implementation, not a second one.
 bool list_page_up(int *selected, int *scroll, int total_count, int items_per_page) {
-    if (items_per_page < 1) {
-        items_per_page = 1;
-    }
-
-    int old_scroll   = *scroll;
-    int old_selected = *selected;
-    int relative_pos = *selected - *scroll;
-    if (relative_pos < 0) {
-        relative_pos = 0;
-    } else if (relative_pos > items_per_page) {
-        relative_pos = items_per_page;
-    }
-
-    *scroll -= items_per_page;
-    if (*scroll < 0) {
-        *scroll = 0;
-    }
-
-    // keep position of selected item on the screen, snap to the first item if needed
-    if (*scroll == old_scroll) {
-        *selected = 0;
-    } else {
-        *selected = *scroll + relative_pos;
-    }
-
-    if (*selected < 0) {
-        *selected = 0;
-    } else if (*selected >= total_count) {
-        *selected = total_count - 1;
-    }
-
-    return (*scroll != old_scroll || *selected != old_selected);
+    return ListNav_pageUp(selected, scroll, total_count, items_per_page);
 }
 
 bool list_page_down(int *selected, int *scroll, int total_count, int items_per_page) {
-    if (items_per_page < 1) {
-        items_per_page = 1;
-    }
-
-    int old_scroll   = *scroll;
-    int old_selected = *selected;
-    int max_scroll   = (total_count > items_per_page) ? total_count - items_per_page : 0;
-
-    int relative_pos = *selected - *scroll;
-    if (relative_pos < 0) {
-        relative_pos = 0;
-    } else if (relative_pos > items_per_page) {
-        relative_pos = items_per_page;
-    }
-
-    *scroll += items_per_page;
-    if (*scroll > max_scroll) {
-        *scroll = max_scroll;
-    }
-
-    // keep position of selected item on the screen, snap to the last item if needed
-    if (*scroll == old_scroll) {
-        *selected = total_count - 1;
-    } else {
-        *selected = *scroll + relative_pos;
-    }
-
-    if (*selected >= total_count) {
-        *selected = total_count - 1;
-    } else if (*selected < 0) {
-        *selected = 0;
-    }
-
-    return (*scroll != old_scroll || *selected != old_selected);
+    return ListNav_pageDown(selected, scroll, total_count, items_per_page);
 }
 
 // Render scroll up/down indicators for lists
@@ -402,6 +338,9 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
     layout.list_h = hh - layout.list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;
+    // "Rich" rows (thumbnail + two text lines) are 1.5x a plain row.
+    layout.rich_item_h = SCALE1(PILL_SIZE) * 3 / 2;
+    layout.rich_items_per_page = layout.list_h / layout.rich_item_h;
     layout.max_width = hw - SCALE1(PADDING * 2);
 
     return layout;
@@ -706,7 +645,7 @@ void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uin
 
 // Render a simple menu with optional customization callbacks
 void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                        const SimpleMenuConfig* config) {
+                        int menu_scroll, const SimpleMenuConfig* config) {
     GFX_clear(screen);
     char truncated[256];
     char label_buffer[256];
@@ -718,7 +657,11 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
     int icon_size = SCALE1(24);
     int icon_spacing = SCALE1(6);
 
-    for (int i = 0; i < config->item_count; i++) {
+    adjust_list_scroll(menu_selected, &menu_scroll, layout.items_per_page);
+
+    for (int i = menu_scroll;
+         i < config->item_count && i - menu_scroll < layout.items_per_page;
+         i++) {
         bool selected = (i == menu_selected);
 
         // Get label (use callback if provided)
@@ -739,7 +682,8 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
         }
 
         // Render pill and text (account for icon width in pill calculation)
-        MenuItemPos pos = render_menu_item_pill(screen, &layout, label, truncated, i, selected, icon_offset);
+        MenuItemPos pos = render_menu_item_pill(screen, &layout, label, truncated,
+                                                i - menu_scroll, selected, icon_offset);
 
         // Render icon if present (scale to display size)
         int text_x = pos.text_x;
@@ -767,6 +711,8 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
             config->render_badge(screen, i, selected, pos.item_y, SCALE1(PILL_SIZE));
         }
     }
+
+    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, config->item_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);

@@ -5,9 +5,11 @@
 #include <stdint.h>
 #include <SDL2/SDL.h>
 
-// Render the main menu (first_item_mode: 0=none, 1=Resume, 2=Now Playing)
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                 char* toast_message, uint32_t toast_time, int first_item_mode);
+#include "menu_rows.h"
+
+// Render the main menu.
+void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll,
+                 char* toast_message, uint32_t toast_time, const MenuRows* rows);
 
 // Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title);

@@ -132,8 +132,7 @@ int main(int argc, char* argv[]) {
 
     // Main application loop
     while (!quit) {
-        // Run main menu - returns selected item or MENU_QUIT
-        int selection = MenuModule_run(screen);
+        MenuSelection selection = MenuModule_run(screen);
 
         if (selection == MENU_QUIT) {
             quit = true;
@@ -144,28 +143,26 @@ int main(int argc, char* argv[]) {
         ModuleExitReason reason = MODULE_EXIT_TO_MENU;
 
         switch (selection) {
-            case MENU_RESUME: {  // Also MENU_NOW_PLAYING (same slot)
-                if (Background_isPlaying()) {
-                    // "Now Playing" — route to the active background module
-                    switch (Background_getActive()) {
-                        case BG_MUSIC:
-                            reason = PlayerModule_run(screen, true);  // Now Playing entry
-                            break;
-                        case BG_RADIO:
-                            reason = RadioModule_run(screen);
-                            break;
-                        case BG_PODCAST:
-                            reason = PodcastModule_run(screen);
-                            break;
-                        default:
-                            break;
-                    }
-                } else {
-                    // "Resume" — load saved state
-                    const ResumeState* rs = Resume_getState();
-                    if (rs) {
-                        reason = PlayerModule_runResume(screen, rs);
-                    }
+            case MENU_NOW_PLAYING:
+                switch (Background_getActive()) {
+                    case BG_MUSIC:
+                        reason = PlayerModule_run(screen, true);  // Now Playing entry
+                        break;
+                    case BG_RADIO:
+                        reason = RadioModule_run(screen);
+                        break;
+                    case BG_PODCAST:
+                        reason = PodcastModule_run(screen);
+                        break;
+                    default:
+                        break;
+                }
+                break;
+
+            case MENU_RESUME: {
+                const ResumeState* rs = Resume_getState();
+                if (rs) {
+                    reason = PlayerModule_runResume(screen, rs);
                 }
                 break;
             }
@@ -180,6 +177,10 @@ int main(int argc, char* argv[]) {
                 break;
             case MENU_SETTINGS:
                 reason = SettingsModule_run(screen);
+                break;
+
+            case MENU_NONE:
+            case MENU_QUIT:
                 break;
         }
 

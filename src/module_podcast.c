@@ -15,6 +15,8 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
 #include "background.h"
 
 // Internal states
@@ -30,21 +32,58 @@ typedef enum {
 } PodcastInternalState;
 
 // Module state
-static int podcast_menu_selected = 0;
-static int podcast_menu_scroll = 0;
-static int podcast_manage_selected = 0;
-static int podcast_manage_scroll = 0;
-static int podcast_top_shows_selected = 0;
-static int podcast_top_shows_scroll = 0;
-static int podcast_search_selected = 0;
-static int podcast_search_scroll = 0;
+// Home and Episodes keep `scroll` in PIXELS, not rows - their renderers lay out
+// section headers and an info panel between the items, so the window cannot be
+// expressed as a row index. .external_scroll keeps ListNav off .scroll; the
+// pixel offset lives in the plain int below, owned by the renderer.
+static ListNav podcast_menu_nav = {
+    .selected        = 0,
+    .scroll          = 0,
+    .count           = 0,
+    .items_per_page  = 1,
+    .external_scroll = true,
+};
+static int podcast_menu_scroll_px = 0;   // pixels
+static ListNav podcast_manage_nav = {
+    .selected       = 0,
+    .scroll         = 0,
+    .count          = PODCAST_MANAGE_COUNT,
+    .items_per_page = 1,
+};
+static ListNav podcast_top_shows_nav = {
+    .selected       = 0,
+    .scroll         = 0,
+    .count          = 0,
+    .items_per_page = 1,
+};
+static ListNav podcast_search_nav = {
+    .selected       = 0,
+    .scroll         = 0,
+    .count          = 0,
+    .items_per_page = 1,
+};
 static char podcast_search_query[256] = "";
-static int podcast_episodes_selected = 0;
-static int podcast_episodes_scroll = 0;
+static ListNav podcast_episodes_nav = {
+    .selected        = 0,
+    .scroll          = 0,
+    .count           = 0,
+    .items_per_page  = 1,
+    .external_scroll = true,
+};
+static int podcast_episodes_scroll_px = 0;   // pixels
 static int podcast_current_feed_index = -1;
 static int podcast_current_episode_index = -1;
-static int podcast_queue_selected = 0;
-static int podcast_queue_scroll = 0;
+// Guid of the item under the queue cursor, remembered across frames: the worker
+// compacts COMPLETE and FAILED items out of wherever they sat, so a count delta
+// alone cannot say how far the selection shifted.
+static char podcast_queue_cursor_guid[PODCAST_MAX_GUID] = "";
+
+static ListNav podcast_queue_nav = {
+    .selected       = 0,
+    .scroll         = 0,
+    .count          = 0,
+    .items_per_page = 1,
+};
 static char podcast_toast_message[128] = "";
 static uint32_t podcast_toast_time = 0;
 
@@ -92,7 +131,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
     PLAT_GPU_Flip();
     ModuleCommon_setAutosleepDisabled(false);
-    podcast_episodes_selected = podcast_current_episode_index;
+    podcast_episodes_nav.selected = podcast_current_episode_index;
     *state = PODCAST_INTERNAL_EPISODES;
     *dirty = 1;
 }
@@ -117,8 +156,8 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     ModuleCommon_recordInputTime();
     podcast_toast_message[0] = '\0';
     show_confirm = false;
-    podcast_menu_selected = 0;
-    podcast_menu_scroll = 0;
+    ListNav_scrollToTop(&podcast_menu_nav);
+    podcast_menu_scroll_px = 0;
 
     // Re-enter playing state if podcast is playing in background
     if (Background_getActive() == BG_PODCAST && Podcast_isActive()) {
@@ -128,25 +167,13 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
     }
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle confirmation dialog
         if (show_confirm) {
             if (PAD_justPressed(BTN_A)) {
                 // Confirm unsubscribe
                 Podcast_unsubscribe(confirm_target_index);
-                if (confirm_return_state == 0) {
-                    // From main menu — clamp selection to new total
-                    int cl_count_raw2 = Podcast_getContinueListeningCount();
-                    int cl_count2 = (cl_count_raw2 > PODCAST_CONTINUE_LISTENING_DISPLAY) ? PODCAST_CONTINUE_LISTENING_DISPLAY : cl_count_raw2;
-                    int total = cl_count2 + Podcast_getSubscriptionCount();
-                    if (podcast_menu_selected >= total && total > 0) {
-                        podcast_menu_selected = total - 1;
-                    } else if (total == 0) {
-                        podcast_menu_selected = 0;
-                    }
-                }
                 snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Unsubscribed");
                 podcast_toast_time = SDL_GetTicks();
                 show_confirm = false;
@@ -215,12 +242,14 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             Podcast_getDownloadQueue(&dl_queue_count);
             int has_downloads_item = (dl_queue_count > 0) ? 1 : 0;
             int total = cl_count + sub_count + has_downloads_item;
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            podcast_menu_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
-            // Clamp selection if items changed (e.g. download queue emptied)
-            if (podcast_menu_selected >= total && total > 0) {
-                podcast_menu_selected = total - 1;
-            }
+            // Items change underneath the cursor (the Downloads row appears and
+            // disappears with the queue), so reconcile before reading it.
+            // The Downloads row comes and goes with the queue, so the row count
+            // can change without the cursor moving.
+            if (podcast_menu_nav.count != total) dirty = 1;
+            if (ListNav_reconcile(&podcast_menu_nav, total).moved) dirty = 1;
 
             if (podcast_toast_message[0] && (SDL_GetTicks() - podcast_toast_time < TOAST_DURATION)) dirty = 1;
             if (has_downloads_item) dirty = 1;  // Force redraw to update download status
@@ -228,41 +257,22 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             if (Podcast_titleScrollNeedsRender()) dirty = 1;
             if (Podcast_loadPendingThumbnails()) dirty = 1;
 
-            if (PAD_justRepeated(BTN_UP) && total > 0) {
-                podcast_menu_selected = (podcast_menu_selected > 0) ? podcast_menu_selected - 1 : total - 1;
+            if (ListNav_step(&podcast_menu_nav, ListNavPad_read()).moved) {
                 Podcast_clearTitleScroll();
                 dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN) && total > 0) {
-                podcast_menu_selected = (podcast_menu_selected < total - 1) ? podcast_menu_selected + 1 : 0;
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT) && total > 0) {
-                if (list_page_up(&podcast_menu_selected, &podcast_menu_scroll, total, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
-            }
-            else if (PAD_justPressed(BTN_RIGHT) && total > 0) {
-                if (list_page_down(&podcast_menu_selected, &podcast_menu_scroll, total, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
             }
             else if (PAD_justPressed(BTN_A) && total > 0) {
-                if (has_downloads_item && podcast_menu_selected == cl_count + sub_count) {
+                if (has_downloads_item && podcast_menu_nav.selected == cl_count + sub_count) {
                     // Downloads item — open download queue
-                    podcast_queue_selected = 0;
-                    podcast_queue_scroll = 0;
+                    ListNav_scrollToTop(&podcast_queue_nav);
                     Podcast_clearTitleScroll();
                     podcast_toast_message[0] = '\0';
                     clear_toast();
                     state = PODCAST_INTERNAL_DOWNLOAD_QUEUE;
                     dirty = 1;
-                } else if (podcast_menu_selected < cl_count) {
+                } else if (podcast_menu_nav.selected < cl_count) {
                     // Continue Listening item — play directly
-                    ContinueListeningEntry* cl_entry = Podcast_getContinueListening(podcast_menu_selected);
+                    ContinueListeningEntry* cl_entry = Podcast_getContinueListening(podcast_menu_nav.selected);
                     if (cl_entry) {
                         int fi = Podcast_findFeedIndex(cl_entry->feed_url);
                         if (fi >= 0) {
@@ -312,9 +322,9 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                     }
                 } else {
                     // Subscription item — go to episodes
-                    podcast_current_feed_index = podcast_menu_selected - cl_count;
-                    podcast_episodes_selected = 0;
-                    podcast_episodes_scroll = 0;
+                    podcast_current_feed_index = podcast_menu_nav.selected - cl_count;
+                    ListNav_scrollToTop(&podcast_episodes_nav);
+                    podcast_episodes_scroll_px = 0;
                     Podcast_clearTitleScroll();
                     podcast_toast_message[0] = '\0';
                     clear_toast();
@@ -324,8 +334,8 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             }
             else if (PAD_justPressed(BTN_X) && total > 0) {
                 // Only allow unsubscribe on subscription items (not Downloads item)
-                if (podcast_menu_selected >= cl_count && podcast_menu_selected < cl_count + sub_count) {
-                    int sub_idx = podcast_menu_selected - cl_count;
+                if (podcast_menu_nav.selected >= cl_count && podcast_menu_nav.selected < cl_count + sub_count) {
+                    int sub_idx = podcast_menu_nav.selected - cl_count;
                     PodcastFeed* feed = Podcast_getSubscription(sub_idx);
                     if (feed) {
                         strncpy(confirm_podcast_name, feed->title, sizeof(confirm_podcast_name) - 1);
@@ -339,7 +349,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 }
             }
             else if (PAD_justPressed(BTN_Y)) {
-                podcast_manage_selected = 0;
+                ListNav_scrollToTop(&podcast_manage_nav);
                 podcast_toast_message[0] = '\0';
                 Podcast_clearTitleScroll();
                 clear_toast();
@@ -367,26 +377,13 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         // =========================================
         else if (state == PODCAST_INTERNAL_MANAGE) {
             Podcast_update();
-            int items_per_page = calc_list_layout(screen).items_per_page;
+            podcast_manage_nav.items_per_page = calc_list_layout(screen).items_per_page;
 
-            if (PAD_justRepeated(BTN_UP)) {
-                podcast_manage_selected = (podcast_manage_selected > 0) ? podcast_manage_selected - 1 : PODCAST_MANAGE_COUNT - 1;
+            if (ListNav_step(&podcast_manage_nav, ListNavPad_read()).moved) {
                 dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN)) {
-                podcast_manage_selected = (podcast_manage_selected < PODCAST_MANAGE_COUNT - 1) ? podcast_manage_selected + 1 : 0;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT)) {
-                if (list_page_up(&podcast_manage_selected, &podcast_manage_scroll, PODCAST_MANAGE_COUNT, items_per_page))
-                    dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT)) {
-                if (list_page_down(&podcast_manage_selected, &podcast_manage_scroll, PODCAST_MANAGE_COUNT, items_per_page))
-                    dirty = 1;
             }
             else if (PAD_justPressed(BTN_A)) {
-                switch (podcast_manage_selected) {
+                switch (podcast_manage_nav.selected) {
                     case PODCAST_MANAGE_SEARCH: {
                         if (!Wifi_ensureConnected(screen, show_setting)) {
                             strncpy(podcast_toast_message, "Internet connection required", sizeof(podcast_toast_message) - 1);
@@ -407,8 +404,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                         if (query && query[0]) {
                             strncpy(podcast_search_query, query, sizeof(podcast_search_query) - 1);
                             Podcast_startSearch(podcast_search_query);
-                            podcast_search_selected = 0;
-                            podcast_search_scroll = 0;
+                            ListNav_scrollToTop(&podcast_search_nav);
                             podcast_toast_message[0] = '\0';
                             state = PODCAST_INTERNAL_SEARCH_RESULTS;
                         }
@@ -424,8 +420,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                             break;
                         }
                         Podcast_loadCharts(NULL);
-                        podcast_top_shows_selected = 0;
-                        podcast_top_shows_scroll = 0;
+                        ListNav_scrollToTop(&podcast_top_shows_nav);
                         podcast_toast_message[0] = '\0';
                         state = PODCAST_INTERNAL_TOP_SHOWS;
                         dirty = 1;
@@ -443,7 +438,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         else if (state == PODCAST_INTERNAL_TOP_SHOWS) {
             Podcast_update();
             const PodcastChartsStatus* chart_status = Podcast_getChartsStatus();
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            podcast_top_shows_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
             if (chart_status->loading || chart_status->completed) dirty = 1;
             if (podcast_toast_message[0] && (SDL_GetTicks() - podcast_toast_time < TOAST_DURATION)) dirty = 1;
@@ -453,28 +448,23 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             if (!chart_status->loading) {
                 int count = 0;
                 Podcast_getTopShows(&count);
+                if (ListNav_reconcile(&podcast_top_shows_nav, count).moved) dirty = 1;
 
-                if (PAD_justRepeated(BTN_UP) && count > 0) {
-                    podcast_top_shows_selected = (podcast_top_shows_selected > 0) ? podcast_top_shows_selected - 1 : count - 1;
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
-                else if (PAD_justRepeated(BTN_DOWN) && count > 0) {
-                    podcast_top_shows_selected = (podcast_top_shows_selected < count - 1) ? podcast_top_shows_selected + 1 : 0;
+                if (ListNav_step(&podcast_top_shows_nav, ListNavPad_read()).moved) {
                     Podcast_clearTitleScroll();
                     dirty = 1;
                 }
                 else if (PAD_justPressed(BTN_A) && count > 0) {
                     PodcastChartItem* items = Podcast_getTopShows(&count);
-                    if (podcast_top_shows_selected < count) {
-                        bool already_subscribed = Podcast_isSubscribedByItunesId(items[podcast_top_shows_selected].itunes_id);
+                    if (podcast_top_shows_nav.selected < count) {
+                        bool already_subscribed = Podcast_isSubscribedByItunesId(items[podcast_top_shows_nav.selected].itunes_id);
                         if (already_subscribed) {
                             // Find subscription index and show confirm dialog
                             int sub_count = 0;
                             PodcastFeed* feeds = Podcast_getSubscriptions(&sub_count);
                             for (int si = 0; si < sub_count; si++) {
-                                if (feeds[si].itunes_id[0] && strcmp(feeds[si].itunes_id, items[podcast_top_shows_selected].itunes_id) == 0) {
-                                    strncpy(confirm_podcast_name, items[podcast_top_shows_selected].title, sizeof(confirm_podcast_name) - 1);
+                                if (feeds[si].itunes_id[0] && strcmp(feeds[si].itunes_id, items[podcast_top_shows_nav.selected].itunes_id) == 0) {
+                                    strncpy(confirm_podcast_name, items[podcast_top_shows_nav.selected].title, sizeof(confirm_podcast_name) - 1);
                                     confirm_podcast_name[sizeof(confirm_podcast_name) - 1] = '\0';
                                     confirm_target_index = si;
                                     confirm_return_state = 1;
@@ -486,7 +476,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                             Podcast_clearTitleScroll();
                             render_podcast_loading(screen, "Subscribing...");
                             GFX_flip(screen);
-                            int sub_result = Podcast_subscribeFromItunes(items[podcast_top_shows_selected].itunes_id);
+                            int sub_result = Podcast_subscribeFromItunes(items[podcast_top_shows_nav.selected].itunes_id);
                             if (sub_result == 0) {
                                 strncpy(podcast_toast_message, "Subscribed!", sizeof(podcast_toast_message) - 1);
                             } else {
@@ -506,8 +496,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                     } else {
                         Podcast_clearChartsCache();
                         Podcast_loadCharts(NULL);
-                        podcast_top_shows_selected = 0;
-                        podcast_top_shows_scroll = 0;
+                        ListNav_scrollToTop(&podcast_top_shows_nav);
                         strncpy(podcast_toast_message, "Refreshing...", sizeof(podcast_toast_message) - 1);
                         podcast_toast_time = SDL_GetTicks();
                     }
@@ -522,22 +511,6 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 state = PODCAST_INTERNAL_MANAGE;
                 dirty = 1;
             }
-            else if (!chart_status->loading) {
-                int count = 0;
-                Podcast_getTopShows(&count);
-                if (PAD_justPressed(BTN_LEFT) && count > 0) {
-                    if (list_page_up(&podcast_top_shows_selected, &podcast_top_shows_scroll, count, items_per_page)) {
-                        Podcast_clearTitleScroll();
-                        dirty = 1;
-                    }
-                }
-                else if (PAD_justPressed(BTN_RIGHT) && count > 0) {
-                    if (list_page_down(&podcast_top_shows_selected, &podcast_top_shows_scroll, count, items_per_page)) {
-                        Podcast_clearTitleScroll();
-                        dirty = 1;
-                    }
-                }
-            }
         }
         // =========================================
         // SEARCH RESULTS STATE
@@ -545,7 +518,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         else if (state == PODCAST_INTERNAL_SEARCH_RESULTS) {
             Podcast_update();
             const PodcastSearchStatus* search_status = Podcast_getSearchStatus();
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            podcast_search_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
             if (search_status->searching || search_status->completed) dirty = 1;
             if (podcast_toast_message[0] && (SDL_GetTicks() - podcast_toast_time < TOAST_DURATION)) dirty = 1;
@@ -555,29 +528,24 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             if (!search_status->searching) {
                 int count = 0;
                 Podcast_getSearchResults(&count);
+                if (ListNav_reconcile(&podcast_search_nav, count).moved) dirty = 1;
 
-                if (PAD_justRepeated(BTN_UP) && count > 0) {
-                    podcast_search_selected = (podcast_search_selected > 0) ? podcast_search_selected - 1 : count - 1;
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
-                else if (PAD_justRepeated(BTN_DOWN) && count > 0) {
-                    podcast_search_selected = (podcast_search_selected < count - 1) ? podcast_search_selected + 1 : 0;
+                if (ListNav_step(&podcast_search_nav, ListNavPad_read()).moved) {
                     Podcast_clearTitleScroll();
                     dirty = 1;
                 }
                 else if (PAD_justPressed(BTN_A) && count > 0) {
                     PodcastSearchResult* results = Podcast_getSearchResults(&count);
-                    if (podcast_search_selected < count) {
-                        bool already_subscribed = results[podcast_search_selected].feed_url[0] &&
-                                                   Podcast_isSubscribed(results[podcast_search_selected].feed_url);
+                    if (podcast_search_nav.selected < count) {
+                        bool already_subscribed = results[podcast_search_nav.selected].feed_url[0] &&
+                                                   Podcast_isSubscribed(results[podcast_search_nav.selected].feed_url);
                         if (already_subscribed) {
                             // Find subscription index and show confirm dialog
                             int sub_count = 0;
                             PodcastFeed* feeds = Podcast_getSubscriptions(&sub_count);
                             for (int si = 0; si < sub_count; si++) {
-                                if (strcmp(feeds[si].feed_url, results[podcast_search_selected].feed_url) == 0) {
-                                    strncpy(confirm_podcast_name, results[podcast_search_selected].title, sizeof(confirm_podcast_name) - 1);
+                                if (strcmp(feeds[si].feed_url, results[podcast_search_nav.selected].feed_url) == 0) {
+                                    strncpy(confirm_podcast_name, results[podcast_search_nav.selected].title, sizeof(confirm_podcast_name) - 1);
                                     confirm_podcast_name[sizeof(confirm_podcast_name) - 1] = '\0';
                                     confirm_target_index = si;
                                     confirm_return_state = 2;
@@ -590,10 +558,10 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                             render_podcast_loading(screen, "Subscribing...");
                             GFX_flip(screen);
                             int sub_result;
-                            if (results[podcast_search_selected].feed_url[0]) {
-                                sub_result = Podcast_subscribe(results[podcast_search_selected].feed_url);
+                            if (results[podcast_search_nav.selected].feed_url[0]) {
+                                sub_result = Podcast_subscribe(results[podcast_search_nav.selected].feed_url);
                             } else {
-                                sub_result = Podcast_subscribeFromItunes(results[podcast_search_selected].itunes_id);
+                                sub_result = Podcast_subscribeFromItunes(results[podcast_search_nav.selected].itunes_id);
                             }
                             if (sub_result == 0) {
                                 strncpy(podcast_toast_message, "Subscribed!", sizeof(podcast_toast_message) - 1);
@@ -616,22 +584,6 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 state = PODCAST_INTERNAL_MANAGE;
                 dirty = 1;
             }
-            else if (!search_status->searching) {
-                int count = 0;
-                Podcast_getSearchResults(&count);
-                if (PAD_justPressed(BTN_LEFT) && count > 0) {
-                    if (list_page_up(&podcast_search_selected, &podcast_search_scroll, count, items_per_page)) {
-                        Podcast_clearTitleScroll();
-                        dirty = 1;
-                    }
-                }
-                else if (PAD_justPressed(BTN_RIGHT) && count > 0) {
-                    if (list_page_down(&podcast_search_selected, &podcast_search_scroll, count, items_per_page)) {
-                        Podcast_clearTitleScroll();
-                        dirty = 1;
-                    }
-                }
-            }
         }
         // =========================================
         // EPISODES STATE
@@ -639,7 +591,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         else if (state == PODCAST_INTERNAL_EPISODES) {
             PodcastFeed* feed = Podcast_getSubscription(podcast_current_feed_index);
             int count = feed ? feed->episode_count : 0;
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            podcast_episodes_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
             // Check if refresh just completed
             if (Podcast_checkRefreshCompleted()) {
@@ -672,30 +624,13 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             if (Podcast_titleScrollNeedsRender()) dirty = 1;
             if (podcast_toast_message[0] && (SDL_GetTicks() - podcast_toast_time < TOAST_DURATION)) dirty = 1;
 
-            if (PAD_justRepeated(BTN_UP) && count > 0) {
-                podcast_episodes_selected = (podcast_episodes_selected > 0) ? podcast_episodes_selected - 1 : count - 1;
+            if (ListNav_reconcile(&podcast_episodes_nav, count).moved) dirty = 1;
+            if (ListNav_step(&podcast_episodes_nav, ListNavPad_read()).moved) {
                 Podcast_clearTitleScroll();
                 dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN) && count > 0) {
-                podcast_episodes_selected = (podcast_episodes_selected < count - 1) ? podcast_episodes_selected + 1 : 0;
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT) && count > 0) {
-                if (list_page_up(&podcast_episodes_selected, &podcast_episodes_scroll, count, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
-            }
-            else if (PAD_justPressed(BTN_RIGHT) && count > 0) {
-                if (list_page_down(&podcast_episodes_selected, &podcast_episodes_scroll, count, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
             }
             else if (PAD_justPressed(BTN_A) && count > 0 && feed) {
-                podcast_current_episode_index = podcast_episodes_selected;
+                podcast_current_episode_index = podcast_episodes_nav.selected;
                 PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_current_episode_index);
 
                 if (ep) {
@@ -750,7 +685,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_X) && count > 0 && feed) {
-                PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_episodes_selected);
+                PodcastEpisode* ep = Podcast_getEpisode(podcast_current_feed_index, podcast_episodes_nav.selected);
                 if (ep) {
                     // Toggle played status
                     if (ep->progress_sec == -1) {
@@ -794,20 +729,32 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
         // DOWNLOAD QUEUE STATE
         // =========================================
         else if (state == PODCAST_INTERNAL_DOWNLOAD_QUEUE) {
-            static int prev_queue_count = -1;
             int queue_count = 0;
-            Podcast_getDownloadQueue(&queue_count);
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            PodcastDownloadItem* qitems = Podcast_getDownloadQueue(&queue_count);
+            podcast_queue_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
-            // Detect items removed by background download thread
-            if (prev_queue_count >= 0 && queue_count < prev_queue_count) {
-                Podcast_clearTitleScroll();
-                if (podcast_queue_selected >= queue_count && queue_count > 0) {
-                    podcast_queue_selected = queue_count - 1;
+            if (podcast_queue_nav.count != queue_count) {
+                // Find where the selected item went. What vanished from above it
+                // is what shifted the selection; moving the window by the same
+                // amount holds it on its screen row. Redraw regardless - rows
+                // below the cursor repaint even when the cursor does not move.
+                int now_at = -1;
+                if (podcast_queue_cursor_guid[0]) {
+                    for (int i = 0; i < queue_count; i++) {
+                        if (strcmp(qitems[i].episode_guid, podcast_queue_cursor_guid) == 0) {
+                            now_at = i;
+                            break;
+                        }
+                    }
                 }
+                if (now_at >= 0 && now_at < podcast_queue_nav.selected) {
+                    ListNav_onItemsRemoved(&podcast_queue_nav, 0,
+                                           podcast_queue_nav.selected - now_at);
+                }
+                ListNav_reconcile(&podcast_queue_nav, queue_count);
+                Podcast_clearTitleScroll();
                 dirty = 1;
             }
-            prev_queue_count = queue_count;
 
             // Force redraw when downloads are active
             for (int qi = 0; qi < queue_count; qi++) {
@@ -821,45 +768,31 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             if (Podcast_isTitleScrolling()) Podcast_animateTitleScroll();
             if (Podcast_titleScrollNeedsRender()) dirty = 1;
 
-            if (PAD_justRepeated(BTN_UP) && queue_count > 0) {
-                podcast_queue_selected = (podcast_queue_selected > 0) ? podcast_queue_selected - 1 : queue_count - 1;
+            // Remember what the cursor is on, for the next count change.
+            if (podcast_queue_nav.selected >= 0 && podcast_queue_nav.selected < queue_count) {
+                snprintf(podcast_queue_cursor_guid, sizeof(podcast_queue_cursor_guid), "%s",
+                         qitems[podcast_queue_nav.selected].episode_guid);
+            } else {
+                podcast_queue_cursor_guid[0] = '\0';
+            }
+
+            if (ListNav_step(&podcast_queue_nav, ListNavPad_read()).moved) {
                 Podcast_clearTitleScroll();
                 dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN) && queue_count > 0) {
-                podcast_queue_selected = (podcast_queue_selected < queue_count - 1) ? podcast_queue_selected + 1 : 0;
-                Podcast_clearTitleScroll();
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT) && queue_count > 0) {
-                if (list_page_up(&podcast_queue_selected, &podcast_queue_scroll, queue_count, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
-            }
-            else if (PAD_justPressed(BTN_RIGHT) && queue_count > 0) {
-                if (list_page_down(&podcast_queue_selected, &podcast_queue_scroll, queue_count, items_per_page)) {
-                    Podcast_clearTitleScroll();
-                    dirty = 1;
-                }
             }
             else if (PAD_justPressed(BTN_X) && queue_count > 0) {
                 // Cancel/remove selected item
                 PodcastDownloadItem* queue = Podcast_getDownloadQueue(NULL);
-                if (podcast_queue_selected < queue_count) {
-                    PodcastDownloadItem* sel = &queue[podcast_queue_selected];
+                if (podcast_queue_nav.selected < queue_count) {
+                    PodcastDownloadItem* sel = &queue[podcast_queue_nav.selected];
                     if (Podcast_cancelEpisodeDownload(sel->feed_url, sel->episode_guid) == 0) {
                         snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Download removed");
+                        ListNav_onItemRemoved(&podcast_queue_nav, podcast_queue_nav.selected);
+                        podcast_queue_cursor_guid[0] = '\0';
                     } else {
                         snprintf(podcast_toast_message, sizeof(podcast_toast_message), "Remove failed");
                     }
                     podcast_toast_time = SDL_GetTicks();
-                    // Adjust selection if needed
-                    int new_count = 0;
-                    Podcast_getDownloadQueue(&new_count);
-                    if (podcast_queue_selected >= new_count && new_count > 0) {
-                        podcast_queue_selected = new_count - 1;
-                    }
                     Podcast_clearTitleScroll();
                 }
                 dirty = 1;
@@ -963,7 +896,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                         PLAT_clearLayers(LAYER_BUFFER);
                         PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
                         PLAT_GPU_Flip();
-                        podcast_episodes_selected = podcast_current_episode_index;
+                        podcast_episodes_nav.selected = podcast_current_episode_index;
                         state = PODCAST_INTERNAL_EPISODES;
                         dirty = 1;
                     } else {
@@ -1085,23 +1018,24 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
             } else {
                 switch (state) {
                     case PODCAST_INTERNAL_MENU:
-                        render_podcast_main_page(screen, show_setting, podcast_menu_selected, &podcast_menu_scroll,
+                        render_podcast_main_page(screen, show_setting, podcast_menu_nav.selected, &podcast_menu_scroll_px,
                                                   podcast_toast_message, podcast_toast_time);
                         break;
                     case PODCAST_INTERNAL_MANAGE:
-                        render_podcast_manage(screen, show_setting, podcast_manage_selected, Podcast_getSubscriptionCount());
+                        render_podcast_manage(screen, show_setting, podcast_manage_nav.selected,
+                                              podcast_manage_nav.scroll, Podcast_getSubscriptionCount());
                         break;
                     case PODCAST_INTERNAL_TOP_SHOWS:
-                        render_podcast_top_shows(screen, show_setting, podcast_top_shows_selected, &podcast_top_shows_scroll,
+                        render_podcast_top_shows(screen, show_setting, podcast_top_shows_nav.selected, &podcast_top_shows_nav.scroll,
                                                   podcast_toast_message, podcast_toast_time);
                         break;
                     case PODCAST_INTERNAL_SEARCH_RESULTS:
-                        render_podcast_search_results(screen, show_setting, podcast_search_selected, &podcast_search_scroll,
+                        render_podcast_search_results(screen, show_setting, podcast_search_nav.selected, &podcast_search_nav.scroll,
                                                        podcast_toast_message, podcast_toast_time);
                         break;
                     case PODCAST_INTERNAL_EPISODES:
-                        render_podcast_episodes(screen, show_setting, podcast_current_feed_index, podcast_episodes_selected,
-                                                &podcast_episodes_scroll, podcast_toast_message, podcast_toast_time);
+                        render_podcast_episodes(screen, show_setting, podcast_current_feed_index, podcast_episodes_nav.selected,
+                                                &podcast_episodes_scroll_px, podcast_toast_message, podcast_toast_time);
                         break;
                     case PODCAST_INTERNAL_SEEKING:
                         render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
@@ -1123,7 +1057,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                         render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
                         break;
                     case PODCAST_INTERNAL_DOWNLOAD_QUEUE:
-                        render_podcast_download_queue(screen, show_setting, podcast_queue_selected, &podcast_queue_scroll,
+                        render_podcast_download_queue(screen, show_setting, podcast_queue_nav.selected, &podcast_queue_nav.scroll,
                                                       podcast_toast_message, podcast_toast_time);
                         break;
                 }

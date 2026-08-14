@@ -10,6 +10,8 @@
 #include "module_downloader.h"
 #include "ui_utils.h"
 #include "ui_fonts.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
 
 // Library submenu items
 #define LIBRARY_FILES       0
@@ -26,7 +28,8 @@ static const char* library_items[] = {"Files", "Playlists", "Downloader"};
 static char library_toast_message[128] = "";
 static uint32_t library_toast_time = 0;
 
-static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
+static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_selected,
+                                int menu_scroll) {
     SimpleMenuConfig config = {
         .title = "Library",
         .items = library_items,
@@ -36,7 +39,7 @@ static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_
         .render_badge = NULL,
         .get_icon = NULL
     };
-    render_simple_menu(screen, show_setting, menu_selected, &config);
+    render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
     render_toast(screen, library_toast_message, library_toast_time);
 }
 
@@ -46,13 +49,17 @@ void LibraryModule_setToast(const char* message) {
 }
 
 ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
-    int menu_selected = 0;
+    ListNav nav = {
+        .selected = 0,
+        .scroll = 0,
+        .count = LIBRARY_ITEM_COUNT,
+        .items_per_page = 1,
+    };
     int dirty = 1;
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle global input
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, LIBRARY_MENU_HELP_STATE);
@@ -66,29 +73,14 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
         }
 
         // Menu navigation
-        int items_per_page = calc_list_layout(screen).items_per_page;
-        if (PAD_justRepeated(BTN_UP)) {
-            menu_selected = (menu_selected > 0) ? menu_selected - 1 : LIBRARY_ITEM_COUNT - 1;
-            dirty = 1;
-        }
-        else if (PAD_justRepeated(BTN_DOWN)) {
-            menu_selected = (menu_selected < LIBRARY_ITEM_COUNT - 1) ? menu_selected + 1 : 0;
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_LEFT)) {
-            int scroll = 0;
-            list_page_up(&menu_selected, &scroll, LIBRARY_ITEM_COUNT, items_per_page);
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_RIGHT)) {
-            int scroll = 0;
-            list_page_down(&menu_selected, &scroll, LIBRARY_ITEM_COUNT, items_per_page);
+        nav.items_per_page = calc_list_layout(screen).items_per_page;
+        if (ListNav_step(&nav, ListNavPad_read()).moved) {
             dirty = 1;
         }
         else if (PAD_justPressed(BTN_A)) {
             ModuleExitReason reason = MODULE_EXIT_TO_MENU;
 
-            switch (menu_selected) {
+            switch (nav.selected) {
                 case LIBRARY_FILES:
                     reason = PlayerModule_run(screen, false);  // File browser entry
                     break;
@@ -116,7 +108,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
         // Render
         if (dirty) {
-            render_library_menu(screen, show_setting, menu_selected);
+            render_library_menu(screen, show_setting, nav.selected, nav.scroll);
 
             if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);

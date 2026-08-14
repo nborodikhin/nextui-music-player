@@ -133,6 +133,7 @@ LOCAL_SRC = \
     module_common.c module_menu.c module_library.c module_player.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_system.c module_settings.c \
+    list_nav.c list_nav_pad.c menu_rows.c \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
     ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
     ui_playlist.c ui_system.c ui_settings.c \

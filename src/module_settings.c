@@ -11,6 +11,8 @@
 #include "ui_system.h"
 #include "wifi.h"
 #include "album_art.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
 
 // Internal states
 typedef enum {
@@ -21,15 +23,6 @@ typedef enum {
     SETTINGS_STATE_UPDATING_YTDLP
 } SettingsState;
 
-// Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
-
 // Internal app state constants for controls help
 // These match the pattern used in ui_main.c
 #define SETTINGS_INTERNAL_MENU      40
@@ -37,14 +30,17 @@ typedef enum {
 
 ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
     SettingsState state = SETTINGS_STATE_MENU;
-    int menu_selected = 0;
-    int menu_scroll = 0;
+    ListNav nav = {
+        .selected           = 0,
+        .scroll             = 0,
+        .count              = SETTINGS_ITEM_COUNT,
+        .items_per_page     = 1,
+    };
     int dirty = 1;
     int show_setting = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle global input first
         int app_state = (state == SETTINGS_STATE_MENU) ? SETTINGS_INTERNAL_MENU : SETTINGS_INTERNAL_ABOUT;
@@ -60,52 +56,48 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
 
         // State-specific handling
         switch (state) {
-            case SETTINGS_STATE_MENU:
-                // Navigation
-                if (PAD_justPressed(BTN_UP)) {
-                    menu_selected = (menu_selected > 0) ? menu_selected - 1 : SETTINGS_ITEM_COUNT - 1;
-                    dirty = 1;
-                }
-                else if (PAD_justPressed(BTN_DOWN)) {
-                    menu_selected = (menu_selected < SETTINGS_ITEM_COUNT - 1) ? menu_selected + 1 : 0;
-                    dirty = 1;
-                }
-                // Left/Right for cyclable settings; page navigation for others
-                else if (PAD_justPressed(BTN_LEFT)) {
-                    if (menu_selected == SETTINGS_ITEM_SCREEN_OFF) {
-                        Settings_cycleScreenOffPrev();
-                        dirty = 1;
-                    } else if (menu_selected == SETTINGS_ITEM_BASS_FILTER) {
-                        Settings_cycleBassFilterPrev();
-                        dirty = 1;
-                    } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
-                        Settings_cycleSoftLimiterPrev();
-                        dirty = 1;
-                    } else {
-                        int items_per_page = calc_list_layout(screen).items_per_page;
-                        list_page_up(&menu_selected, &menu_scroll, SETTINGS_ITEM_COUNT, items_per_page);
-                        dirty = 1;
+            case SETTINGS_STATE_MENU: {
+                nav.items_per_page = calc_list_layout(screen).items_per_page;
+                ListNavInput in = ListNavPad_read();
+
+                // Left/Right is overloaded here: on a cyclable row it changes
+                // the value, everywhere else it pages.
+                //
+                // Vertical input wins, so a frame with both bits set navigates
+                // only - Up+Right must not cycle the value AND move.
+                bool buttonHandledByItem = false;
+
+                bool upDown = (in & (LIST_NAV_UP | LIST_NAV_DOWN)) != 0;
+                bool leftRight = (in & (LIST_NAV_LEFT | LIST_NAV_RIGHT)) != 0;
+                if (leftRight && !upDown) {
+                    bool cycleNext = (in & LIST_NAV_RIGHT) != 0;
+                    switch (nav.selected) {
+                        case SETTINGS_ITEM_SCREEN_OFF:
+                            cycleNext ? Settings_cycleScreenOffNext() : Settings_cycleScreenOffPrev();
+                            buttonHandledByItem = true;
+                            break;
+                        case SETTINGS_ITEM_BASS_FILTER:
+                            cycleNext ? Settings_cycleBassFilterNext() : Settings_cycleBassFilterPrev();
+                            buttonHandledByItem = true;
+                            break;
+                        case SETTINGS_ITEM_SOFT_LIMITER:
+                            cycleNext ? Settings_cycleSoftLimiterNext() : Settings_cycleSoftLimiterPrev();
+                            buttonHandledByItem = true;
+                            break;
+                        default:
+                            break;
                     }
                 }
-                else if (PAD_justPressed(BTN_RIGHT)) {
-                    if (menu_selected == SETTINGS_ITEM_SCREEN_OFF) {
-                        Settings_cycleScreenOffNext();
-                        dirty = 1;
-                    } else if (menu_selected == SETTINGS_ITEM_BASS_FILTER) {
-                        Settings_cycleBassFilterNext();
-                        dirty = 1;
-                    } else if (menu_selected == SETTINGS_ITEM_SOFT_LIMITER) {
-                        Settings_cycleSoftLimiterNext();
-                        dirty = 1;
-                    } else {
-                        int items_per_page = calc_list_layout(screen).items_per_page;
-                        list_page_down(&menu_selected, &menu_scroll, SETTINGS_ITEM_COUNT, items_per_page);
-                        dirty = 1;
-                    }
+
+                if (buttonHandledByItem) {
+                    dirty = 1;
+                } else if (ListNav_step(&nav, in).moved) {
+                    dirty = 1;
                 }
-                // A button
+                // A button. Skipped on a frame that already cycled a value, so
+                // Right+A does one thing rather than advancing twice.
                 else if (PAD_justPressed(BTN_A)) {
-                    switch (menu_selected) {
+                    switch (nav.selected) {
                         case SETTINGS_ITEM_SCREEN_OFF:
                             // A also cycles the value (convenience)
                             Settings_cycleScreenOffNext();
@@ -141,6 +133,7 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                     return MODULE_EXIT_TO_MENU;
                 }
                 break;
+            }
 
             case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
                 if (PAD_justPressed(BTN_A)) {
@@ -237,10 +230,10 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
         if (dirty) {
             switch (state) {
                 case SETTINGS_STATE_MENU:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, nav.selected, nav.scroll);
                     break;
                 case SETTINGS_STATE_CLEAR_CACHE_CONFIRM:
-                    render_settings_menu(screen, show_setting, menu_selected);
+                    render_settings_menu(screen, show_setting, nav.selected, nav.scroll);
                     render_confirmation_dialog(screen, NULL, "Clear album art cache?");
                     break;
                 case SETTINGS_STATE_ABOUT:

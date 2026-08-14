@@ -8,7 +8,7 @@
 
 // Render downloader sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         char* toast_message, uint32_t toast_time);
+                         int menu_scroll, char* toast_message, uint32_t toast_time);
 
 // Render downloader searching status
 void render_downloader_searching(SDL_Surface* screen, int show_setting, const char* search_query);

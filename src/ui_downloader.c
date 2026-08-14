@@ -60,7 +60,7 @@ static const char* youtube_menu_get_label(int index, const char* default_label,
 
 // Render YouTube sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         char* toast_message, uint32_t toast_time) {
+                         int menu_scroll, char* toast_message, uint32_t toast_time) {
     SimpleMenuConfig config = {
         .title = "Downloader",
         .items = youtube_menu_items,
@@ -70,7 +70,7 @@ void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_sele
         .render_badge = NULL,
         .get_icon = NULL
     };
-    render_simple_menu(screen, show_setting, menu_selected, &config);
+    render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
 
     // Toast notification
     render_toast(screen, toast_message, toast_time);
@@ -252,9 +252,8 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
 
     // Two-row pill layout (like podcast download queue)
     ListLayout layout = calc_list_layout(screen);
-    layout.item_h = SCALE1(PILL_SIZE) * 3 / 2;
-    layout.items_per_page = layout.list_h / layout.item_h;
-    if (layout.items_per_page > 5) layout.items_per_page = 5;
+    layout.item_h = layout.rich_item_h;
+    layout.items_per_page = layout.rich_items_per_page;
     adjust_list_scroll(queue_selected, queue_scroll, layout.items_per_page);
 
     for (int i = 0; i < layout.items_per_page && *queue_scroll + i < qcount; i++) {

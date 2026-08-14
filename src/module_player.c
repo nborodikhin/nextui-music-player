@@ -576,8 +576,7 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
     }
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -775,8 +774,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
     ModuleCommon_recordInputTime();
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
@@ -1066,8 +1064,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
         PlayerInternalState state = PLAYER_INTERNAL_PLAYING;
 
         while (1) {
-            GFX_startFrame();
-            PAD_poll();
+            ModuleCommon_frameBegin();
 
             // Handle add-to-playlist dialog overlay
             if (AddToPlaylist_isActive()) {
