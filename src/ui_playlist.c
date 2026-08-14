@@ -108,6 +108,9 @@ void render_playlist_detail(SDL_Surface* screen, int show_setting,
     }
 
     render_scroll_indicators(screen, scroll, layout.items_per_page, count);
+
+    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
 }
 
 bool playlist_list_needs_scroll_refresh(void) {

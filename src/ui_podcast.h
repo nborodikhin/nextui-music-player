@@ -26,7 +26,7 @@ bool Podcast_loadPendingThumbnails(void);
 
 // Render the podcast management menu (Y button opens this)
 void render_podcast_manage(SDL_Surface* screen, int show_setting,
-                           int menu_selected, int subscription_count);
+                           int menu_selected, int menu_scroll, int subscription_count);
 
 // Render Top Shows list
 void render_podcast_top_shows(SDL_Surface* screen, int show_setting,

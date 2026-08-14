@@ -12,6 +12,8 @@
 #include "ui_downloader.h"
 #include "ui_utils.h"
 #include "wifi.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
 
 // Menu count
 #define DOWNLOADER_MENU_COUNT 2
@@ -24,12 +26,30 @@ typedef enum {
     DOWNLOADER_INTERNAL_QUEUE
 } DownloaderInternalState;
 
-// Module state
-static int menu_selected = 0;
-static int results_selected = 0;
-static int results_scroll = 0;
-static int queue_selected = 0;
-static int queue_scroll = 0;
+// Module state. Three cursors, one per list state.
+static ListNav menu_nav = {
+    .selected = 0,
+    .scroll = 0,
+    .count = DOWNLOADER_MENU_COUNT,
+    .items_per_page = 1,
+};
+static ListNav results_nav = {
+    .selected = 0,
+    .scroll = 0,
+    .count = 0,
+    .items_per_page = 1,
+};
+// Id of the item under the queue cursor, remembered across frames: the worker
+// removes a completed item from wherever it sat, so a count delta alone cannot
+// say how far the selection shifted.
+static char queue_cursor_id[DOWNLOADER_VIDEO_ID_LEN] = "";
+
+static ListNav queue_nav = {
+    .selected = 0,
+    .scroll = 0,
+    .count = 0,
+    .items_per_page = 1,
+};
 static DownloaderResult* results = NULL;
 static int result_count = 0;
 static char toast_message[128] = "";
@@ -55,25 +75,21 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     int dirty = 1;
     char search_query[256] = "";
 
-    menu_selected = 0;
-    results_selected = 0;
-    results_scroll = 0;
-    queue_selected = 0;
-    queue_scroll = 0;
+    ListNav_scrollToTop(&menu_nav);
+    ListNav_scrollToTop(&queue_nav);
+    ListNav_scrollToTop(&results_nav);
     results = NULL;
     result_count = 0;
     toast_message[0] = '\0';
 
     // If re-entering while download is running, go straight to queue
     if (Downloader_isDownloading()) {
-        queue_selected = 0;
-        queue_scroll = 0;
+        ListNav_scrollToTop(&queue_nav);
         state = DOWNLOADER_INTERNAL_QUEUE;
     }
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle global input
         int app_state_for_help;
@@ -99,27 +115,12 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         // MENU STATE
         // =========================================
         if (state == DOWNLOADER_INTERNAL_MENU) {
-            int items_per_page = calc_list_layout(screen).items_per_page;
-            if (PAD_justRepeated(BTN_UP)) {
-                menu_selected = (menu_selected > 0) ? menu_selected - 1 : DOWNLOADER_MENU_COUNT - 1;
-                dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN)) {
-                menu_selected = (menu_selected < DOWNLOADER_MENU_COUNT - 1) ? menu_selected + 1 : 0;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT)) {
-                int scroll = 0;
-                list_page_up(&menu_selected, &scroll, DOWNLOADER_MENU_COUNT, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT)) {
-                int scroll = 0;
-                list_page_down(&menu_selected, &scroll, DOWNLOADER_MENU_COUNT, items_per_page);
+            menu_nav.items_per_page = calc_list_layout(screen).items_per_page;
+            if (ListNav_step(&menu_nav, ListNavPad_read()).moved) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_A)) {
-                if (menu_selected == 0) {
+                if (menu_nav.selected == 0) {
                     // Search Music
                     char* query = Downloader_openKeyboard("Search:");
                     PAD_reset(); PAD_poll(); PAD_reset();
@@ -130,7 +131,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
 					}
                     if (query && strlen(query) > 0) {
                         snprintf(search_query, sizeof(search_query), "%s", query);
-                        results_scroll = 0;
+                        ListNav_scrollToTop(&results_nav);
                         results = NULL;
                         result_count = 0;
                         if (Downloader_startSearch(query) == 0) {
@@ -143,10 +144,9 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                     }
                     if (query) free(query);
                     dirty = 1;
-                } else if (menu_selected == 1) {
+                } else if (menu_nav.selected == 1) {
                     // Download Queue
-                    queue_selected = 0;
-                    queue_scroll = 0;
+                    ListNav_scrollToTop(&queue_nav);
                     state = DOWNLOADER_INTERNAL_QUEUE;
                     dirty = 1;
                 }
@@ -171,7 +171,8 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                 if (search_status->result_count > 0) {
                     results = Downloader_getSearchResults();
                     result_count = search_status->result_count;
-                    results_selected = -1;
+                    ListNav_reconcile(&results_nav, result_count);
+                    ListNav_scrollToTop(&results_nav);
                     state = DOWNLOADER_INTERNAL_RESULTS;
                 } else {
                     snprintf(toast_message, sizeof(toast_message), "%s",
@@ -192,33 +193,13 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         // RESULTS STATE
         // =========================================
         else if (state == DOWNLOADER_INTERNAL_RESULTS) {
-            int items_per_page = calc_list_layout(screen).items_per_page;
-            if (PAD_justRepeated(BTN_UP) && result_count > 0) {
-                if (results_selected < 0) {
-                    results_selected = result_count - 1;
-                } else {
-                    results_selected = (results_selected > 0) ? results_selected - 1 : result_count - 1;
-                }
+            results_nav.items_per_page = calc_list_layout(screen).items_per_page;
+            if (ListNav_reconcile(&results_nav, result_count).moved) dirty = 1;
+            if (ListNav_step(&results_nav, ListNavPad_read()).moved) {
                 dirty = 1;
             }
-            else if (PAD_justRepeated(BTN_DOWN) && result_count > 0) {
-                if (results_selected < 0) {
-                    results_selected = 0;
-                } else {
-                    results_selected = (results_selected < result_count - 1) ? results_selected + 1 : 0;
-                }
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT) && result_count > 0) {
-                list_page_up(&results_selected, &results_scroll, result_count, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT) && result_count > 0) {
-                list_page_down(&results_selected, &results_scroll, result_count, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_A) && result_count > 0 && results_selected >= 0) {
-                DownloaderResult* r = &results[results_selected];
+            else if (PAD_justPressed(BTN_A) && result_count > 0) {
+                DownloaderResult* r = &results[results_nav.selected];
                 if (Downloader_isInQueue(r->video_id)) {
                     snprintf(toast_message, sizeof(toast_message), "Already in queue");
                 } else {
@@ -254,34 +235,39 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         // QUEUE STATE
         // =========================================
         else if (state == DOWNLOADER_INTERNAL_QUEUE) {
-            int qcount = Downloader_queueCount();
-            int items_per_page = calc_list_layout(screen).list_h / (SCALE1(PILL_SIZE) * 3 / 2);
+            int qcount = 0;
+            DownloaderQueueItem* qitems = Downloader_queueGet(&qcount);
+            queue_nav.items_per_page = calc_list_layout(screen).rich_items_per_page;
 
-            if (PAD_justRepeated(BTN_UP) && qcount > 0) {
-                queue_selected = (queue_selected > 0) ? queue_selected - 1 : qcount - 1;
+            if (queue_nav.count != qcount) {
+                // Find where the selected item went. What vanished from above it
+                // is what shifted the selection; moving the window by the same
+                // amount holds it on its screen row. Redraw regardless - rows
+                // below the cursor repaint even when the cursor does not move.
+                int now_at = -1;
+                if (queue_cursor_id[0]) {
+                    for (int i = 0; i < qcount; i++) {
+                        if (strcmp(qitems[i].video_id, queue_cursor_id) == 0) { now_at = i; break; }
+                    }
+                }
+                if (now_at >= 0 && now_at < queue_nav.selected) {
+                    ListNav_onItemsRemoved(&queue_nav, 0, queue_nav.selected - now_at);
+                }
+                ListNav_reconcile(&queue_nav, qcount);
                 dirty = 1;
             }
-            else if (PAD_justRepeated(BTN_DOWN) && qcount > 0) {
-                queue_selected = (queue_selected < qcount - 1) ? queue_selected + 1 : 0;
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_LEFT) && qcount > 0) {
-                list_page_up(&queue_selected, &queue_scroll, qcount, items_per_page);
-                dirty = 1;
-            }
-            else if (PAD_justPressed(BTN_RIGHT) && qcount > 0) {
-                list_page_down(&queue_selected, &queue_scroll, qcount, items_per_page);
+
+            if (ListNav_step(&queue_nav, ListNavPad_read()).moved) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_A) && qcount > 0) {
                 // Queue is now a monitoring page — downloads auto-start from search
             }
             else if (PAD_justPressed(BTN_X) && qcount > 0) {
-                Downloader_queueRemove(queue_selected);
+                int removed_index = queue_nav.selected;
+                Downloader_queueRemove(removed_index);
                 downloader_queue_clear_scroll();
-                if (queue_selected >= Downloader_queueCount() && queue_selected > 0) {
-                    queue_selected--;
-                }
+                ListNav_onItemRemoved(&queue_nav, removed_index);
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
@@ -294,6 +280,14 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                 downloader_queue_animate_scroll();
             }
             if (downloader_queue_scroll_needs_render()) dirty = 1;
+
+            // Remember what the cursor is on, for the next count change.
+            if (queue_nav.selected >= 0 && queue_nav.selected < qcount) {
+                snprintf(queue_cursor_id, sizeof(queue_cursor_id), "%s",
+                         qitems[queue_nav.selected].video_id);
+            } else {
+                queue_cursor_id[0] = '\0';
+            }
         }
         // Keep refreshing while download is active (for progress updates)
         if (state == DOWNLOADER_INTERNAL_QUEUE && Downloader_isDownloading()) {
@@ -306,17 +300,18 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         if (dirty) {
             switch (state) {
                 case DOWNLOADER_INTERNAL_MENU:
-                    render_downloader_menu(screen, show_setting, menu_selected, toast_message, toast_time);
+                    render_downloader_menu(screen, show_setting, menu_nav.selected, menu_nav.scroll,
+                                           toast_message, toast_time);
                     break;
                 case DOWNLOADER_INTERNAL_SEARCHING:
                     render_downloader_searching(screen, show_setting, search_query);
                     break;
                 case DOWNLOADER_INTERNAL_RESULTS:
                     render_downloader_results(screen, show_setting, search_query, results, result_count,
-                                              results_selected, &results_scroll, toast_message, toast_time, false);
+                                              results_nav.selected, &results_nav.scroll, toast_message, toast_time, false);
                     break;
                 case DOWNLOADER_INTERNAL_QUEUE:
-                    render_downloader_queue(screen, show_setting, queue_selected, &queue_scroll);
+                    render_downloader_queue(screen, show_setting, queue_nav.selected, &queue_nav.scroll);
                     break;
             }
 

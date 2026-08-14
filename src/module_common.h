@@ -76,4 +76,8 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);
 // Handle hardware volume buttons (BTN_PLUS/BTN_MINUS).
 void ModuleCommon_handleHardwareVolume(void);
 
+// Begin one module-loop iteration: start the frame timer, poll input.
+// MUST be the first statement of every module's loop body.
+void ModuleCommon_frameBegin(void);
+
 #endif

@@ -11,15 +11,6 @@
 #include "selfupdate.h"
 #include "downloader.h"
 
-// Settings menu items
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_CLEAR_CACHE   3
-#define SETTINGS_ITEM_UPDATE_YTDLP  4
-#define SETTINGS_ITEM_ABOUT         5
-#define SETTINGS_ITEM_COUNT         6
-
 // Format cache size as human-readable string
 static void format_cache_size(long bytes, char* buf, int buf_size) {
     if (bytes >= 1024 * 1024) {
@@ -31,7 +22,8 @@ static void format_cache_size(long bytes, char* buf, int buf_size) {
     }
 }
 
-void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected) {
+void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected,
+                          int menu_scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -39,18 +31,16 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     render_screen_header(screen, "Settings", show_setting);
     ListLayout layout = calc_list_layout(screen);
 
-    // Vertically center items in available area
-    int item_h = SCALE1(PILL_SIZE);
-    int total_items_h = SETTINGS_ITEM_COUNT * item_h;
-    int start_y = layout.list_y + (layout.list_h - total_items_h) / 8;
+    if (menu_scroll < 0) menu_scroll = 0;
 
     char truncated[256];
     char label_buffer[256];
 
-    for (int i = 0; i < SETTINGS_ITEM_COUNT; i++) {
+    for (int row = 0; row < layout.items_per_page && menu_scroll + row < SETTINGS_ITEM_COUNT; row++) {
+        int i = menu_scroll + row;
         bool selected = (i == menu_selected);
 
-        int item_y = start_y + i * item_h;
+        int item_y = layout.list_y + row * layout.item_h;
 
         // Build label text based on item
         const char* label = "";
@@ -173,6 +163,9 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
             }
         }
     }
+
+    // Scroll indicators when the list overflows the visible window
+    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, SETTINGS_ITEM_COUNT);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);

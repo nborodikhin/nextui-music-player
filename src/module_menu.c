@@ -9,6 +9,9 @@
 #include "ui_utils.h"
 #include "resume.h"
 #include "background.h"
+#include "list_nav.h"
+#include "list_nav_pad.h"
+#include "menu_rows.h"
 
 // Toast message state
 static char menu_toast_message[128] = "";
@@ -24,8 +27,30 @@ static uint32_t exit_armed_at = 0;
 // until NextUI draws its first frame.
 #define EXIT_TOAST_DELAY_MS 100
 
-int MenuModule_run(SDL_Surface* screen) {
-    int menu_selected = 0;
+// The item the cursor was on when the menu was last left.
+static MenuSelection last_selection = MENU_LIBRARY;
+
+// State of the playback row. Now Playing wins over Resume when both apply.
+static MenuSelection menu_playing_item(void) {
+    if (Background_isPlaying()) return MENU_NOW_PLAYING;
+    if (Resume_isAvailable())   return MENU_RESUME;
+    return MENU_NONE;
+}
+
+MenuSelection MenuModule_run(SDL_Surface* screen) {
+    ListNav nav = {
+        .selected = 0,
+        .scroll = 0,
+        .count = 0,
+        .items_per_page = 1,
+    };
+
+    // Row map as last rendered. count -1 so the first frame always differs.
+    MenuRows prev_rows = {
+        .playing_item = MENU_NONE,
+        .count        = -1,
+    };
+
     int dirty = 1;
     int show_setting = 0;
     int exiting = 0;
@@ -35,8 +60,7 @@ int MenuModule_run(SDL_Surface* screen) {
     exit_armed_at = 0;
 
     while (1) {
-        GFX_startFrame();
-        PAD_poll();
+        ModuleCommon_frameBegin();
 
         // Handle background player updates (track advancement, resume saving)
         Background_tick();
@@ -44,15 +68,26 @@ int MenuModule_run(SDL_Surface* screen) {
             ModuleCommon_setAutosleepDisabled(true);
         }
 
-        // Determine first item: Now Playing (if BG active) > Resume > none
-        int first_item_mode = MENU_FIRST_NONE;
-        if (Background_isPlaying()) {
-            first_item_mode = MENU_FIRST_NOW_PLAYING;
-        } else if (Resume_isAvailable()) {
-            first_item_mode = MENU_FIRST_RESUME;
+        MenuRows rows = MenuRows_build(menu_playing_item());
+
+        // The playback row appears and disappears on its own, so the map can
+        // change on a frame with no input and no cursor move - which repaints
+        // every row whether or not the cursor is one of them.
+        if (!MenuRows_equal(&rows, &prev_rows)) dirty = 1;
+        prev_rows = rows;
+
+        // Note: play item may come and go, we need to check each frame.
+        int row = MenuRows_isPlayItem(last_selection)
+                      ? MenuRows_getPlayingItemRow(&rows)
+                      : MenuRows_rowOf(&rows, last_selection);
+        if (row >= 0 && row != nav.selected) {
+            nav.selected = row;
+            dirty = 1;
         }
-        bool has_first = (first_item_mode != MENU_FIRST_NONE);
-        int item_count = has_first ? 5 : 4;
+        // A remembered item that is gone leaves the cursor where it was, which
+        // reconcile then clamps into the new map.
+        if (ListNav_reconcile(&nav, rows.count).moved) dirty = 1;
+        last_selection = MenuRows_selectionAt(&rows, nav.selected);
 
         // Handle global input first (volume, START dialogs, power)
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);
@@ -66,51 +101,32 @@ int MenuModule_run(SDL_Surface* screen) {
         }
 
         // Menu navigation
-        int items_per_page = calc_list_layout(screen).items_per_page;
-        if (PAD_justRepeated(BTN_UP)) {
-            menu_selected = (menu_selected > 0) ? menu_selected - 1 : item_count - 1;
-            GFX_clearLayers(LAYER_SCROLLTEXT);
-            dirty = 1;
-        }
-        else if (PAD_justRepeated(BTN_DOWN)) {
-            menu_selected = (menu_selected < item_count - 1) ? menu_selected + 1 : 0;
-            GFX_clearLayers(LAYER_SCROLLTEXT);
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_LEFT)) {
-            int scroll = 0;
-            list_page_up(&menu_selected, &scroll, item_count, items_per_page);
-            GFX_clearLayers(LAYER_SCROLLTEXT);
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_RIGHT)) {
-            int scroll = 0;
-            list_page_down(&menu_selected, &scroll, item_count, items_per_page);
+        nav.items_per_page = calc_list_layout(screen).items_per_page;
+        ListNavChange ch = ListNav_step(&nav, ListNavPad_read());
+        if (ch.moved) {
+            last_selection = MenuRows_selectionAt(&rows, nav.selected);
             GFX_clearLayers(LAYER_SCROLLTEXT);
             dirty = 1;
         }
         else if (PAD_justPressed(BTN_A)) {
+            MenuSelection selection = MenuRows_selectionAt(&rows, nav.selected);
+            if (selection == MENU_NONE) continue;  // cursor off the end; ignore
             GFX_clearLayers(LAYER_SCROLLTEXT);
-            // Adjust selection to match MENU_* constants
-            int selection = menu_selected;
-            if (!has_first) selection += 1;  // Skip first-item slot
+            last_selection = selection;
             return selection;
         }
         else if (PAD_justPressed(BTN_X)) {
-            if (menu_selected == 0) {
-                if (first_item_mode == MENU_FIRST_NOW_PLAYING) {
-                    // Stop background playback
+            MenuSelection sel = MenuRows_selectionAt(&rows, nav.selected);
+            if (MenuRows_isPlayItem(sel)) {
+                if (sel == MENU_NOW_PLAYING) {
                     Background_stopAll();
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
-                    menu_selected = 0;
-                    dirty = 1;
-                } else if (first_item_mode == MENU_FIRST_RESUME) {
-                    // Clear resume history
+                } else {
                     Resume_clear();
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
-                    menu_selected = 0;
-                    dirty = 1;
                 }
+                GFX_clearLayers(LAYER_SCROLLTEXT);
+                nav.selected = 0;
+                last_selection = MenuRows_selectionAt(&rows, 0);
+                dirty = 1;
             }
         }
         else if (PAD_justPressed(BTN_B)) {
@@ -135,8 +151,8 @@ int MenuModule_run(SDL_Surface* screen) {
 
         // Render
         if (dirty) {
-            render_menu(screen, show_setting, menu_selected,
-                        menu_toast_message, menu_toast_time, first_item_mode);
+            render_menu(screen, show_setting, nav.selected, nav.scroll,
+                        menu_toast_message, menu_toast_time, &rows);
 
             if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);

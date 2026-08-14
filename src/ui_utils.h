@@ -89,6 +89,8 @@ typedef struct {
     int list_h;          // Total height available for list
     int item_h;          // Height of each item
     int items_per_page;  // Number of visible items
+    int rich_item_h;         // Height of a "rich" row (1.5x), used by podcast/downloader
+    int rich_items_per_page; // Number of visible rich rows
     int max_width;       // Maximum width for content (hw - padding*2)
 } ListLayout;
 
@@ -214,9 +216,11 @@ typedef struct {
     MenuItemCustomTextCallback render_text; // Optional: custom text rendering
 } SimpleMenuConfig;
 
-// Render a simple menu with optional customization callbacks
+// Render a simple menu with optional customization callbacks.
+// `menu_scroll` is the index of the first visible row; menus shorter than a
+// page pass 0 and the window logic is inert.
 void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                        const SimpleMenuConfig* config);
+                        int menu_scroll, const SimpleMenuConfig* config);
 
 // ============================================
 // Rounded Rectangle Background
