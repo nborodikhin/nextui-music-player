@@ -150,6 +150,10 @@ A comprehensive music playback application for NextUI featuring local file playb
 # Remove generated local build and distribution output
 ./dev clean
 
+# Inspect or update release versions and changelog notes
+./dev version latest
+./dev version list
+
 # Enter a toolchain or run a command in it
 ./dev docker 5040
 ./dev docker 5040 -- ls
