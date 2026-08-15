@@ -84,6 +84,10 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                             cycleNext ? Settings_cycleSoftLimiterNext() : Settings_cycleSoftLimiterPrev();
                             buttonHandledByItem = true;
                             break;
+                        case SETTINGS_ITEM_AUTO_UPDATE:
+                            Settings_toggleAutoUpdate();
+                            buttonHandledByItem = true;
+                            break;
                         default:
                             break;
                     }
@@ -109,6 +113,10 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
                             break;
                         case SETTINGS_ITEM_SOFT_LIMITER:
                             Settings_cycleSoftLimiterNext();
+                            dirty = 1;
+                            break;
+                        case SETTINGS_ITEM_AUTO_UPDATE:
+                            Settings_toggleAutoUpdate();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_CLEAR_CACHE:

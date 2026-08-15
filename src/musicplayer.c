@@ -116,13 +116,17 @@ int main(int argc, char* argv[]) {
 
     // Initialize self-update module
     SelfUpdate_init(".");
-    SelfUpdate_checkForUpdate();
 
     // Initialize common module (global input handling)
     ModuleCommon_init();
 
     // Initialize app-specific settings
     Settings_init();
+
+    // Startup update check is opt-out; About can still check on demand
+    if (Settings_getAutoUpdateEnabled()) {
+        SelfUpdate_checkForUpdate();
+    }
 
     // Initialize resume state
     Resume_init();
