@@ -1,0 +1,16 @@
+# Pak metainfo
+pak.json
+
+# Shared runtime payload
+launch.sh
+bin/keyboard
+bin/wget
+bin/yt-dlp
+res/font.ttf
+res/icon-*
+state/*.txt
+stations/*.json
+
+# Platform payload
+bin/{platform}/musicplayer.elf
+[tg5050] bin/tg5050/libfdk-aac.so*

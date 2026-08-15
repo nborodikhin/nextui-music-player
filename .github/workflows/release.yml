@@ -24,25 +24,10 @@ jobs:
         with:
           path: NextUI/workspace/nextui-music-player
 
-      - name: Build for tg5040
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
-            ghcr.io/loveretro/tg5040-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cd /root/workspace/tg5040/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5040'
-
-      - name: Build for tg5050
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/NextUI/workspace:/root/workspace \
-            ghcr.io/loveretro/tg5050-toolchain:latest \
-            /bin/bash -c 'source ~/.bashrc && cp /root/workspace/nextui-music-player/bin/tg5050/libfdk-aac.so* $PREFIX/lib/ && cd /root/workspace/tg5050/libmsettings && make build CROSS_COMPILE=aarch64-nextui-linux-gnu- PREFIX=/opt/nextui PREFIX_LOCAL=/opt/nextui && cd /root/workspace/nextui-music-player/src && make PLATFORM=tg5050'
-
-      - name: Package release zip
+      - name: Build and package release
         run: |
           cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
-          sudo rm -rf .github src .git .gitignore LICENSE README.md
-          zip -r ../Music.Player.pak.zip .
+          ./dev dist all --strict
 
       - name: Create GitHub Release
         env:
@@ -53,4 +38,4 @@ jobs:
             --repo ${{ github.repository }} \
             --title "$VERSION" \
             --generate-notes \
-            "${{ github.workspace }}/NextUI/workspace/Music.Player.pak.zip"
+            "${{ github.workspace }}/NextUI/workspace/nextui-music-player/dist/Music.Player.pak.zip"
