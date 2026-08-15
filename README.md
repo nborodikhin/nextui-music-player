@@ -131,18 +131,39 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Cross-compilation toolchain for ARM64
 - NextUI workspace with platform dependencies
 
-### Build Commands
+### Build Commands and Tools
 
 ```bash
-# Enter the toolchain (replace PLATFORM accordingly) 
-make shell PLATFORM=tg5040
+# Build only
+./dev build                            # desktop
+./dev build brick tsps                 # tg5040 and tg5050
 
-# Once in the toolchain shell
-cd ~/workspace/nextui-music-player/src
+# Build, install, and run on connected devices
+./dev devices
+./dev install device
+./dev run device
+./dev log device --follow
 
-# Build for TrimUI Brick (tg5040)
-make clean && make PLATFORM=tg5040
+# Build a release folder and ZIP package using the distribution manifest
+./dev dist all --strict
+
+# Remove generated local build and distribution output
+./dev clean
+
+# Enter a toolchain or run a command in it
+./dev docker 5040
+./dev docker 5040 -- ls
+./dev docker 5040 --podman -- ls
 ```
+
+Platform aliases include `brick`, `brickpro`, `tsp`, `smartpro`, `5040`,
+`tsps`, `smartpros`, and `5050`. Aliases ignore case, spaces, hyphens, and
+underscores. An ADB serial can also be used wherever a device target is
+accepted.
+
+By default, install and run only update the binary.
+Use `--full` to install the complete pak and `--delete` to remove stale files
+from the installed pak before uploading it (userdata is not cleared).
 
 ### Project Structure
 

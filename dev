@@ -1,0 +1,891 @@
+#!/usr/bin/env python3
+import argparse
+import glob
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+DEVICE_PLATFORMS = ("tg5040", "tg5050")
+ALL_PLATFORMS = DEVICE_PLATFORMS + ("desktop",)
+PAK_NAME = "Music Player.pak"
+REMOTE_ROOT = "/mnt/SDCARD/Tools"
+RESTART_FLAG = "/tmp/nextui-music-player.restart"
+MANIFEST = ROOT / "dist.manifest"
+DIST_DIR = ROOT / "dist"
+DIST_PAK = DIST_DIR / PAK_NAME
+DIST_ZIP = DIST_DIR / "Music.Player.pak.zip"
+
+ALIASES = {
+    "tg5040": ("tg5040", "5040", "brick", "brickpro", "tsp", "smartpro"),
+    "tg5050": ("tg5050", "5050", "tsps", "smartpros"),
+    "desktop": ("desktop",),
+}
+
+CPUINFO_PLATFORMS = {
+    "TG5040": "tg5040",
+    "TG3040": "tg5040",
+    "TG4040": "tg5040",
+    "TG5050": "tg5050",
+    "0xd05": "my355",
+}
+
+
+class DevError(Exception):
+    pass
+
+
+class CommandHelpFormatter(argparse.HelpFormatter):
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction):
+            format_action = super()._format_action
+            return "".join(
+                format_action(command) for command in action._get_subactions()
+            )
+        return super()._format_action(action)
+
+
+@dataclass(frozen=True)
+class Device:
+    serial: str
+    state: str
+    platform: str = "unknown"
+    hardware: str = "-"
+
+
+def run_command(args, cwd=ROOT, env=None, capture=False, check=True, stdin=None):
+    if capture:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            env=env,
+            input=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    else:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            env=env,
+            input=stdin,
+            check=False,
+        )
+    if check and result.returncode:
+        if capture and result.stderr:
+            sys.stderr.write(result.stderr.decode(errors="replace"))
+        raise DevError("Command failed: " + " ".join(shlex.quote(str(a)) for a in args))
+    return result
+
+
+def adb(device, *args, check=True):
+    """Run ADB and return stdout as a list of lines.
+
+    ADB emits CRLF on some hosts; carriage returns are removed before splitting.
+    """
+    command = ["adb"]
+    if device is not None:
+        command.extend(["-s", device.serial])
+    command.extend(str(arg) for arg in args)
+    result = run_command(command, capture=True, check=check)
+    return result.stdout.decode(errors="replace").replace("\r", "").splitlines()
+
+
+def adb_shell(device, *args, check=True):
+    """Run one safely quoted device command and return normalized output lines."""
+    command = shlex.join(str(arg) for arg in args)
+    return adb(device, "shell", command, check=check)
+
+
+def list_devices(detect_platforms=True):
+    devices = []
+    for line in adb(None, "devices")[1:]:
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        serial, state = fields[:2]
+        device = Device(serial=serial, state=state)
+        if state == "device" and detect_platforms:
+            device = detect_device(device)
+        devices.append(device)
+    return devices
+
+
+def detect_device(device):
+    cpuinfo = "\n".join(adb_shell(device, "cat", "/proc/cpuinfo", check=False))
+    platform = "unknown"
+    hardware = "-"
+    for identifier, candidate in CPUINFO_PLATFORMS.items():
+        if identifier in cpuinfo:
+            platform = candidate
+            hardware = identifier
+            break
+
+    return Device(
+        serial=device.serial,
+        state=device.state,
+        platform=platform,
+        hardware=hardware,
+    )
+
+
+def normalize_alias(value):
+    return re.sub(r"[\s_-]+", "", value).lower()
+
+
+def platform_for_alias(value):
+    key = normalize_alias(value)
+    for platform, aliases in ALIASES.items():
+        if any(key == normalize_alias(alias) for alias in aliases):
+            return platform
+    return None
+
+
+def unique(values):
+    return list(dict.fromkeys(values))
+
+
+def resolve_build_platforms(values, default=("desktop",), allow_all=True):
+    values = values or list(default)
+    platforms = []
+    for value in values:
+        key = normalize_alias(value)
+        if key == "all":
+            if not allow_all:
+                raise DevError("'all' is not valid for this command")
+            platforms.extend(ALL_PLATFORMS)
+            continue
+        platform = platform_for_alias(key)
+        if not platform:
+            raise DevError("Unknown platform: " + value)
+        platforms.append(platform)
+    return unique(platforms)
+
+
+def resolve_dist_platforms(values):
+    values = values or ["all"]
+    platforms = []
+    for value in values:
+        key = normalize_alias(value)
+        if key == "all":
+            platforms.extend(DEVICE_PLATFORMS)
+            continue
+        platform = platform_for_alias(key)
+        if platform not in DEVICE_PLATFORMS:
+            raise DevError("Invalid distribution platform: " + value)
+        platforms.append(platform)
+    return unique(platforms)
+
+
+def resolve_device_targets(values, devices, allow_desktop):
+    ready = [device for device in devices if device.state == "device"]
+    by_serial = {device.serial: device for device in devices}
+    build_platforms = []
+    targets = []
+
+    for value in values:
+        key = normalize_alias(value)
+        if key == "device":
+            selected = [device for device in ready if device.platform in DEVICE_PLATFORMS]
+            if not selected:
+                raise DevError("No supported ADB devices are connected")
+            targets.extend(selected)
+            build_platforms.extend(device.platform for device in selected)
+            continue
+
+        platform = platform_for_alias(key)
+        if platform:
+            if platform == "desktop":
+                if not allow_desktop:
+                    raise DevError("desktop is not valid for this command")
+                build_platforms.append(platform)
+                continue
+            selected = [device for device in ready if device.platform == platform]
+            if not selected:
+                raise DevError("No connected device matches " + platform)
+            targets.extend(selected)
+            build_platforms.append(platform)
+            continue
+
+        device = by_serial.get(value)
+        if not device:
+            raise DevError("Unknown platform, alias, or ADB serial: " + value)
+        if device.state != "device":
+            raise DevError("ADB device {} is {}".format(value, device.state))
+        if device.platform not in DEVICE_PLATFORMS:
+            raise DevError("Could not detect the platform for ADB device " + value)
+        targets.append(device)
+        build_platforms.append(device.platform)
+
+    targets = list({device.serial: device for device in targets}.values())
+    return unique(build_platforms), targets
+
+
+def run_container(runtime, platform, command, check=True):
+    container_command = [runtime, "run"]
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        container_command.append("-it")
+    container_command.extend(
+        [
+            "-v",
+            "{}:/root/workspace".format(ROOT.parent),
+            "--rm",
+            "ghcr.io/loveretro/{}-toolchain".format(platform),
+        ]
+    )
+    container_command.extend(command)
+    return run_command(container_command, check=check)
+
+
+def build_device(platform, runtime):
+    build_dir = ROOT / "src" / "build" / platform
+    build_dir.mkdir(parents=True, exist_ok=True)
+    if platform == "tg5050":
+        libraries = sorted((ROOT / "bin" / platform).glob("libfdk-aac.so*"))
+        if not libraries:
+            raise DevError("Missing bin/tg5050/libfdk-aac.so")
+        for library in libraries:
+            shutil.copy2(library, build_dir / library.name)
+
+    run_container(
+        runtime,
+        platform,
+        [
+            "make",
+            "-C",
+            "/root/workspace/{}/libmsettings".format(platform),
+            "build",
+            "CROSS_COMPILE=aarch64-nextui-linux-gnu-",
+            "PREFIX=/opt/nextui",
+            "PREFIX_LOCAL=/opt/nextui",
+        ],
+    )
+    run_container(
+        runtime,
+        platform,
+        [
+            "make",
+            "-C",
+            "/root/workspace/nextui-music-player/src",
+            "PLATFORM={}".format(platform),
+        ],
+    )
+
+
+def build_desktop():
+    nextui_root = ROOT.parent.parent
+    desktop_root = nextui_root / "workspace" / "desktop"
+    prefix_local = Path("/var/tmp/nextui")
+    setup_marker = prefix_local / ".desktop_setup_ok"
+    system = os.uname().sysname
+
+    env = os.environ.copy()
+    if system == "Linux":
+        env["CROSS_COMPILE"] = "/usr/bin/"
+        env["PREFIX"] = "/usr"
+    elif system == "Darwin":
+        env["CROSS_COMPILE"] = "/usr/local/bin/"
+        env["PREFIX"] = "/opt/homebrew"
+    else:
+        raise DevError("Unsupported host OS: " + system)
+    env["PREFIX_LOCAL"] = str(prefix_local)
+    env["UNION_PLATFORM"] = "desktop"
+
+    if not setup_marker.exists():
+        print("Preparing NextUI desktop workspace (one-time setup)...", flush=True)
+        if system == "Darwin" and not os.access("/usr/local/bin/gcc", os.X_OK):
+            run_command(
+                ["sudo", str(desktop_root / "macos_create_gcc_symlinks.sh")],
+                env=env,
+            )
+        run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=env)
+        run_command(
+            ["make", "-C", str(nextui_root), "build", "PLATFORM=desktop"],
+            env=env,
+        )
+        prefix_local.mkdir(parents=True, exist_ok=True)
+        setup_marker.touch()
+        print("Desktop workspace setup complete.")
+
+    run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=env)
+    run_command(["make", "-C", str(ROOT / "src"), "PLATFORM=desktop"], env=env)
+
+
+def build_platforms(platforms, runtime="docker"):
+    for platform in platforms:
+        print("== Building {} ==".format(platform), flush=True)
+        if platform == "desktop":
+            build_desktop()
+        else:
+            build_device(platform, runtime)
+
+
+def parse_manifest(platforms):
+    entries = []
+    missing = []
+    for line_number, raw_line in enumerate(MANIFEST.read_text().splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        condition = None
+        match = re.match(r"^\[([^]]+)\]\s+(.+)$", line)
+        if match:
+            condition, line = match.groups()
+            if condition not in platforms:
+                continue
+
+        patterns = []
+        if "{platform}" in line:
+            patterns.extend(line.replace("{platform}", platform) for platform in platforms)
+        else:
+            patterns.append(line)
+
+        for pattern in patterns:
+            absolute_pattern = str(ROOT / pattern)
+            matches = sorted(Path(path) for path in glob.glob(absolute_pattern, recursive=True))
+            matches = [path for path in matches if path.is_file() or path.is_symlink()]
+            if not matches:
+                missing.append("{}:{}: {}".format(MANIFEST.name, line_number, pattern))
+                continue
+            for path in matches:
+                resolved = path.resolve()
+                try:
+                    resolved.relative_to(ROOT)
+                except ValueError:
+                    raise DevError("Manifest entry escapes the repository: " + str(path))
+                entries.append(path.relative_to(ROOT))
+    return unique(entries), missing
+
+
+def stage_package(platforms, strict):
+    platforms = tuple(unique(platforms))
+    if DIST_PAK.exists():
+        shutil.rmtree(DIST_PAK)
+    DIST_PAK.mkdir(parents=True, exist_ok=True)
+
+    entries, missing = parse_manifest(platforms)
+    if missing:
+        message = "Manifest patterns with no matches:\n  " + "\n  ".join(missing)
+        if strict:
+            raise DevError(message)
+        print("WARNING: " + message, file=sys.stderr)
+
+    for relative in entries:
+        source = ROOT / relative
+        destination = DIST_PAK / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination, follow_symlinks=True)
+
+    if strict:
+        actual = {
+            path.relative_to(DIST_PAK)
+            for path in DIST_PAK.rglob("*")
+            if path.is_file() or path.is_symlink()
+        }
+        expected = set(entries)
+        extra = sorted(actual - expected)
+        absent = sorted(expected - actual)
+        if extra or absent:
+            lines = []
+            if extra:
+                lines.append("Unexpected files:\n  " + "\n  ".join(map(str, extra)))
+            if absent:
+                lines.append("Missing files:\n  " + "\n  ".join(map(str, absent)))
+            raise DevError("\n".join(lines))
+
+    return DIST_PAK
+
+
+def create_zip(package_dir):
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    if DIST_ZIP.exists():
+        DIST_ZIP.unlink()
+    with zipfile.ZipFile(DIST_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(package_dir.rglob("*")):
+            if path.is_file():
+                archive.write(path, path.relative_to(package_dir))
+    return DIST_ZIP
+
+
+def remote_pak_path(platform):
+    return "{}/{}/{}".format(REMOTE_ROOT, platform, PAK_NAME)
+
+
+def get_pids(device, process):
+    lines = adb_shell(device, "pidof", process, check=False)
+    pids = " ".join(lines).split()
+    return [pid for pid in pids if pid.isdigit()]
+
+
+def stop_player(device, restart):
+    pids = get_pids(device, "musicplayer.elf")
+    if not pids:
+        return False
+    if restart:
+        adb_shell(device, "touch", RESTART_FLAG)
+    adb_shell(device, "kill", "-KILL", *pids)
+    return True
+
+
+def wait_for_nextui(device, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pids = get_pids(device, "nextui.elf")
+        if pids:
+            return pids
+        time.sleep(0.25)
+    return []
+
+
+def launch_from_nextui(device):
+    pids = wait_for_nextui(device)
+    if not pids:
+        raise DevError(
+            "nextui.elf is not running on {}. Launch Music Player manually.".format(
+                device.serial
+            )
+        )
+    launch_command = "'{}/launch.sh'".format(remote_pak_path(device.platform))
+    with tempfile.TemporaryDirectory(prefix="music-player-next-") as temp_dir:
+        next_file = Path(temp_dir) / "next"
+        next_file.write_bytes(launch_command.encode("utf-8"))
+        adb(device, "push", str(next_file), "/tmp/next")
+    adb_shell(device, "kill", "-KILL", *pids)
+
+
+def install_binary(device):
+    source = ROOT / "bin" / device.platform / "musicplayer.elf"
+    destination_dir = remote_pak_path(device.platform) + "/bin/" + device.platform
+    adb_shell(device, "mkdir", "-p", destination_dir)
+    adb(device, "push", str(source), destination_dir + "/musicplayer.elf")
+
+
+def install_full(device, package, delete):
+    if delete:
+        stop_player(device, restart=False)
+        adb_shell(device, "rm", "-rf", remote_pak_path(device.platform))
+    adb_shell(
+        device, "mkdir", "-p", "{}/{}".format(REMOTE_ROOT, device.platform)
+    )
+    adb(
+        device,
+        "push",
+        str(package),
+        "{}/{}/".format(REMOTE_ROOT, device.platform),
+    )
+
+
+def run_on_device(device):
+    if stop_player(device, restart=True):
+        return
+    launch_from_nextui(device)
+
+
+def run_desktop():
+    prefix = "/var/tmp/nextui"
+    env = os.environ.copy()
+    for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        current = env.get(name, "")
+        env[name] = prefix + "/lib" + ((":" + current) if current else "")
+    (Path(prefix) / "sdcard/.userdata/shared").mkdir(parents=True, exist_ok=True)
+    (Path(prefix) / "sdcard/.userdata/desktop").mkdir(parents=True, exist_ok=True)
+    return run_command([str(ROOT / "bin/desktop/musicplayer.elf")], env=env).returncode
+
+
+def clean_local():
+    paths = [ROOT / "src/build", ROOT / "src/opus_obj", ROOT / "test/bin", DIST_DIR]
+    files = [
+        ROOT / "bin/tg5040/musicplayer.elf",
+        ROOT / "bin/tg5050/musicplayer.elf",
+        ROOT / "bin/desktop/musicplayer.elf",
+        ROOT / "Music.Player.pak.zip",
+    ]
+    for path in paths:
+        if path.exists():
+            print("Removing " + str(path.relative_to(ROOT)))
+            shutil.rmtree(path)
+    for path in files:
+        if path.exists():
+            print("Removing " + str(path.relative_to(ROOT)))
+            path.unlink()
+
+
+def command_devices(_args):
+    devices = list_devices()
+    if not devices:
+        print("No ADB devices found.")
+        return 0
+    print(
+        "{:<24} {:<14} {:<10} {}".format(
+            "SERIAL", "STATE", "PLATFORM", "HARDWARE"
+        )
+    )
+    for device in devices:
+        state = "connected" if device.state == "device" else device.state
+        print(
+            "{:<24} {:<14} {:<10} {}".format(
+                device.serial, state, device.platform, device.hardware
+            )
+        )
+    return 0
+
+
+def command_container(args):
+    if args.container_command in (["-h"], ["--help"]):
+        args.command_parser.print_help()
+        return 0
+    platform = platform_for_alias(args.platform)
+    if platform not in DEVICE_PLATFORMS:
+        raise DevError("Invalid container platform: " + args.platform)
+    command = args.container_command
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        command = ["/bin/bash"]
+    runtime = "podman" if args.podman else "docker"
+    return run_container(runtime, platform, command, check=False).returncode
+
+
+def command_build(args):
+    platforms = resolve_build_platforms(args.targets)
+    runtime = "podman" if args.podman else "docker"
+    build_platforms(platforms, runtime)
+    return 0
+
+
+def command_clean(_args):
+    clean_local()
+    return 0
+
+
+def command_dist(args):
+    platforms = resolve_dist_platforms(args.targets)
+    if args.strict and set(platforms) != set(DEVICE_PLATFORMS):
+        raise DevError(
+            "--strict requires all distribution platforms: "
+            + ", ".join(DEVICE_PLATFORMS)
+        )
+    runtime = "podman" if args.podman else "docker"
+    build_platforms(platforms, runtime)
+    if DIST_ZIP.exists():
+        DIST_ZIP.unlink()
+    package = stage_package(platforms, strict=args.strict)
+    print("Created " + str(package.relative_to(ROOT)))
+    if not args.no_zip:
+        archive = create_zip(package)
+        print("Created " + str(archive.relative_to(ROOT)))
+    return 0
+
+
+def command_install_or_run(args, should_run):
+    targets = args.targets
+    if not targets:
+        if should_run:
+            targets = ["desktop"]
+        else:
+            raise DevError("install requires at least one target")
+    full = args.full or args.delete
+
+    only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
+    devices = [] if only_desktop else list_devices()
+    platforms, device_targets = resolve_device_targets(
+        targets, devices, allow_desktop=True
+    )
+    runtime = "podman" if args.podman else "docker"
+    build_platforms(platforms, runtime)
+
+    by_platform = {}
+    for device in device_targets:
+        by_platform.setdefault(device.platform, []).append(device)
+
+    failures = []
+    for platform, matching_devices in by_platform.items():
+        package = None
+        if full:
+            try:
+                package = stage_package((platform,), strict=False)
+            except DevError as error:
+                failures.append(str(error))
+                continue
+
+        for device in matching_devices:
+            try:
+                if package:
+                    install_full(device, package, delete=args.delete)
+                else:
+                    install_binary(device)
+                if should_run:
+                    run_on_device(device)
+            except DevError as error:
+                failures.append(str(error))
+
+    if should_run and "desktop" in platforms:
+        run_desktop()
+
+    if failures:
+        raise DevError("\n".join(failures))
+    return 0
+
+
+def command_install(args):
+    return command_install_or_run(args, should_run=args.run)
+
+
+def command_run(args):
+    result = command_install_or_run(args, should_run=True)
+    if args.follow:
+        targets = args.targets
+        if not targets or any(
+            platform_for_alias(target) == "desktop" for target in targets
+        ):
+            raise DevError("--follow requires exactly one device target")
+        log_args = argparse.Namespace(targets=targets, follow=True, lines=10)
+        return command_log(log_args)
+    return result
+
+
+def command_log(args):
+    selectors = args.targets or ["device"]
+    devices = list_devices()
+    _platforms, targets = resolve_device_targets(selectors, devices, allow_desktop=False)
+    if len(targets) != 1:
+        details = ", ".join(
+            "{} ({})".format(device.serial, device.platform) for device in targets
+        ) or "none"
+        raise DevError("log requires exactly one device; resolved: " + details)
+    device = targets[0]
+    log_path = "/mnt/SDCARD/.userdata/{}/logs/music-player.txt".format(
+        device.platform
+    )
+    command = ["tail", "-n", str(args.lines)]
+    if args.follow:
+        command.append("-f")
+    command.append(log_path)
+    action = "Following" if args.follow else "Reading"
+    print("{} {}:{}".format(action, device.serial, log_path), flush=True)
+    remote_command = shlex.join(command)
+    return run_command(
+        ["adb", "-s", device.serial, "shell", remote_command],
+        check=False,
+    ).returncode
+
+
+def add_install_options(parser, include_run, target_help):
+    parser.add_argument("targets", nargs="*", metavar="target", help=target_help)
+    parser.add_argument(
+        "--podman",
+        action="store_true",
+        help="use Podman instead of Docker for device builds",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="install the full pak (default: update only the binary)",
+    )
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="remove the installed pak before uploading it (implies --full)",
+    )
+    if include_run:
+        parser.add_argument("--run", action="store_true", help="run after installing")
+
+
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description="Build and deploy NextUI Music Player",
+        formatter_class=CommandHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        title="commands",
+        metavar="command",
+    )
+
+    build = subparsers.add_parser(
+        "build",
+        help="build locally",
+        description="build locally",
+        usage="%(prog)s target [-h] [--podman]",
+    )
+    build.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help="one or more of desktop (default), tg5040, tg5050, all",
+    )
+    build.add_argument(
+        "--podman",
+        action="store_true",
+        help="use Podman instead of Docker for device builds",
+    )
+    build.set_defaults(handler=command_build)
+
+    clean = subparsers.add_parser(
+        "clean",
+        help="remove local generated files",
+        description="remove local generated files",
+        usage="%(prog)s [-h]",
+    )
+    clean.set_defaults(handler=command_clean)
+
+    install = subparsers.add_parser(
+        "install",
+        help="build and install",
+        description="build and install",
+        usage="%(prog)s target [-h] [--podman] [--full] [--delete] [--run]",
+    )
+    add_install_options(
+        install,
+        include_run=True,
+        target_help=(
+            "one or more of desktop, tg5040, tg5050, device, or an ADB serial; "
+            "no default"
+        ),
+    )
+    install.set_defaults(handler=command_install)
+
+    run = subparsers.add_parser(
+        "run",
+        help="build, install, and run",
+        description="build, install, and run",
+        usage="%(prog)s target [-h] [--podman] [--full] [--delete] [-f]",
+    )
+    add_install_options(
+        run,
+        include_run=False,
+        target_help=(
+            "one or more of desktop (default), tg5040, tg5050, device, or an "
+            "ADB serial"
+        ),
+    )
+    run.add_argument("-f", "--follow", action="store_true", help="follow the log")
+    run.set_defaults(handler=command_run)
+
+    dist = subparsers.add_parser(
+        "dist",
+        help="build the app and create a distribution package",
+        description="build the app and create a distribution package",
+        usage="%(prog)s target [-h] [--podman] [--no-zip] [--strict]",
+    )
+    dist.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help="one or more of all (default), tg5040, tg5050",
+    )
+    dist.add_argument(
+        "--podman",
+        action="store_true",
+        help="use Podman instead of Docker for device builds",
+    )
+    dist.add_argument(
+        "--no-zip",
+        action="store_true",
+        help="skip .pak.zip package creation",
+    )
+    dist.add_argument(
+        "--strict",
+        action="store_true",
+        help="check that the manifest completely describes the dist package",
+    )
+    dist.set_defaults(handler=command_dist)
+
+    log = subparsers.add_parser(
+        "log",
+        help="show the application log",
+        description="show the application log",
+        usage="%(prog)s target [-h] [-f] [-n lines]",
+    )
+    log.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help=(
+            "exactly one of device (default), tg5040, tg5050, or an ADB serial; "
+            "must resolve to one connected device"
+        ),
+    )
+    log.add_argument("-f", "--follow", action="store_true")
+    log.add_argument("-n", "--lines", type=int, default=10)
+    log.set_defaults(handler=command_log)
+
+    devices = subparsers.add_parser(
+        "devices",
+        help="list ADB devices and platforms",
+        description="list ADB devices and platforms",
+        usage="%(prog)s [-h]",
+    )
+    devices.set_defaults(handler=command_devices)
+
+    container = subparsers.add_parser(
+        "docker",
+        help="run the platform toolchain",
+        description="run the platform toolchain",
+        usage="%(prog)s platform [-h] [--podman] [--] [command ...]",
+    )
+    container.add_argument(
+        "--podman",
+        action="store_true",
+        help="use Podman instead of Docker",
+    )
+    container.add_argument(
+        "platform",
+        nargs="?",
+        default="tg5040",
+        help="one of tg5040 (default), tg5050",
+    )
+    container.add_argument(
+        "container_command",
+        nargs=argparse.REMAINDER,
+        metavar="command",
+        help="command to execute in the container (default: interactive shell)",
+    )
+    container.set_defaults(handler=command_container, command_parser=container)
+
+    parser.usage = "%(prog)s [-h] command args"
+    return parser
+
+
+def normalize_docker_options(argv):
+    argv = list(argv)
+    if argv[:1] != ["docker"]:
+        return argv
+    separator = argv.index("--") if "--" in argv else len(argv)
+    options = [index for index in range(1, separator) if argv[index] == "--podman"]
+    if not options:
+        return argv
+    for index in reversed(options):
+        del argv[index]
+    argv.insert(1, "--podman")
+    return argv
+
+
+def main():
+    parser = create_parser()
+    args = parser.parse_args(normalize_docker_options(sys.argv[1:]))
+    if args.command is None:
+        parser.print_help()
+        return 0
+    try:
+        return args.handler(args)
+    except DevError as error:
+        print("ERROR: " + str(error), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

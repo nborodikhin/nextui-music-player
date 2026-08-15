@@ -25,5 +25,13 @@ echo conservative > "$CPU_FREQ/scaling_governor"
 cat "$CPU_FREQ/cpuinfo_min_freq" > "$CPU_FREQ/scaling_min_freq"
 cat "$CPU_FREQ/cpuinfo_max_freq" > "$CPU_FREQ/scaling_max_freq"
 
-# Run the platform-specific binary
-"$DIR/bin/$PLATFORM/musicplayer.elf" &> "$LOGS_PATH/music-player.txt"
+# Development hook:
+# - if the restart flag file is present when app exits, restart the app.
+RESTART_FLAG_FILE=/tmp/nextui-music-player.restart
+
+while :; do
+	rm -f "$RESTART_FLAG_FILE"
+	"$DIR/bin/$PLATFORM/musicplayer.elf" > "$LOGS_PATH/music-player.txt" 2>&1
+
+	[ -e "$RESTART_FLAG_FILE" ] || break
+done
