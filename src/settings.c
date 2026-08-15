@@ -30,6 +30,7 @@ static struct {
     bool lyrics_enabled;     // true = show lyrics
     int bass_filter_hz;      // 0=off, 80, 100, 120, 150, 200
     int soft_limiter_index;  // 0=off, 1=mild, 2=medium, 3=strong
+    bool auto_update;        // true = check for app updates on startup
 } current_settings;
 
 // Find index of current screen off value in the values array
@@ -58,6 +59,7 @@ void Settings_init(void) {
     current_settings.lyrics_enabled = true;
     current_settings.bass_filter_hz = bass_filter_values[DEFAULT_BASS_FILTER_INDEX];
     current_settings.soft_limiter_index = DEFAULT_SOFT_LIMITER_INDEX;
+    current_settings.auto_update = true;
 
     // Try to load from file
     FILE* f = fopen(SETTINGS_FILE, "r");
@@ -90,6 +92,9 @@ void Settings_init(void) {
             if (value >= 0 && value < SOFT_LIMITER_VALUE_COUNT) {
                 current_settings.soft_limiter_index = value;
             }
+        }
+        if (sscanf(line, "auto_update=%d", &value) == 1) {
+            current_settings.auto_update = (value != 0);
         }
     }
     fclose(f);
@@ -152,6 +157,7 @@ void Settings_save(void) {
     fprintf(f, "lyrics_enabled=%d\n", current_settings.lyrics_enabled ? 1 : 0);
     fprintf(f, "bass_filter_hz=%d\n", current_settings.bass_filter_hz);
     fprintf(f, "soft_limiter=%d\n", current_settings.soft_limiter_index);
+    fprintf(f, "auto_update=%d\n", current_settings.auto_update ? 1 : 0);
     fclose(f);
 }
 
@@ -167,6 +173,24 @@ void Settings_setLyricsEnabled(bool enabled) {
 void Settings_toggleLyrics(void) {
     current_settings.lyrics_enabled = !current_settings.lyrics_enabled;
     Settings_save();
+}
+
+bool Settings_getAutoUpdateEnabled(void) {
+    return current_settings.auto_update;
+}
+
+void Settings_setAutoUpdateEnabled(bool enabled) {
+    current_settings.auto_update = enabled;
+    Settings_save();
+}
+
+void Settings_toggleAutoUpdate(void) {
+    current_settings.auto_update = !current_settings.auto_update;
+    Settings_save();
+}
+
+const char* Settings_getAutoUpdateDisplayStr(void) {
+    return current_settings.auto_update ? "On" : "Off";
 }
 
 // Bass filter getters/cyclers

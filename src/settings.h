@@ -43,6 +43,12 @@ void Settings_cycleSoftLimiterNext(void);
 void Settings_cycleSoftLimiterPrev(void);
 const char* Settings_getSoftLimiterDisplayStr(void);
 
+// Automatic update check on startup
+bool Settings_getAutoUpdateEnabled(void);
+void Settings_setAutoUpdateEnabled(bool enabled);
+void Settings_toggleAutoUpdate(void);
+const char* Settings_getAutoUpdateDisplayStr(void);
+
 // Save settings to file (auto-called on change)
 void Settings_save(void);
 
