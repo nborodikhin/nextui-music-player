@@ -559,15 +559,10 @@ def version_list(pak, _args):
 
 
 def version_update(pak, args):
-    words = args.text
-    if words[0] in pak["changelog"]:
-        version = words[0]
-        text = " ".join(words[1:])
-        if not text:
-            raise DevError("version update requires changelog text")
-    else:
-        version = latest_version(pak)
-        text = " ".join(words)
+    version = args.version
+    if version not in pak["changelog"]:
+        raise DevError("Version {} not found in changelog.".format(version))
+    text = " ".join(args.text)
 
     pak["changelog"][version] = text
     save_pak(pak)
@@ -1080,12 +1075,13 @@ def create_parser():
         "update",
         help="update a changelog note",
         description="update a changelog note",
-        usage="%(prog)s [version] text [-h]",
+        usage="%(prog)s version text [-h]",
     )
+    version_update_parser.add_argument("version", help="version to update")
     version_update_parser.add_argument(
         "text",
         nargs="+",
-        help="optional existing version followed by its new changelog note",
+        help="new changelog note",
     )
     version_update_parser.set_defaults(version_handler=version_update)
 
