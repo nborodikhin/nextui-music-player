@@ -8,26 +8,16 @@
 // Toast sits on the highest GPU layer, above scroll text and every other overlay.
 #define LAYER_TOAST 5
 
-// The one toast that can be up at a time. current == TOAST_TOKEN_NONE means none.
-static ToastToken current = TOAST_TOKEN_NONE;
-static ToastToken next_token = TOAST_TOKEN_NONE + 1;
-static char current_message[128] = "";
-static uint32_t shown_at = 0;
-static uint32_t duration = 0;
-static bool screen_bound = false;
+static ToastState state;
 
 // Surface the toast is positioned against; only its dimensions are read.
 static SDL_Surface* target = NULL;
 
-static bool expired(void) {
-    return SDL_GetTicks() - shown_at >= duration;
-}
-
 // Paint the current message onto the toast layer.
 static void draw(void) {
-    if (!target || current == TOAST_TOKEN_NONE) return;
+    if (!target || state.current == TOAST_TOKEN_NONE) return;
 
-    SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), current_message, COLOR_WHITE);
+    SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), state.message, COLOR_WHITE);
     if (!text) return;
 
     int border   = SCALE1(2);
@@ -69,25 +59,15 @@ static void draw(void) {
     SDL_FreeSurface(text);
 }
 
-static void end(void) {
-    current = TOAST_TOKEN_NONE;
-    current_message[0] = '\0';
+static void clear(void) {
     PLAT_clearLayers(LAYER_TOAST);
     PLAT_GPU_Flip();
 }
 
-static ToastToken show(const char* msg, uint32_t duration_ms, bool bound) {
-    if (!msg || msg[0] == '\0' || duration_ms == 0) return TOAST_TOKEN_NONE;
-
-    snprintf(current_message, sizeof(current_message), "%s", msg);
-    shown_at     = SDL_GetTicks();
-    duration     = duration_ms;
-    screen_bound = bound;
-    current      = next_token++;
-    if (next_token == TOAST_TOKEN_NONE) next_token++;
-
-    draw();
-    return current;
+static ToastToken show(const char* msg, uint32_t duration_ms, bool screen_bound) {
+    ToastToken token = ToastState_show(&state, msg, duration_ms, screen_bound, SDL_GetTicks());
+    if (token != TOAST_TOKEN_NONE) draw();
+    return token;
 }
 
 ToastToken Toast_show(const char* msg, uint32_t duration_ms) {
@@ -99,11 +79,15 @@ ToastToken Toast_showScreenBound(const char* msg, uint32_t duration_ms) {
 }
 
 bool Toast_isShowing(ToastToken token) {
-    return token != TOAST_TOKEN_NONE && token == current && !expired();
+    return ToastState_isShowing(&state, token, SDL_GetTicks());
 }
 
 void Toast_dismiss(ToastToken token) {
-    if (Toast_isShowing(token)) end();
+    if (ToastState_dismiss(&state, token, SDL_GetTicks())) clear();
+}
+
+void Toast_tick(void) {
+    if (ToastState_tick(&state, SDL_GetTicks())) clear();
 }
 
 void Toast_setSurface(SDL_Surface* screen) {
@@ -111,13 +95,9 @@ void Toast_setSurface(SDL_Surface* screen) {
 }
 
 void Toast_screenChanged(void) {
-    if (current != TOAST_TOKEN_NONE && screen_bound) end();
-}
-
-void Toast_tick(void) {
-    if (current != TOAST_TOKEN_NONE && expired()) end();
+    if (ToastState_screenChanged(&state)) clear();
 }
 
 void Toast_redraw(void) {
-    if (current != TOAST_TOKEN_NONE && !expired()) draw();
+    if (Toast_isShowing(state.current)) draw();
 }

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "api.h"
+#include "toast_state.h"  // ToastToken, TOAST_TOKEN_NONE
 
 // Transient message shown at the bottom of the screen, on a GPU layer of its
 // own above all other content. At most one toast exists at a time; showing a
@@ -12,16 +13,12 @@
 //
 // The toast is not part of the screen surface, so it neither needs nor causes a
 // module redraw: it is painted once when shown and cleared once when it ends.
+//
+// This is the screen half; toast_state.{c,h} holds which toast is up and until
+// when, and is what the host-side tests exercise.
 
 // Default lifetime for toasts with nothing better to ask for.
 #define TOAST_DURATION 3000
-
-// Identifies one shown toast. Handed out by Toast_show*(), passed back to ask
-// about or dismiss that specific toast.
-typedef uint32_t ToastToken;
-
-// Zero is never a token assigned to a toast
-#define TOAST_TOKEN_NONE 0u
 
 // ============================================
 // Toast API methods
