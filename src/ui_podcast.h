@@ -14,8 +14,7 @@ typedef enum {
 
 // Render redesigned podcast main page (continue listening + subscriptions)
 void render_podcast_main_page(SDL_Surface* screen, int show_setting,
-    int selected, int* scroll,
-    const char* toast_message, uint32_t toast_time);
+    int selected, int* scroll);
 
 // Clear thumbnail cache (call from Podcast_cleanup)
 void Podcast_clearThumbnailCache(void);
@@ -30,23 +29,19 @@ void render_podcast_manage(SDL_Surface* screen, int show_setting,
 
 // Render Top Shows list
 void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
-                               int selected, int* scroll,
-                               const char* toast_message, uint32_t toast_time);
+                               int selected, int* scroll);
 
 // Render search results
 void render_podcast_search_results(SDL_Surface* screen, int show_setting,
-                                    int selected, int* scroll,
-                                    const char* toast_message, uint32_t toast_time);
+                                    int selected, int* scroll);
 
 // Render episode list for a feed
 void render_podcast_episodes(SDL_Surface* screen, int show_setting,
-                              int feed_index, int selected, int* scroll,
-                              const char* toast_message, uint32_t toast_time);
+                              int feed_index, int selected, int* scroll);
 
 // Render download queue view
 void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
-                                    int selected, int* scroll,
-                                    const char* toast_message, uint32_t toast_time);
+                                    int selected, int* scroll);
 
 // Render now playing screen for podcast
 void render_podcast_playing(SDL_Surface* screen, int show_setting,

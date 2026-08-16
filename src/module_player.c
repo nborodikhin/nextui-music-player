@@ -654,16 +654,6 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
             ModuleCommon_PWR_update(&dirty, &show_setting);
         }
 
-        // Auto-clear toast after duration; force re-render while visible
-        const char* atp_toast = AddToPlaylist_getToastMessage();
-        if (atp_toast && atp_toast[0]) {
-            if (SDL_GetTicks() - AddToPlaylist_getToastTime() > TOAST_DURATION) {
-                AddToPlaylist_clearToast();
-                clear_toast();
-            }
-            dirty = 1;
-        }
-
         // Render
         if (dirty && !screen_off) {
             if (ModuleCommon_isScreenOffHintActive()) {
@@ -675,12 +665,6 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
                 int pl_track = playlist_active ? Playlist_getCurrentIndex(&playlist) + 1 : 0;
                 int pl_total = playlist_active ? Playlist_getCount(&playlist) : 0;
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-            }
-
-            // Show add-to-playlist toast (if still active after auto-clear check)
-            atp_toast = AddToPlaylist_getToastMessage();
-            if (atp_toast && atp_toast[0]) {
-                render_toast(screen, atp_toast, AddToPlaylist_getToastTime());
             }
 
             GFX_flip(screen);
@@ -979,16 +963,6 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
             ModuleCommon_PWR_update(&dirty, &show_setting);
         }
 
-        // Auto-clear toast after duration; force re-render while visible
-        const char* atp_toast = AddToPlaylist_getToastMessage();
-        if (atp_toast && atp_toast[0]) {
-            if (SDL_GetTicks() - AddToPlaylist_getToastTime() > TOAST_DURATION) {
-                AddToPlaylist_clearToast();
-                clear_toast();
-            }
-            dirty = 1;
-        }
-
         // Render
         if (dirty && !screen_off) {
             if (ModuleCommon_isScreenOffHintActive()) {
@@ -998,12 +972,6 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
                 int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                 int pl_total = Playlist_getCount(&playlist);
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-            }
-
-            // Show add-to-playlist toast (if still active after auto-clear check)
-            atp_toast = AddToPlaylist_getToastMessage();
-            if (atp_toast && atp_toast[0]) {
-                render_toast(screen, atp_toast, AddToPlaylist_getToastTime());
             }
 
             GFX_flip(screen);
@@ -1119,16 +1087,6 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
                 ModuleCommon_PWR_update(&dirty, &show_setting);
             }
 
-            // Auto-clear toast
-            const char* atp_toast = AddToPlaylist_getToastMessage();
-            if (atp_toast && atp_toast[0]) {
-                if (SDL_GetTicks() - AddToPlaylist_getToastTime() > TOAST_DURATION) {
-                    AddToPlaylist_clearToast();
-                    clear_toast();
-                }
-                dirty = 1;
-            }
-
             // Render
             if (dirty && !screen_off) {
                 if (ModuleCommon_isScreenOffHintActive()) {
@@ -1138,11 +1096,6 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
                     int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                     int pl_total = Playlist_getCount(&playlist);
                     render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-                }
-
-                atp_toast = AddToPlaylist_getToastMessage();
-                if (atp_toast && atp_toast[0]) {
-                    render_toast(screen, atp_toast, AddToPlaylist_getToastTime());
                 }
 
                 GFX_flip(screen);

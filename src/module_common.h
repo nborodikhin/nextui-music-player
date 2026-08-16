@@ -5,9 +5,6 @@
 #include <stdbool.h>
 #include "player.h"
 
-// Toast duration for all modules (3 seconds)
-#define TOAST_DURATION 3000
-
 // Screen off hint duration (time hint is shown before screen turns off)
 #define SCREEN_OFF_HINT_DURATION_MS 4000
 
@@ -59,9 +56,6 @@ void ModuleCommon_recordInputTime(void);
 // If timed out: starts screen off hint and returns true.
 // Caller is responsible for clearing GPU layers after this returns true.
 bool ModuleCommon_checkAutoScreenOffTimeout(void);
-
-// Check toast state: if active and not expired, sets dirty=1; if expired, clears message and sets dirty=1.
-void ModuleCommon_tickToast(char* message, uint32_t toast_time, int* dirty);
 
 // Clean up module common resources (call at app exit)
 void ModuleCommon_quit(void);

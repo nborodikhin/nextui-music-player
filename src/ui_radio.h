@@ -10,8 +10,7 @@
 
 // Render the radio station list
 void render_radio_list(SDL_Surface* screen, int show_setting,
-                       int radio_selected, int* radio_scroll,
-                       const char* toast_message, uint32_t toast_time);
+                       int radio_selected, int* radio_scroll);
 
 // Render the radio playing screen
 void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selected);
@@ -24,8 +23,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 void render_radio_add_stations(SDL_Surface* screen, int show_setting,
                                const char* country_code,
                                int add_station_selected, int* add_station_scroll,
-                               const int* sorted_indices, int sorted_count,
-                               const char* toast_message, uint32_t toast_time);
+                               const int* sorted_indices, int sorted_count);
 
 // Render help/instructions screen
 void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll);

@@ -576,8 +576,7 @@ static ListItemRichPos render_rich_list_item(SDL_Surface* screen, ListLayout* la
 
 // Render redesigned podcast main page (continue listening + subscriptions with artwork)
 void render_podcast_main_page(SDL_Surface* screen, int show_setting,
-    int selected, int* scroll,
-    const char* toast_message, uint32_t toast_time) {
+    int selected, int* scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -806,7 +805,6 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     }
 
     // Toast
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Render the podcast management menu (Y button opens this)
@@ -848,8 +846,7 @@ void render_podcast_manage(SDL_Surface* screen, int show_setting,
 
 // Render Top Shows list
 void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
-                               int selected, int* scroll,
-                               const char* toast_message, uint32_t toast_time) {
+                               int selected, int* scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -927,13 +924,11 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
     }
 
     // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Render search results
 void render_podcast_search_results(SDL_Surface* screen, int show_setting,
-                                    int selected, int* scroll,
-                                    const char* toast_message, uint32_t toast_time) {
+                                    int selected, int* scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -1011,13 +1006,11 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
     }
 
     // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Render episode list for a feed
 void render_podcast_episodes(SDL_Surface* screen, int show_setting,
-                              int feed_index, int selected, int* scroll,
-                              const char* toast_message, uint32_t toast_time) {
+                              int feed_index, int selected, int* scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -1403,7 +1396,6 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
     }
 
     // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Format download speed for display
@@ -1434,8 +1426,7 @@ static void format_eta(char* buf, int buf_size, int seconds) {
 
 // Render download queue view
 void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
-                                    int selected, int* scroll,
-                                    const char* toast_message, uint32_t toast_time) {
+                                    int selected, int* scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -1465,7 +1456,6 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
             SDL_FreeSurface(text);
         }
         GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
-        render_toast(screen, toast_message, toast_time);
         return;
     }
 
@@ -1592,7 +1582,6 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
     }
 
     // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Render now playing screen for podcast (matches radio/music player style)

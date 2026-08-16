@@ -13,6 +13,7 @@
 #include "radio.h"
 #include "spectrum.h"
 #include "background.h"
+#include "toast.h"
 
 static bool autosleep_disabled = false;
 static uint32_t last_input_time = 0;
@@ -36,16 +37,6 @@ static bool overlay_buttons_were_active = false;
 static uint32_t overlay_release_time = 0;
 #define OVERLAY_VISIBLE_AFTER_RELEASE_MS 800  // How long overlay stays visible after release
 #define OVERLAY_FORCE_HIDE_DURATION_MS 500    // How long to keep forcing hide
-
-void ModuleCommon_tickToast(char* message, uint32_t toast_time, int* dirty) {
-    if (message[0] == '\0') return;
-    if (SDL_GetTicks() - toast_time < TOAST_DURATION) {
-        *dirty = 1;
-    } else {
-        message[0] = '\0';
-        *dirty = 1;
-    }
-}
 
 void ModuleCommon_init(void) {
     autosleep_disabled = false;
@@ -340,6 +331,7 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
 void ModuleCommon_frameBegin(void) {
     GFX_startFrame();
     PAD_poll();
+    Toast_tick();
 }
 
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {

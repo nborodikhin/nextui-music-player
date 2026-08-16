@@ -12,14 +12,14 @@
 #include "list_nav.h"
 #include "list_nav_pad.h"
 #include "menu_rows.h"
+#include "toast.h"
 
-// Toast message state
-static char menu_toast_message[128] = "";
-static uint32_t menu_toast_time = 0;
+// How long the exit prompt stays up, which is also how long the confirming
+// press has to arrive: the prompt being on screen *is* the armed state.
+#define EXIT_CONFIRM_WINDOW_MS 3000
 
-// Two-step exit state: timestamp of first B-press; 0 = not armed.
-// Window equals TOAST_DURATION so the exit toast and the arm-window expire together.
-static uint32_t exit_armed_at = 0;
+// The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed.
+static ToastToken exit_prompt = TOAST_TOKEN_NONE;
 
 // How long to show the "Exiting..." toast before actually quitting.
 // It has to be a few frames to ensure the text is drawn which is important since
@@ -54,10 +54,6 @@ MenuSelection MenuModule_run(SDL_Surface* screen) {
     int dirty = 1;
     int show_setting = 0;
     int exiting = 0;
-
-    // Reset two-step exit arming on (re-)entry, so a stale arm from a previous
-    // visit to the menu can't make a single B-press here read as the confirm.
-    exit_armed_at = 0;
 
     while (1) {
         ModuleCommon_frameBegin();
@@ -130,19 +126,15 @@ MenuSelection MenuModule_run(SDL_Surface* screen) {
             }
         }
         else if (PAD_justPressed(BTN_B)) {
-            uint32_t now = SDL_GetTicks();
-            if (exit_armed_at != 0 && now - exit_armed_at < TOAST_DURATION) {
+            if (Toast_isShowing(exit_prompt)) {
                 GFX_clearLayers(LAYER_SCROLLTEXT);
-                exit_armed_at = 0;
                 exiting = 1;
-                snprintf(menu_toast_message, sizeof(menu_toast_message), "Exiting...");
+                // Unbound: it has to outlive the menu as the last frame on screen.
+                Toast_show("Exiting...", TOAST_DURATION);
             } else {
-                // First press (or window expired) — arm and show toast
-                exit_armed_at = now;
-                snprintf(menu_toast_message, sizeof(menu_toast_message),
-                         "Press B again to exit");
+                exit_prompt = Toast_showScreenBound("Press B again to exit",
+                                                    EXIT_CONFIRM_WINDOW_MS);
             }
-            menu_toast_time = now;
             dirty = 1;
         }
 
@@ -151,8 +143,7 @@ MenuSelection MenuModule_run(SDL_Surface* screen) {
 
         // Render
         if (dirty) {
-            render_menu(screen, show_setting, nav.selected, nav.scroll,
-                        menu_toast_message, menu_toast_time, &rows);
+            render_menu(screen, show_setting, nav.selected, nav.scroll, &rows);
 
             if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);
@@ -167,19 +158,10 @@ MenuSelection MenuModule_run(SDL_Surface* screen) {
                 SDL_Delay(EXIT_TOAST_DELAY_MS);
                 return MENU_QUIT;
             }
-
-            // Keep refreshing while toast is visible
-            ModuleCommon_tickToast(menu_toast_message, menu_toast_time, &dirty);
         } else {
             // Software scroll needs continuous redraws
             if (menu_needs_scroll_redraw()) dirty = 1;
             GFX_sync();
         }
     }
-}
-
-// Set toast message (called by modules that return to menu with a message)
-void MenuModule_setToast(const char* message) {
-    snprintf(menu_toast_message, sizeof(menu_toast_message), "%s", message);
-    menu_toast_time = SDL_GetTicks();
 }

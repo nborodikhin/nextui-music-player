@@ -5,6 +5,7 @@
 #include "defines.h"
 #include "api.h"
 #include "module_common.h"
+#include "toast.h"
 #include "module_playlist.h"
 #include "module_player.h"
 #include "playlist_m3u.h"
@@ -44,10 +45,6 @@ static ListNav detail_nav = {
 };
 static int current_playlist_index = -1;  // Index into playlists[] for current detail view
 
-// Toast
-static char playlist_toast_message[128] = "";
-static uint32_t playlist_toast_time = 0;
-
 // Confirmation dialog state
 static bool show_confirm = false;
 static char confirm_name[256] = "";
@@ -65,11 +62,6 @@ static void refresh_playlists(void) {
 static void refresh_detail(void) {
     if (current_playlist_index < 0 || current_playlist_index >= playlist_count) return;
     M3U_loadTracks(playlists[current_playlist_index].path, detail_tracks, PLAYLIST_MAX_TRACKS, &detail_track_count);
-}
-
-static void show_toast(const char* msg) {
-    snprintf(playlist_toast_message, sizeof(playlist_toast_message), "%s", msg);
-    playlist_toast_time = SDL_GetTicks();
 }
 
 ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
@@ -94,7 +86,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                         M3U_delete(playlists[idx].path);
                         refresh_playlists();
                         ListNav_onItemRemoved(&list_nav, idx);
-                        show_toast("Playlist deleted");
+                        Toast_show("Playlist deleted", TOAST_DURATION);
                     }
                 } else if (confirm_action == 1) {
                     // Remove track
@@ -105,7 +97,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                         // Update parent count
                         playlists[current_playlist_index].track_count = detail_track_count;
                         ListNav_onItemRemoved(&detail_nav, idx);
-                        show_toast("Track removed");
+                        Toast_show("Track removed", TOAST_DURATION);
                     }
                 }
                 show_confirm = false;
@@ -171,10 +163,10 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
 				}
                 if (name && name[0]) {
                     if (M3U_create(name) == 0) {
-                        show_toast("Playlist created");
+                        Toast_show("Playlist created", TOAST_DURATION);
                         refresh_playlists();
                     } else {
-                        show_toast("Already exists");
+                        Toast_show("Already exists", TOAST_DURATION);
                     }
                     free(name);
                 } else if (name) {
@@ -263,17 +255,12 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                                        detail_tracks, detail_track_count, detail_nav.selected, detail_nav.scroll);
             }
 
-            // Toast
-            render_toast(screen, playlist_toast_message, playlist_toast_time);
-
             if (show_setting) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
             GFX_flip(screen);
             dirty = 0;
-
-            ModuleCommon_tickToast(playlist_toast_message, playlist_toast_time, &dirty);
         } else {
             GFX_sync();
         }

@@ -132,7 +132,7 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 
 // Render the main menu
 void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll,
-                 char* toast_message, uint32_t toast_time, const MenuRows* rows) {
+                 const MenuRows* rows) {
     current_rows = *rows;
 
     const char* items[MENU_ROWS_MAX];
@@ -151,9 +151,6 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int m
         .render_text = main_menu_render_text
     };
     render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
-
-    // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Controls help text for each page/state

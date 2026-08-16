@@ -20,9 +20,4 @@ int AddToPlaylist_handleInput(void);
 // Render the dialog overlay
 void AddToPlaylist_render(SDL_Surface* screen);
 
-// Toast accessors (for callers to show toast after dialog closes)
-const char* AddToPlaylist_getToastMessage(void);
-uint32_t AddToPlaylist_getToastTime(void);
-void AddToPlaylist_clearToast(void);
-
 #endif

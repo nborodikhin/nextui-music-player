@@ -13,8 +13,7 @@
 
 // Render the radio station list
 void render_radio_list(SDL_Surface* screen, int show_setting,
-                       int radio_selected, int* radio_scroll,
-                       const char* toast_message, uint32_t toast_time) {
+                       int radio_selected, int* radio_scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -82,9 +81,6 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
             SDL_FreeSurface(note2_surf);
         }
     }
-
-    // Toast notification
-    render_toast(screen, toast_message, toast_time);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -357,8 +353,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 void render_radio_add_stations(SDL_Surface* screen, int show_setting,
                                const char* country_code,
                                int add_station_selected, int* add_station_scroll,
-                               const int* sorted_indices, int sorted_count,
-                               const char* toast_message, uint32_t toast_time) {
+                               const int* sorted_indices, int sorted_count) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -450,9 +445,6 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
     }
 
     render_scroll_indicators(screen, *add_station_scroll, layout.items_per_page, sorted_count);
-
-    // Toast notification
-    render_toast(screen, toast_message, toast_time);
 
     // Button hints - dynamic based on whether selected station is already added
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
