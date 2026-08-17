@@ -3,6 +3,7 @@
 #include "defines.h"
 #include "api.h"
 #include "toast.h"
+#include "toast_state.h"
 #include "ui_fonts.h"
 
 // Toast sits on the highest GPU layer, above scroll text and every other overlay.

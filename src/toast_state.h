@@ -4,14 +4,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "toast_types.h"
+
 // System-agnostic part of toast state management (state only, no graphics).
 // See toast.h for the public API.
 
 #define TOAST_MESSAGE_MAX 128
-
-typedef uint32_t ToastToken;
-#define TOAST_DURATION_FOREVER UINT32_MAX
-#define TOAST_TOKEN_NONE ((ToastToken)0)
 
 typedef struct {
     ToastToken current;       // TOAST_TOKEN_NONE when nothing is up

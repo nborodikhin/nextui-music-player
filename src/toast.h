@@ -2,10 +2,9 @@
 #define __TOAST_H__
 
 #include <stdbool.h>
-#include <stdint.h>
 
 #include "api.h"
-#include "toast_state.h"
+#include "toast_types.h"
 
 // Toast is a transient message shown at the bottom of the screen, rendered as
 // a GPU layer of its own above all other content. At most one toast exists
@@ -14,24 +13,11 @@
 // The toast is not part of the screen surface, so it neither needs nor causes a
 // module redraw: it is painted once when shown and cleared once when it ends.
 
-// Default lifetime for toasts.
-#define TOAST_DURATION 3000
-
-// For manually managed toasts that must not expire automatically.
-// Most likely such a toast should be screen-bound as well.
-#define TOAST_DURATION_FOREVER UINT32_MAX
-
 // ============================================
-// Toast API methods
+// Toast API
 // ============================================
 
-typedef uint32_t ToastToken;
-
-// Zero is never a token assigned to a toast
-#define TOAST_TOKEN_NONE ((ToastToken)0)
-
-// Show `msg` for `duration_ms`, replacing any current toast. Pass
-// TOAST_DURATION_FOREVER when the caller will manage its lifetime.
+// Show `msg` for `duration_ms`, replacing any current toast.
 // Returns a token that uniquely identifies this toast.
 ToastToken Toast_show(const char* msg, uint32_t duration_ms);
 
@@ -45,7 +31,7 @@ bool Toast_isShowing(ToastToken token);
 void Toast_dismiss(ToastToken token);
 
 // ============================================
-// Toast system API methods
+// Toast system API
 // ============================================
 
 // Should be called on every tick, used for managing toast durations.

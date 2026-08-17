@@ -31,7 +31,7 @@ $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h
 $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_menu_rows.c $(SRC)/menu_rows.c
 
-$(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h test.h | $(BIN)
+$(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
 
 run: $(TESTS)
