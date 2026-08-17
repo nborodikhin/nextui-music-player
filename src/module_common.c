@@ -200,7 +200,6 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             start_was_pressed = false;
             // Clear all GPU layers so dialog is not obscured
             GFX_clearLayers(LAYER_SCROLLTEXT);
-            PLAT_clearLayers(LAYER_SPECTRUM);
             PLAT_clearLayers(LAYER_PLAYTIME);
             PLAT_GPU_Flip();
             PlayTime_clear();
@@ -292,7 +291,6 @@ void ModuleCommon_quit(void) {
 
     // Clear all GPU layers
     GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_SPECTRUM);
     PLAT_clearLayers(LAYER_PLAYTIME);
     PLAT_clearLayers(LAYER_BUFFER);
 }

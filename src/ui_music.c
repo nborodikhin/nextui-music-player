@@ -224,10 +224,13 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
     // If text needs scrolling, use GPU layer (no background)
     if (player_title_scroll.needs_scroll) {
-        ScrollText_renderGPU_NoBg(&player_title_scroll, Fonts_getTitle(), COLOR_WHITE, SCALE1(PADDING), title_y);
+        // Record where the scrolling title sits; the player paints it onto its layer.
+        player_title_scroll.last_x     = SCALE1(PADDING);
+        player_title_scroll.last_y     = title_y;
+        player_title_scroll.last_font  = Fonts_getTitle();
+        player_title_scroll.last_color = COLOR_WHITE;
     } else {
         // Static text - render to screen surface
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
         SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getTitle(), title, COLOR_WHITE);
         if (title_surf) {
             SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
@@ -345,12 +348,15 @@ bool player_title_scroll_needs_render(void) {
     return ScrollText_needsRender(&player_title_scroll);
 }
 
-// Animate player title scroll (GPU mode, no screen redraw needed)
-void player_animate_scroll(void) {
-    if (!player_title_scroll.text[0] || !player_title_scroll.needs_scroll) return;
-    ScrollText_renderGPU_NoBg(&player_title_scroll, player_title_scroll.last_font,
-                              player_title_scroll.last_color,
-                              player_title_scroll.last_x, player_title_scroll.last_y);
+bool player_title_scroll_showing(void) {
+    return player_title_scroll.text[0] && player_title_scroll.needs_scroll &&
+           player_title_scroll.last_font != NULL;
+}
+
+void player_title_scroll_paint(int layer) {
+    ScrollText_paintGPU(&player_title_scroll, player_title_scroll.last_font,
+                        player_title_scroll.last_color,
+                        player_title_scroll.last_x, player_title_scroll.last_y, layer);
 }
 
 // === PLAYTIME GPU FUNCTIONS ===

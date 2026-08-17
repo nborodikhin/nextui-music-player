@@ -229,13 +229,9 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 
 // GPU scroll without background (for player title)
 // Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
-                                SDL_Color color, int x, int y) {
-    if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) {
-        // Static text or no scroll needed - just clear layer
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
-        return;
-    }
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y, int layer) {
+    if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) return;
 
     // Save render info
     state->last_x = x;
@@ -256,9 +252,7 @@ void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
     SDL_Rect src = {state->scroll_offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
 
-    // Render to GPU layer
-    PLAT_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_drawOnLayer(clipped, x, y, state->max_width, height, 1.0f, false, LAYER_SCROLLTEXT);
+    PLAT_drawOnLayer(clipped, x, y, state->max_width, height, 1.0f, false, layer);
     SDL_FreeSurface(clipped);
 
     // Advance scroll offset (1 pixel per frame for smooth, slower scrolling)
@@ -266,8 +260,6 @@ void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
     if (state->scroll_offset >= state->text_width + padding) {
         state->scroll_offset = 0;
     }
-
-    PLAT_GPU_Flip();
 }
 
 // Render standard screen header (title pill + hardware status)
@@ -797,5 +789,3 @@ void render_empty_state(SDL_Surface* screen, const char* message,
         GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
     }
 }
-
-

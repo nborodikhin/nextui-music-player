@@ -55,10 +55,11 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
                        int max_width, SDL_Color color, SDL_Surface* screen, int x, int y, bool use_gpu);
 
-// GPU scroll without background (for player title)
-// Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
-                                SDL_Color color, int x, int y);
+// Draw the scrolling text at its current offset onto `layer`, and advance it. Does not
+// clear the layer or flip: the caller owns the layer and decides what else goes
+// on it.
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y, int layer);
 
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);

@@ -5,19 +5,16 @@
 #include <stdint.h>
 
 #include "api.h"
-#include "toast_state.h"  // ToastToken, TOAST_TOKEN_NONE
+#include "toast_state.h"
 
-// Transient message shown at the bottom of the screen, on a GPU layer of its
-// own above all other content. At most one toast exists at a time; showing a
-// new one replaces whatever was up.
+// Toast is a transient message shown at the bottom of the screen, rendered as
+// a GPU layer of its own above all other content. At most one toast exists
+// at a time; showing a new one replaces whatever was up.
 //
 // The toast is not part of the screen surface, so it neither needs nor causes a
 // module redraw: it is painted once when shown and cleared once when it ends.
-//
-// This is the screen half; toast_state.{c,h} holds which toast is up and until
-// when, and is what the host-side tests exercise.
 
-// Default lifetime for toasts with nothing better to ask for.
+// Default lifetime for toasts.
 #define TOAST_DURATION 3000
 
 // ============================================
@@ -28,8 +25,7 @@
 // Returns a token that uniquely identifies this toast.
 ToastToken Toast_show(const char* msg, uint32_t duration_ms);
 
-// As Toast_show(), but the toast also ends when the screen changes, so it can
-// never bleed into whatever the user opens next.
+// Same as Toast_show(), but the toast also ends when the screen changes.
 ToastToken Toast_showScreenBound(const char* msg, uint32_t duration_ms);
 
 // True while `token` is the current toast and its duration has not elapsed.

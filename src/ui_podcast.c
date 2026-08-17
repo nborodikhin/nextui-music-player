@@ -1704,7 +1704,10 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
 
     // If text needs scrolling, use GPU layer
     if (podcast_playing_title_scroll.needs_scroll) {
-        ScrollText_renderGPU_NoBg(&podcast_playing_title_scroll, Fonts_getTitle(), COLOR_WHITE, SCALE1(PADDING), title_y);
+        PLAT_clearLayers(LAYER_SCROLLTEXT);
+        ScrollText_paintGPU(&podcast_playing_title_scroll, Fonts_getTitle(), COLOR_WHITE,
+                            SCALE1(PADDING), title_y, LAYER_SCROLLTEXT);
+        PLAT_GPU_Flip();
     } else {
         // Static text - render to screen surface
         PLAT_clearLayers(LAYER_SCROLLTEXT);
@@ -1851,11 +1854,14 @@ void Podcast_animateTitleScroll(void) {
     // Only scroll playing title when playing, not when paused
     if (Player_getState() != PLAYER_STATE_PLAYING) return;
     if (ScrollText_isScrolling(&podcast_playing_title_scroll)) {
-        ScrollText_renderGPU_NoBg(&podcast_playing_title_scroll,
-                                   podcast_playing_title_scroll.last_font,
-                                   podcast_playing_title_scroll.last_color,
-                                   podcast_playing_title_scroll.last_x,
-                                   podcast_playing_title_scroll.last_y);
+        PLAT_clearLayers(LAYER_SCROLLTEXT);
+        ScrollText_paintGPU(&podcast_playing_title_scroll,
+                            podcast_playing_title_scroll.last_font,
+                            podcast_playing_title_scroll.last_color,
+                            podcast_playing_title_scroll.last_x,
+                            podcast_playing_title_scroll.last_y,
+                            LAYER_SCROLLTEXT);
+        PLAT_GPU_Flip();
     }
 }
 

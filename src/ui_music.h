@@ -34,8 +34,9 @@ bool player_needs_scroll_refresh(void);
 // Check if player title scroll needs a render to transition (delay phase)
 bool player_title_scroll_needs_render(void);
 
-// Animate player title scroll (GPU mode, no screen redraw needed)
-void player_animate_scroll(void);
+// Scrolling title, as painted onto the player's overlay layer.
+bool player_title_scroll_showing(void);
+void player_title_scroll_paint(int layer);
 
 // Playtime GPU rendering functions
 void PlayTime_setPosition(int x, int y, int duration_x);

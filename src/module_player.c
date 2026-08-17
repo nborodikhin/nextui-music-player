@@ -70,9 +70,18 @@ static uint32_t last_resume_save = 0;
 // Clear all player GPU overlay layers
 static void clear_gpu_layers(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_SPECTRUM);
     PLAT_clearLayers(LAYER_PLAYTIME);
     PLAT_clearLayers(LAYER_LYRICS);
+    PLAT_GPU_Flip();
+}
+
+// The playing screen draws its spectrum and its scrolling title onto one GPU
+// layer, so both are painted together after a single clear - neither can wipe
+// the other. Call order is z order: the scrolling title sits on top.
+static void paint_player_layer(void) {
+    PLAT_clearLayers(LAYER_SCROLLTEXT);
+    if (Spectrum_isShowing())          Spectrum_paint(LAYER_SCROLLTEXT);
+    if (player_title_scroll_showing()) player_title_scroll_paint(LAYER_SCROLLTEXT);
     PLAT_GPU_Flip();
 }
 
@@ -535,13 +544,14 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
 
     // Animate player GPU layers (skip if screen-off hint just activated)
     if (!ModuleCommon_isScreenOffHintActive()) {
-        if (player_needs_scroll_refresh()) {
-            player_animate_scroll();
-        }
+        bool repaint_layer = false;
+        if (player_needs_scroll_refresh()) repaint_layer = true;
         if (player_title_scroll_needs_render()) *dirty = 1;
         if (Spectrum_needsRefresh()) {
-            Spectrum_renderGPU();
+            Spectrum_update();
+            repaint_layer = true;
         }
+        if (repaint_layer) paint_player_layer();
         if (PlayTime_needsRefresh()) {
             PlayTime_renderGPU();
         }
@@ -665,6 +675,7 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
                 int pl_track = playlist_active ? Playlist_getCurrentIndex(&playlist) + 1 : 0;
                 int pl_total = playlist_active ? Playlist_getCount(&playlist) : 0;
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
+                paint_player_layer();
             }
 
             GFX_flip(screen);
@@ -943,13 +954,14 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
 
         // Animate player GPU layers
         if (!ModuleCommon_isScreenOffHintActive()) {
-            if (player_needs_scroll_refresh()) {
-                player_animate_scroll();
-            }
+            bool repaint_layer = false;
+            if (player_needs_scroll_refresh()) repaint_layer = true;
             if (player_title_scroll_needs_render()) dirty = 1;
             if (Spectrum_needsRefresh()) {
-                Spectrum_renderGPU();
+                Spectrum_update();
+                repaint_layer = true;
             }
+            if (repaint_layer) paint_player_layer();
             if (PlayTime_needsRefresh()) {
                 PlayTime_renderGPU();
             }
@@ -972,6 +984,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
                 int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                 int pl_total = Playlist_getCount(&playlist);
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
+                paint_player_layer();
             }
 
             GFX_flip(screen);
@@ -1096,6 +1109,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
                     int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                     int pl_total = Playlist_getCount(&playlist);
                     render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
+                    paint_player_layer();
                 }
 
                 GFX_flip(screen);
