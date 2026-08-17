@@ -10,12 +10,12 @@
 
 static ToastState state;
 
-// Surface the toast is positioned against; only its dimensions are read.
-static SDL_Surface* target = NULL;
+static int target_w = 0;
+static int target_h = 0;
 
 // Paint the current message onto the toast layer.
 static void draw(void) {
-    if (!target || state.current == TOAST_TOKEN_NONE) return;
+    if (target_w <= 0 || target_h <= 0 || state.current == TOAST_TOKEN_NONE) return;
 
     SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), state.message, COLOR_WHITE);
     if (!text) return;
@@ -23,8 +23,8 @@ static void draw(void) {
     int border   = SCALE1(2);
     int toast_w  = text->w + SCALE1(PADDING * 3);
     int toast_h  = text->h + SCALE1(12);
-    int toast_x  = (target->w - toast_w) / 2;
-    int toast_y  = target->h - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING * 3) - toast_h;
+    int toast_x  = (target_w - toast_w) / 2;
+    int toast_y  = target_h - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING * 3) - toast_h;
 
     // Total surface size including border
     int surface_w = toast_w + border * 2;
@@ -91,7 +91,9 @@ void Toast_tick(void) {
 }
 
 void Toast_setSurface(SDL_Surface* screen) {
-    target = screen;
+    if (!screen) return;
+    target_w = screen->w;
+    target_h = screen->h;
 }
 
 void Toast_screenChanged(void) {
