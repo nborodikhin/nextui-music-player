@@ -38,9 +38,6 @@ static ListNav radio_nav = {
     .count              = 0,
     .items_per_page     = 1,
 };
-// The "added / limit reached" toast on the add-stations screen, so leaving that
-// screen can take it down with it.
-static ToastToken add_station_toast = TOAST_TOKEN_NONE;
 
 // Add stations UI state
 static ListNav add_country_nav = {
@@ -156,15 +153,19 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
         // Handle confirmation dialog
         if (show_confirm) {
             if (PAD_justPressed(BTN_A)) {
+                bool removed = false;
                 if (confirm_action_type == 0) {
                     // Delete from main list
-                    Radio_removeStation(confirm_target_index);
+                    removed = Radio_removeStation(confirm_target_index);
                     Radio_saveStations();
                     ListNav_onItemRemoved(&radio_nav, confirm_target_index);
                 } else if (confirm_action_type == 1) {
                     // Remove from browse
-                    Radio_removeStationByUrl(confirm_station_url);
+                    removed = Radio_removeStationByUrl(confirm_station_url);
                     Radio_saveStations();
+                }
+                if (removed) {
+                    Toast_show("Removed", TOAST_DURATION);
                 }
                 show_confirm = false;
                 dirty = 1;
@@ -456,9 +457,9 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                         Radio_saveStations();
                         char msg[128];
                         snprintf(msg, sizeof(msg), "Added: %s", station->name);
-                        add_station_toast = Toast_show(msg, TOAST_DURATION);
+                        Toast_show(msg, TOAST_DURATION);
                     } else {
-                        add_station_toast = Toast_show("Maximum 32 stations reached", TOAST_DURATION);
+                        Toast_show("Maximum 32 stations reached", TOAST_DURATION);
                     }
                     dirty = 1;
                 }
@@ -470,7 +471,6 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
-                Toast_dismiss(add_station_toast);
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
