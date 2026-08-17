@@ -121,6 +121,25 @@ TEST(tick_ends_the_toast_once) {
     CHECK_EQ_INT(s.message[0], '\0');
 }
 
+TEST(forever_toast_does_not_expire) {
+    ToastState s = {0};
+    ToastToken t = SHOW(s, "Working...", TOAST_DURATION_FOREVER, 1000);
+
+    CHECK(ToastState_isShowing(&s, t, UINT32_MAX));
+    CHECK(!ToastState_tick(&s, UINT32_MAX));
+    CHECK(ToastState_isShowing(&s, t, 999));
+    CHECK(ToastState_dismiss(&s, t, 999));
+}
+
+TEST(screen_change_ends_a_bound_forever_toast) {
+    ToastState s = {0};
+    ToastToken t = SHOW_BOUND(s, "Working...", TOAST_DURATION_FOREVER, 0);
+
+    CHECK(ToastState_isShowing(&s, t, UINT32_MAX));
+    CHECK(ToastState_screenChanged(&s));
+    CHECK(!ToastState_isShowing(&s, t, UINT32_MAX));
+}
+
 TEST(dismiss_ends_the_toast_once) {
     ToastState s = {0};
     ToastToken t = SHOW(s, "Saved", 3000, 0);
@@ -243,6 +262,8 @@ int main(void) {
     RUN(replacing_restarts_the_duration);
     RUN(expiry_boundary_is_exclusive);
     RUN(tick_ends_the_toast_once);
+    RUN(forever_toast_does_not_expire);
+    RUN(screen_change_ends_a_bound_forever_toast);
     RUN(dismiss_ends_the_toast_once);
     RUN(dismiss_with_a_stale_token_is_a_no_op);
     RUN(dismiss_after_expiry_reports_nothing_to_clear);

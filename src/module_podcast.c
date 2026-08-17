@@ -90,7 +90,6 @@ static ToastToken podcast_toast = TOAST_TOKEN_NONE;
 
 // The "Resuming..." message shown for as long as a seek takes. Screen-bound so
 // that leaving the module mid-seek cannot carry it onto the next screen.
-#define SEEK_TOAST_MS 30000
 static ToastToken seek_toast = TOAST_TOKEN_NONE;
 
 static void show_toast(const char* msg) {
@@ -107,7 +106,7 @@ static void show_seek_toast(int feed_index, int episode_index) {
     } else {
         snprintf(msg, sizeof(msg), "Resuming...");
     }
-    seek_toast = Toast_showScreenBound(msg, SEEK_TOAST_MS);
+    seek_toast = Toast_showScreenBound(msg, TOAST_DURATION_FOREVER);
 }
 
 // Periodic progress saving
@@ -1096,4 +1095,3 @@ void PodcastModule_backgroundTick(void) {
         ModuleCommon_setAutosleepDisabled(false);
     }
 }
-

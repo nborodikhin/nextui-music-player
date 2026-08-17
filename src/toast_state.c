@@ -11,6 +11,7 @@ void ToastState_reset(ToastState* state) {
 }
 
 static bool expired(const ToastState* state, uint32_t now) {
+    if (state->duration >= TOAST_DURATION_FOREVER) return false;
     return now - state->shown_at >= state->duration;
 }
 

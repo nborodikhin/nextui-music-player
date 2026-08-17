@@ -9,11 +9,8 @@
 
 #define TOAST_MESSAGE_MAX 128
 
-// Identifies one shown toast. Handed out by ToastState_show(), passed back to
-// ask about or dismiss that specific toast.
 typedef uint32_t ToastToken;
-
-// Zero is never a token assigned to a toast
+#define TOAST_DURATION_FOREVER UINT32_MAX
 #define TOAST_TOKEN_NONE ((ToastToken)0)
 
 typedef struct {

@@ -17,11 +17,21 @@
 // Default lifetime for toasts.
 #define TOAST_DURATION 3000
 
+// For manually managed toasts that must not expire automatically.
+// Most likely such a toast should be screen-bound as well.
+#define TOAST_DURATION_FOREVER UINT32_MAX
+
 // ============================================
 // Toast API methods
 // ============================================
 
-// Show `msg` for `duration_ms`, replacing any current toast.
+typedef uint32_t ToastToken;
+
+// Zero is never a token assigned to a toast
+#define TOAST_TOKEN_NONE ((ToastToken)0)
+
+// Show `msg` for `duration_ms`, replacing any current toast. Pass
+// TOAST_DURATION_FOREVER when the caller will manage its lifetime.
 // Returns a token that uniquely identifies this toast.
 ToastToken Toast_show(const char* msg, uint32_t duration_ms);
 
