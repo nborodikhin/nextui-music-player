@@ -5,6 +5,7 @@
 #include "defines.h"
 #include "api.h"
 #include "module_common.h"
+#include "toast.h"
 #include "module_downloader.h"
 #include "display_helper.h"
 #include "module_library.h"
@@ -52,8 +53,6 @@ static ListNav queue_nav = {
 };
 static DownloaderResult* results = NULL;
 static int result_count = 0;
-static char toast_message[128] = "";
-static uint32_t toast_time = 0;
 
 ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     Downloader_init();
@@ -62,12 +61,12 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     int show_setting = 0;
     if (!Downloader_isAvailable()) {
         Downloader_cleanup();
-        LibraryModule_setToast("Downloader not available");
+        Toast_show("Downloader not available", TOAST_DURATION);
         return MODULE_EXIT_TO_MENU;
     }
     if (!Wifi_ensureConnected(screen, show_setting)) {
         Downloader_cleanup();
-        LibraryModule_setToast("Internet connection required");
+        Toast_show("Internet connection required", TOAST_DURATION);
         return MODULE_EXIT_TO_MENU;
     }
 
@@ -80,7 +79,6 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
     ListNav_scrollToTop(&results_nav);
     results = NULL;
     result_count = 0;
-    toast_message[0] = '\0';
 
     // If re-entering while download is running, go straight to queue
     if (Downloader_isDownloading()) {
@@ -138,8 +136,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                             state = DOWNLOADER_INTERNAL_SEARCHING;
                         } else {
                             // Search failed to start (likely another search in progress)
-                            snprintf(toast_message, sizeof(toast_message), "Search already in progress");
-                            toast_time = SDL_GetTicks();
+                            Toast_show("Search already in progress", TOAST_DURATION);
                         }
                     }
                     if (query) free(query);
@@ -175,9 +172,9 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                     ListNav_scrollToTop(&results_nav);
                     state = DOWNLOADER_INTERNAL_RESULTS;
                 } else {
-                    snprintf(toast_message, sizeof(toast_message), "%s",
-                             search_status->error_message[0] ? search_status->error_message : "No results found");
-                    toast_time = SDL_GetTicks();
+                    Toast_show(search_status->error_message[0]
+                                   ? search_status->error_message : "No results found",
+                               TOAST_DURATION);
                     state = DOWNLOADER_INTERNAL_MENU;
                 }
             }
@@ -201,25 +198,20 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
             else if (PAD_justPressed(BTN_A) && result_count > 0) {
                 DownloaderResult* r = &results[results_nav.selected];
                 if (Downloader_isInQueue(r->video_id)) {
-                    snprintf(toast_message, sizeof(toast_message), "Already in queue");
+                    Toast_show("Already in queue", TOAST_DURATION);
                 } else {
                     int added = Downloader_queueAdd(r->video_id, r->title);
                     if (added == 1) {
                         // queueAdd auto-starts download thread
-                        if (Downloader_isDownloading()) {
-                            snprintf(toast_message, sizeof(toast_message), "Added to queue");
-                        } else {
-                            snprintf(toast_message, sizeof(toast_message), "Downloading...");
-                        }
+                        Toast_show(Downloader_isDownloading() ? "Added to queue" : "Downloading...",
+                                   TOAST_DURATION);
                     } else if (added == -1) {
-                        snprintf(toast_message, sizeof(toast_message), "Queue is full");
+                        Toast_show("Queue is full", TOAST_DURATION);
                     }
                 }
-                toast_time = SDL_GetTicks();
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
-                toast_message[0] = '\0';
                 downloader_results_clear_scroll();
                 GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = DOWNLOADER_INTERNAL_MENU;
@@ -300,15 +292,14 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         if (dirty) {
             switch (state) {
                 case DOWNLOADER_INTERNAL_MENU:
-                    render_downloader_menu(screen, show_setting, menu_nav.selected, menu_nav.scroll,
-                                           toast_message, toast_time);
+                    render_downloader_menu(screen, show_setting, menu_nav.selected, menu_nav.scroll);
                     break;
                 case DOWNLOADER_INTERNAL_SEARCHING:
                     render_downloader_searching(screen, show_setting, search_query);
                     break;
                 case DOWNLOADER_INTERNAL_RESULTS:
                     render_downloader_results(screen, show_setting, search_query, results, result_count,
-                                              results_nav.selected, &results_nav.scroll, toast_message, toast_time, false);
+                                              results_nav.selected, &results_nav.scroll, false);
                     break;
                 case DOWNLOADER_INTERNAL_QUEUE:
                     render_downloader_queue(screen, show_setting, queue_nav.selected, &queue_nav.scroll);
@@ -321,9 +312,6 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
 
             GFX_flip(screen);
             dirty = 0;
-
-            // Toast refresh
-            ModuleCommon_tickToast(toast_message, toast_time, &dirty);
         } else {
             GFX_sync();
         }

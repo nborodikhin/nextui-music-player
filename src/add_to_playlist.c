@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "toast.h"
 #include "module_common.h"
 #include "display_helper.h"
 
@@ -22,10 +23,6 @@ static PlaylistInfo playlists[MAX_PLAYLISTS];
 static int playlist_count = 0;
 static int selected = 0;
 static int scroll = 0;
-
-// Toast state (shown after adding)
-static char toast_msg[128] = "";
-static uint32_t toast_time = 0;
 
 // Extract display name from a file path: basename without extension
 // TODO: prefer the track name from file metadata (ID3 / Vorbis comment / etc.)
@@ -115,9 +112,9 @@ int AddToPlaylist_handleInput(void) {
                         display_name_from_path(file_paths[i], dname, sizeof(dname));
                         if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
                     }
-                    snprintf(toast_msg, sizeof(toast_msg), "Added %d/%d files to %s",
-                             added, file_count, name);
-                    toast_time = SDL_GetTicks();
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, name);
+                    Toast_show(msg, TOAST_DURATION);
                 }
                 free(name);
             }
@@ -134,9 +131,10 @@ int AddToPlaylist_handleInput(void) {
                     display_name_from_path(file_paths[i], dname, sizeof(dname));
                     if (M3U_addTrack(playlists[idx].path, file_paths[i], dname) == 0) added++;
                 }
-                snprintf(toast_msg, sizeof(toast_msg), "Added %d/%d files to %s",
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Added %d/%d files to %s",
                          added, file_count, playlists[idx].name);
-                toast_time = SDL_GetTicks();
+                Toast_show(msg, TOAST_DURATION);
             }
             free_file_list();
             active = false;
@@ -233,18 +231,4 @@ void AddToPlaylist_render(SDL_Surface* screen) {
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(screen->w - hint_surf->w) / 2, hint_y});
         SDL_FreeSurface(hint_surf);
     }
-}
-
-// Get toast message and time (for callers to display after dialog closes)
-const char* AddToPlaylist_getToastMessage(void) {
-    return toast_msg;
-}
-
-uint32_t AddToPlaylist_getToastTime(void) {
-    return toast_time;
-}
-
-void AddToPlaylist_clearToast(void) {
-    toast_msg[0] = '\0';
-    toast_time = 0;
 }

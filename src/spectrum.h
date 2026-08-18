@@ -5,7 +5,6 @@
 
 #define SPECTRUM_FFT_SIZE 512
 #define SPECTRUM_BARS 64
-#define LAYER_SPECTRUM 5
 
 typedef enum {
     SPECTRUM_STYLE_VERTICAL = 0, // Vertical gradient within each bar (default)
@@ -27,8 +26,11 @@ void Spectrum_update(void);
 const SpectrumData* Spectrum_getData(void);
 
 void Spectrum_setPosition(int x, int y, int w, int h);
-void Spectrum_renderGPU(void);
 bool Spectrum_needsRefresh(void);
+
+// The spectrum, as painted onto the player's overlay layer.
+bool Spectrum_isShowing(void);
+void Spectrum_paint(int layer);
 
 // Style and visibility controls
 void Spectrum_cycleStyle(void);          // Cycle: style1 -> style2 -> ... -> off -> style1

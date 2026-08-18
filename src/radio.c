@@ -1333,12 +1333,14 @@ int Radio_addStation(const char* name, const char* url, const char* genre, const
     return radio.station_count - 1;
 }
 
-void Radio_removeStation(int index) {
-    if (index < 0 || index >= radio.station_count) return;
+bool Radio_removeStation(int index) {
+    if (index < 0 || index >= radio.station_count) return false;
 
     memmove(&radio.stations[index], &radio.stations[index + 1],
             (radio.station_count - index - 1) * sizeof(RadioStation));
     radio.station_count--;
+
+    return true;
 }
 
 void Radio_saveStations(void) {

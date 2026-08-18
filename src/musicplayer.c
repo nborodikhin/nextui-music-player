@@ -18,6 +18,7 @@
 // UI modules
 #include "ui_fonts.h"
 #include "ui_icons.h"
+#include "toast.h"
 
 // Module architecture
 #include "module_common.h"
@@ -53,6 +54,7 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     screen = GFX_init(MODE_MAIN);
+    Toast_setSurface(screen);
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
@@ -135,6 +137,7 @@ int main(int argc, char* argv[]) {
 
     // Main application loop
     while (!quit) {
+        Toast_screenChanged();
         MenuSelection selection = MenuModule_run(screen);
 
         if (selection == MENU_QUIT) {
@@ -143,6 +146,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Run the selected module
+        Toast_screenChanged();
         ModuleExitReason reason = MODULE_EXIT_TO_MENU;
 
         switch (selection) {
@@ -190,7 +194,11 @@ int main(int argc, char* argv[]) {
         // TG5050: modules may have triggered display recovery (new screen surface)
 		{
 			SDL_Surface* ns = DisplayHelper_getReinitScreen();
-			if (ns) screen = ns;
+			if (ns) {
+				screen = ns;
+				Toast_setSurface(screen);
+				Toast_redraw();  // GPU layers do not survive the reinit
+			}
 		}
 
         if (reason == MODULE_EXIT_QUIT) {

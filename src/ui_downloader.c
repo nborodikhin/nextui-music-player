@@ -60,7 +60,7 @@ static const char* youtube_menu_get_label(int index, const char* default_label,
 
 // Render YouTube sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         int menu_scroll, char* toast_message, uint32_t toast_time) {
+                         int menu_scroll) {
     SimpleMenuConfig config = {
         .title = "Downloader",
         .items = youtube_menu_items,
@@ -71,9 +71,6 @@ void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_sele
         .get_icon = NULL
     };
     render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
-
-    // Toast notification
-    render_toast(screen, toast_message, toast_time);
 }
 
 // Render YouTube searching status
@@ -109,8 +106,7 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
 void render_downloader_results(SDL_Surface* screen, int show_setting,
                             const char* search_query,
                             DownloaderResult* results, int result_count,
-                            int selected, int* scroll,
-                            char* toast_message, uint32_t toast_time, bool searching) {
+                            int selected, int* scroll, bool searching) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -200,9 +196,6 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
             SDL_FreeSurface(text);
         }
     }
-
-    // Toast notification (rendered to GPU layer above scroll text)
-    render_toast(screen, toast_message, toast_time);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -408,10 +401,9 @@ void downloader_queue_clear_scroll(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
 }
 
-// Clear YouTube results scroll state and toast
+// Clear YouTube results scroll state
 void downloader_results_clear_scroll(void) {
     memset(&downloader_results_scroll_text, 0, sizeof(downloader_results_scroll_text));
     GFX_clearLayers(LAYER_SCROLLTEXT);
-    clear_toast();
 }
 

@@ -7,6 +7,7 @@
 #include "api.h"
 #include "config.h"
 #include "module_common.h"
+#include "toast.h"
 #include "module_radio.h"
 #include "player.h"
 #include "radio.h"
@@ -37,8 +38,6 @@ static ListNav radio_nav = {
     .count              = 0,
     .items_per_page     = 1,
 };
-static char radio_toast_message[128] = "";
-static uint32_t radio_toast_time = 0;
 
 // Add stations UI state
 static ListNav add_country_nav = {
@@ -136,7 +135,6 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
     screen_off = false;
     ModuleCommon_resetScreenOffHint();
     ModuleCommon_recordInputTime();
-    radio_toast_message[0] = '\0';
     show_confirm = false;
 
     // Re-enter playing state if radio is playing in background
@@ -155,15 +153,19 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
         // Handle confirmation dialog
         if (show_confirm) {
             if (PAD_justPressed(BTN_A)) {
+                bool removed = false;
                 if (confirm_action_type == 0) {
                     // Delete from main list
-                    Radio_removeStation(confirm_target_index);
+                    removed = Radio_removeStation(confirm_target_index);
                     Radio_saveStations();
                     ListNav_onItemRemoved(&radio_nav, confirm_target_index);
                 } else if (confirm_action_type == 1) {
                     // Remove from browse
-                    Radio_removeStationByUrl(confirm_station_url);
+                    removed = Radio_removeStationByUrl(confirm_station_url);
                     Radio_saveStations();
+                }
+                if (removed) {
+                    Toast_show("Removed", TOAST_DURATION);
                 }
                 show_confirm = false;
                 dirty = 1;
@@ -221,8 +223,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
             }
             else if (PAD_justPressed(BTN_A) && station_count > 0) {
                 if (!Wifi_ensureConnected(screen, show_setting)) {
-                    snprintf(radio_toast_message, sizeof(radio_toast_message), "Internet connection required");
-                    radio_toast_time = SDL_GetTicks();
+                    Toast_show("Internet connection required", TOAST_DURATION);
                     dirty = 1;
                 } else {
                     Background_stopAll();
@@ -454,11 +455,11 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                     // Not subscribed - add instantly
                     if (Radio_addStation(station->name, station->url, station->genre, station->slogan) >= 0) {
                         Radio_saveStations();
-                        snprintf(radio_toast_message, sizeof(radio_toast_message), "Added: %s", station->name);
-                        radio_toast_time = SDL_GetTicks();
+                        char msg[128];
+                        snprintf(msg, sizeof(msg), "Added: %s", station->name);
+                        Toast_show(msg, TOAST_DURATION);
                     } else {
-                        snprintf(radio_toast_message, sizeof(radio_toast_message), "Maximum 32 stations reached");
-                        radio_toast_time = SDL_GetTicks();
+                        Toast_show("Maximum 32 stations reached", TOAST_DURATION);
                     }
                     dirty = 1;
                 }
@@ -470,8 +471,6 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
-                radio_toast_message[0] = '\0';
-                clear_toast();
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
@@ -513,8 +512,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
             } else {
                 switch (state) {
                     case RADIO_INTERNAL_LIST:
-                        render_radio_list(screen, show_setting, radio_nav.selected, &radio_nav.scroll,
-                                          radio_toast_message, radio_toast_time);
+                        render_radio_list(screen, show_setting, radio_nav.selected, &radio_nav.scroll);
                         break;
                     case RADIO_INTERNAL_PLAYING: {
                         render_radio_playing(screen, show_setting, radio_nav.selected);
@@ -531,8 +529,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
                     case RADIO_INTERNAL_ADD_STATIONS:
                         render_radio_add_stations(screen, show_setting, add_selected_country_code,
                                                   add_station_nav.selected, &add_station_nav.scroll,
-                                                  sorted_station_indices, sorted_station_count,
-                                                  radio_toast_message, radio_toast_time);
+                                                  sorted_station_indices, sorted_station_count);
                         break;
                     case RADIO_INTERNAL_HELP:
                         render_radio_help(screen, show_setting, &help_scroll);
@@ -546,11 +543,6 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
 
             GFX_flip(screen);
             dirty = 0;
-
-            // Keep refreshing while toast is visible
-            if (state == RADIO_INTERNAL_LIST || state == RADIO_INTERNAL_ADD_STATIONS) {
-                ModuleCommon_tickToast(radio_toast_message, radio_toast_time, &dirty);
-            }
         } else if (!screen_off) {
             GFX_sync();
         }

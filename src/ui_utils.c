@@ -229,13 +229,9 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 
 // GPU scroll without background (for player title)
 // Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
-                                SDL_Color color, int x, int y) {
-    if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) {
-        // Static text or no scroll needed - just clear layer
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
-        return;
-    }
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y, int layer) {
+    if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) return;
 
     // Save render info
     state->last_x = x;
@@ -256,9 +252,7 @@ void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
     SDL_Rect src = {state->scroll_offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
 
-    // Render to GPU layer
-    PLAT_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_drawOnLayer(clipped, x, y, state->max_width, height, 1.0f, false, LAYER_SCROLLTEXT);
+    PLAT_drawOnLayer(clipped, x, y, state->max_width, height, 1.0f, false, layer);
     SDL_FreeSurface(clipped);
 
     // Advance scroll offset (1 pixel per frame for smooth, slower scrolling)
@@ -266,8 +260,6 @@ void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
     if (state->scroll_offset >= state->text_width + padding) {
         state->scroll_offset = 0;
     }
-
-    PLAT_GPU_Flip();
 }
 
 // Render standard screen header (title pill + hardware status)
@@ -797,75 +789,3 @@ void render_empty_state(SDL_Surface* screen, const char* message,
         GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
     }
 }
-
-// ============================================
-// Toast Notification (GPU layer, highest z-index)
-// ============================================
-
-// Toast is rendered to GPU layer 5 (highest) to appear above all content
-#define LAYER_TOAST 5
-
-// Render toast notification to GPU layer (above all other content)
-void render_toast(SDL_Surface* screen, const char* message, uint32_t toast_time) {
-    if (!message || message[0] == '\0') {
-        PLAT_clearLayers(LAYER_TOAST);
-        return;
-    }
-
-    uint32_t now = SDL_GetTicks();
-    if (now - toast_time >= TOAST_DURATION) {
-        PLAT_clearLayers(LAYER_TOAST);
-        return;
-    }
-
-    int hw = screen->w;
-    int hh = screen->h;
-
-    SDL_Surface* toast_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), message, COLOR_WHITE);
-    if (toast_text) {
-        int border = SCALE1(2);
-        int toast_w = toast_text->w + SCALE1(PADDING * 3);
-        int toast_h = toast_text->h + SCALE1(12);
-        int toast_x = (hw - toast_w) / 2;
-        int toast_y = hh - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING * 3) - toast_h;
-
-        // Total surface size including border
-        int surface_w = toast_w + border * 2;
-        int surface_h = toast_h + border * 2;
-
-        // Create surface for GPU layer rendering
-        SDL_Surface* toast_surface = SDL_CreateRGBSurfaceWithFormat(0,
-            surface_w, surface_h, 32, SDL_PIXELFORMAT_ARGB8888);
-        if (toast_surface) {
-            // Disable blending so fills are opaque
-            SDL_SetSurfaceBlendMode(toast_surface, SDL_BLENDMODE_NONE);
-
-            // Draw light gray border (outer rect)
-            SDL_FillRect(toast_surface, NULL, SDL_MapRGBA(toast_surface->format, 200, 200, 200, 255));
-
-            // Draw dark grey background (inner rect)
-            SDL_Rect bg_rect = {border, border, toast_w, toast_h};
-            SDL_FillRect(toast_surface, &bg_rect, SDL_MapRGBA(toast_surface->format, 40, 40, 40, 255));
-
-            // Draw text centered within the toast (blend text onto surface)
-            SDL_SetSurfaceBlendMode(toast_surface, SDL_BLENDMODE_BLEND);
-            int text_x = border + (toast_w - toast_text->w) / 2;
-            int text_y = border + (toast_h - toast_text->h) / 2;
-            SDL_BlitSurface(toast_text, NULL, toast_surface, &(SDL_Rect){text_x, text_y});
-
-            // Render to GPU layer at the correct screen position
-            PLAT_clearLayers(LAYER_TOAST);
-            PLAT_drawOnLayer(toast_surface, toast_x - border, toast_y - border,
-                            surface_w, surface_h, 1.0f, false, LAYER_TOAST);
-
-            SDL_FreeSurface(toast_surface);
-        }
-        SDL_FreeSurface(toast_text);
-    }
-}
-
-// Clear toast from GPU layer
-void clear_toast(void) {
-    PLAT_clearLayers(LAYER_TOAST);
-}
-

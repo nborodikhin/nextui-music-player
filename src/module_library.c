@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "module_common.h"
+#include "toast.h"
 #include "module_library.h"
 #include "module_player.h"
 #include "module_playlist.h"
@@ -24,10 +25,6 @@
 
 static const char* library_items[] = {"Files", "Playlists", "Downloader"};
 
-// Toast state
-static char library_toast_message[128] = "";
-static uint32_t library_toast_time = 0;
-
 static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_selected,
                                 int menu_scroll) {
     SimpleMenuConfig config = {
@@ -40,12 +37,6 @@ static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_
         .get_icon = NULL
     };
     render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
-    render_toast(screen, library_toast_message, library_toast_time);
-}
-
-void LibraryModule_setToast(const char* message) {
-    snprintf(library_toast_message, sizeof(library_toast_message), "%s", message);
-    library_toast_time = SDL_GetTicks();
 }
 
 ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
@@ -116,8 +107,6 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
             GFX_flip(screen);
             dirty = 0;
-
-            ModuleCommon_tickToast(library_toast_message, library_toast_time, &dirty);
         } else {
             GFX_sync();
         }

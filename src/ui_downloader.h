@@ -8,7 +8,7 @@
 
 // Render downloader sub-menu
 void render_downloader_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                         int menu_scroll, char* toast_message, uint32_t toast_time);
+                         int menu_scroll);
 
 // Render downloader searching status
 void render_downloader_searching(SDL_Surface* screen, int show_setting, const char* search_query);
@@ -17,8 +17,7 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
 void render_downloader_results(SDL_Surface* screen, int show_setting,
                             const char* search_query,
                             DownloaderResult* results, int result_count,
-                            int selected, int* scroll,
-                            char* toast_message, uint32_t toast_time, bool searching);
+                            int selected, int* scroll, bool searching);
 
 // Render downloader download queue
 void render_downloader_queue(SDL_Surface* screen, int show_setting,
@@ -45,7 +44,7 @@ void downloader_queue_animate_scroll(void);
 // Clear downloader queue scroll state (call when queue items are removed)
 void downloader_queue_clear_scroll(void);
 
-// Clear downloader results scroll state and toast (call when leaving results screen)
+// Clear downloader results scroll state (call when leaving results screen)
 void downloader_results_clear_scroll(void);
 
 #endif

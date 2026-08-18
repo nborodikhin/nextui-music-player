@@ -138,6 +138,9 @@ A comprehensive music playback application for NextUI featuring local file playb
 ./dev build                            # desktop
 ./dev build brick tsps                 # tg5040 and tg5050
 
+# Run host-side unit tests
+./dev test
+
 # Build, install, and run on connected devices
 ./dev devices
 ./dev install device

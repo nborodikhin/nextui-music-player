@@ -55,10 +55,11 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
                        int max_width, SDL_Color color, SDL_Surface* screen, int x, int y, bool use_gpu);
 
-// GPU scroll without background (for player title)
-// Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_renderGPU_NoBg(ScrollTextState* state, TTF_Font* font,
-                                SDL_Color color, int x, int y);
+// Draw the scrolling text at its current offset onto `layer`, and advance it. Does not
+// clear the layer or flip: the caller owns the layer and decides what else goes
+// on it.
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y, int layer);
 
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);
@@ -230,17 +231,6 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
 // Works at any height (unlike pill asset which requires PILL_SIZE)
 // Uses two overlapping rects to create corner inset effect
 void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uint32_t color);
-
-// ============================================
-// Toast Notification (GPU layer, highest z-index)
-// ============================================
-
-// Render toast notification to GPU layer (above all other content including scroll text)
-// Call this at the end of your render function. Toast auto-hides after TOAST_DURATION.
-void render_toast(SDL_Surface* screen, const char* message, uint32_t toast_time);
-
-// Clear toast from GPU layer (call when leaving screen or clearing state)
-void clear_toast(void);
 
 // ============================================
 // Dialog Box

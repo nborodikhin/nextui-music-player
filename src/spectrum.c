@@ -170,9 +170,6 @@ void Spectrum_quit(void) {
         kiss_fftr_free(fft_cfg);
         fft_cfg = NULL;
     }
-    // Clear the GPU layer
-    PLAT_clearLayers(LAYER_SPECTRUM);
-    PLAT_GPU_Flip();
 }
 
 void Spectrum_update(void) {
@@ -268,11 +265,6 @@ void Spectrum_cycleStyle(void) {
 
 void Spectrum_toggleVisibility(void) {
     spectrum_visible = !spectrum_visible;
-    if (!spectrum_visible) {
-        // Clear the spectrum layer when hiding
-        PLAT_clearLayers(LAYER_SPECTRUM);
-        PLAT_GPU_Flip();
-    }
     save_settings();  // Persist preference
 }
 
@@ -286,8 +278,6 @@ void Spectrum_cycleNext(void) {
         if (next >= SPECTRUM_STYLE_COUNT) {
             // Last style -> off
             spectrum_visible = false;
-            PLAT_clearLayers(LAYER_SPECTRUM);
-            PLAT_GPU_Flip();
         } else {
             current_style = (SpectrumStyle)next;
         }
@@ -342,12 +332,11 @@ static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y, int w
     }
 }
 
-void Spectrum_renderGPU(void) {
-    if (!position_set || !spectrum_visible) return;
+bool Spectrum_isShowing(void) {
+    return Spectrum_needsRefresh() && spectrum_data.valid;
+}
 
-    Spectrum_update();
-    if (!spectrum_data.valid) return;
-
+void Spectrum_paint(int layer) {
     SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0,
         spec_w, spec_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!surface) return;
@@ -392,9 +381,6 @@ void Spectrum_renderGPU(void) {
         }
     }
 
-    PLAT_clearLayers(LAYER_SPECTRUM);
-    PLAT_drawOnLayer(surface, spec_x, spec_y, spec_w, spec_h, 1.0f, false, LAYER_SPECTRUM);
+    PLAT_drawOnLayer(surface, spec_x, spec_y, spec_w, spec_h, 1.0f, false, layer);
     SDL_FreeSurface(surface);
-
-    PLAT_GPU_Flip();
 }

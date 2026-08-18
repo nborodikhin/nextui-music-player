@@ -8,7 +8,4 @@
 // Run the main menu. Returns the row the user chose, or MENU_QUIT.
 MenuSelection MenuModule_run(SDL_Surface* screen);
 
-// Set toast message (called by modules returning to menu with a message)
-void MenuModule_setToast(const char* message);
-
 #endif

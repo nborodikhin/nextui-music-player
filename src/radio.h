@@ -63,7 +63,7 @@ int Radio_getStations(RadioStation** stations);
 int Radio_addStation(const char* name, const char* url, const char* genre, const char* slogan);
 
 // Remove a station by index
-void Radio_removeStation(int index);
+bool Radio_removeStation(int index);
 
 // Save stations to file
 void Radio_saveStations(void);
