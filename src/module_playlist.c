@@ -64,7 +64,7 @@ static void refresh_detail(void) {
     M3U_loadTracks(playlists[current_playlist_index].path, detail_tracks, PLAYLIST_MAX_TRACKS, &detail_track_count);
 }
 
-ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
+ModuleExitReason PlaylistModule_run(DisplayContext* display) {
     M3U_init();
     Keyboard_init();
     refresh_playlists();
@@ -75,6 +75,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -153,14 +154,7 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
             }
             else if (PAD_justPressed(BTN_Y)) {
                 // New Playlist
-                DisplayHelper_prepareForExternal();
                 char* name = Keyboard_open("Playlist name");
-                PAD_poll(); PAD_reset();
-                DisplayHelper_recoverDisplay();
-				{
-					SDL_Surface* ns = DisplayHelper_getReinitScreen();
-					if (ns) screen = ns;
-				}
                 if (name && name[0]) {
                     if (M3U_create(name) == 0) {
                         Toast_show("Playlist created", TOAST_DURATION);
@@ -172,7 +166,9 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                 } else if (name) {
                     free(name);
                 }
+                // The keyboard may have recreated the display - start a fresh frame.
                 dirty = 1;
+                continue;
             }
             else if (PAD_justPressed(BTN_X)) {
                 // Delete playlist
@@ -210,12 +206,14 @@ ModuleExitReason PlaylistModule_run(SDL_Surface* screen) {
                     // Play the playlist starting from selected track
                     GFX_clearLayers(LAYER_SCROLLTEXT);
                     PlayerModule_setResumePlaylistPath(playlists[current_playlist_index].path);
-                    PlayerModule_runWithPlaylist(screen, detail_tracks, detail_track_count, detail_nav.selected);
+                    PlayerModule_runWithPlaylist(display, detail_tracks, detail_track_count, detail_nav.selected);
                     PlayerModule_setResumePlaylistPath(NULL);
                     // On return, refresh and go back to detail
                     refresh_detail();
                     ListNav_reconcile(&detail_nav, detail_track_count);
+                    // The player may have recreated the display - start a fresh frame.
                     dirty = 1;
+                    continue;
                 }
             }
             else if (PAD_justPressed(BTN_X)) {

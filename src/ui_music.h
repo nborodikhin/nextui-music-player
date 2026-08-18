@@ -44,10 +44,16 @@ void PlayTime_renderGPU(void);
 bool PlayTime_needsRefresh(void);
 void PlayTime_clear(void);
 
+// Drop the cached elapsed/duration so the next render repaints the layer.
+void PlayTime_invalidate(void);
+
 // Lyrics GPU rendering functions
 void Lyrics_setGPUPosition(int x, int y, int max_w);
 void Lyrics_renderGPU(void);
 bool Lyrics_GPUneedsRefresh(void);
 void Lyrics_clearGPU(void);
+
+// Drop the cached lyric lines so the next render repaints the layer.
+void Lyrics_invalidateGPU(void);
 
 #endif

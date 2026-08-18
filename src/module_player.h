@@ -6,6 +6,7 @@
 #include "module_common.h"
 #include "playlist.h"
 #include "resume.h"
+typedef struct DisplayContext DisplayContext;
 
 // Run the local files player module
 // Handles: File browser, music playback, playlist, shuffle/repeat
@@ -13,17 +14,19 @@
 // background audio into the playing screen, B pops to main menu). false when called
 // to browse files (Library → Files); the file browser is shown regardless of any
 // background audio.
-ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry);
+ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entry);
 
 // Run the player directly with a pre-built playlist (used by PlaylistModule)
 // Enters playing state immediately, returns when user presses B or all tracks end.
-ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
+ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                                               PlaylistTrack* tracks,
                                               int track_count,
                                               int start_index);
 
 // Run player with resume state (restores folder/playlist, seeks to position)
-ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* resume);
+ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeState* resume);
+
+void PlayerModule_quit(void);
 
 // Set the M3U playlist path for resume tracking (call before runWithPlaylist)
 void PlayerModule_setResumePlaylistPath(const char* m3u_path);

@@ -7,6 +7,7 @@
 #include "module_common.h"
 #include "toast.h"
 #include "module_downloader.h"
+#include "keyboard.h"
 #include "display_helper.h"
 #include "module_library.h"
 #include "downloader.h"
@@ -54,7 +55,7 @@ static ListNav queue_nav = {
 static DownloaderResult* results = NULL;
 static int result_count = 0;
 
-ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
+ModuleExitReason DownloaderModule_run(DisplayContext* display) {
     Downloader_init();
 
     // Check WiFi before entering
@@ -64,7 +65,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
         Toast_show("Downloader not available", TOAST_DURATION);
         return MODULE_EXIT_TO_MENU;
     }
-    if (!Wifi_ensureConnected(screen, show_setting)) {
+    if (!Wifi_ensureConnected(DisplayHelper_getSurface(display), show_setting)) {
         Downloader_cleanup();
         Toast_show("Internet connection required", TOAST_DURATION);
         return MODULE_EXIT_TO_MENU;
@@ -88,6 +89,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input
         int app_state_for_help;
@@ -120,13 +122,7 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
             else if (PAD_justPressed(BTN_A)) {
                 if (menu_nav.selected == 0) {
                     // Search Music
-                    char* query = Downloader_openKeyboard("Search:");
-                    PAD_reset(); PAD_poll(); PAD_reset();
-                    // TG5050: display recovery creates a new screen surface
-					{
-						SDL_Surface* ns = DisplayHelper_getReinitScreen();
-						if (ns) screen = ns;
-					}
+                    char* query = Keyboard_open("Search:");
                     if (query && strlen(query) > 0) {
                         snprintf(search_query, sizeof(search_query), "%s", query);
                         ListNav_scrollToTop(&results_nav);
@@ -140,7 +136,9 @@ ModuleExitReason DownloaderModule_run(SDL_Surface* screen) {
                         }
                     }
                     if (query) free(query);
+                    // The keyboard may have recreated the display - start a fresh frame.
                     dirty = 1;
+                    continue;
                 } else if (menu_nav.selected == 1) {
                     // Download Queue
                     ListNav_scrollToTop(&queue_nav);

@@ -4,10 +4,11 @@
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "module_common.h"
+typedef struct DisplayContext DisplayContext;
 
 // Run the podcast module
 // Handles: Subscriptions, search, top shows, episodes, playback
-ModuleExitReason PodcastModule_run(SDL_Surface* screen);
+ModuleExitReason PodcastModule_run(DisplayContext* display);
 
 // Check if podcast module is active (playing)
 bool PodcastModule_isActive(void);

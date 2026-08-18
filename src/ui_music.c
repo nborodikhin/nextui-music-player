@@ -375,6 +375,11 @@ void PlayTime_clear(void) {
     // Note: Caller should clear LAYER_PLAYTIME and call PLAT_GPU_Flip() if needed
 }
 
+void PlayTime_invalidate(void) {
+    last_rendered_position = -1;
+    last_rendered_duration = -1;
+}
+
 bool PlayTime_needsRefresh(void) {
     if (!playtime_position_set) return false;
     // Only update when playing, not when paused
@@ -454,6 +459,11 @@ void Lyrics_clearGPU(void) {
     last_lyric_line[0] = '\0';
     last_next_lyric_line[0] = '\0';
     PLAT_clearLayers(LAYER_LYRICS);
+}
+
+void Lyrics_invalidateGPU(void) {
+    last_lyric_line[0] = '\0';
+    last_next_lyric_line[0] = '\0';
 }
 
 bool Lyrics_GPUneedsRefresh(void) {

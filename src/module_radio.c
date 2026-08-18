@@ -9,6 +9,7 @@
 #include "module_common.h"
 #include "toast.h"
 #include "module_radio.h"
+#include "display_helper.h"
 #include "player.h"
 #include "radio.h"
 #include "radio_curated.h"
@@ -125,7 +126,7 @@ static void build_sorted_station_indices(const char* country_code) {
     }
 }
 
-ModuleExitReason RadioModule_run(SDL_Surface* screen) {
+ModuleExitReason RadioModule_run(DisplayContext* display) {
     Radio_init();
 
     RadioInternalState state = RADIO_INTERNAL_LIST;
@@ -149,6 +150,7 @@ ModuleExitReason RadioModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
         if (show_confirm) {

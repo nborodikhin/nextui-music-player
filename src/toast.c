@@ -2,6 +2,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "display_helper.h"
 #include "toast.h"
 #include "toast_state.h"
 #include "ui_fonts.h"
@@ -11,12 +12,19 @@
 
 static ToastState state;
 
-// Surface the toast is positioned against; only its dimensions are read.
-static SDL_Surface* target = NULL;
+// Display the toast is positioned against; only the screen dimensions are read.
+static DisplayContext* display = NULL;
+
+// Set when the display was recreated and the toast layer has to be repainted.
+static bool dirty = false;
+
+static void display_recreated(void) {
+    dirty = true;
+}
 
 // Paint the current message onto the toast layer.
 static void draw(void) {
-    if (!target || state.current == TOAST_TOKEN_NONE) return;
+    if (!display || state.current == TOAST_TOKEN_NONE) return;
 
     SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), state.message, COLOR_WHITE);
     if (!text) return;
@@ -24,8 +32,8 @@ static void draw(void) {
     int border   = SCALE1(2);
     int toast_w  = text->w + SCALE1(PADDING * 3);
     int toast_h  = text->h + SCALE1(12);
-    int toast_x  = (target->w - toast_w) / 2;
-    int toast_y  = target->h - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING * 3) - toast_h;
+    int toast_x  = (DisplayHelper_getWidth(display) - toast_w) / 2;
+    int toast_y  = DisplayHelper_getHeight(display) - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING * 3) - toast_h;
 
     // Total surface size including border
     int surface_w = toast_w + border * 2;
@@ -71,6 +79,17 @@ static ToastToken show(const char* msg, uint32_t duration_ms, bool screen_bound)
     return token;
 }
 
+void Toast_init(DisplayContext* display_context) {
+    display = display_context;
+    DisplayHelper_addRecreatedCallback(display_recreated);
+}
+
+void Toast_quit(void) {
+    DisplayHelper_removeRecreatedCallback(display_recreated);
+    clear();
+    display = NULL;
+}
+
 ToastToken Toast_show(const char* msg, uint32_t duration_ms) {
     return show(msg, duration_ms, false);
 }
@@ -89,16 +108,10 @@ void Toast_dismiss(ToastToken token) {
 
 void Toast_tick(void) {
     if (ToastState_tick(&state, SDL_GetTicks())) clear();
-}
-
-void Toast_setSurface(SDL_Surface* screen) {
-    target = screen;
+    else if (dirty && Toast_isShowing(state.current)) draw();
+    dirty = false;
 }
 
 void Toast_screenChanged(void) {
     if (ToastState_screenChanged(&state)) clear();
-}
-
-void Toast_redraw(void) {
-    if (Toast_isShowing(state.current)) draw();
 }

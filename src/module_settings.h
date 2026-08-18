@@ -3,9 +3,10 @@
 
 #include <SDL2/SDL.h>
 #include "module_common.h"
+typedef struct DisplayContext DisplayContext;
 
 // Run the settings module
 // Handles: Settings menu, About screen, app updates
-ModuleExitReason SettingsModule_run(SDL_Surface* screen);
+ModuleExitReason SettingsModule_run(DisplayContext* display);
 
 #endif

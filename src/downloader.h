@@ -156,8 +156,4 @@ void Downloader_loadQueue(void);
 // Get download directory path
 const char* Downloader_getDownloadPath(void);
 
-// Open keyboard for search input
-// Returns allocated string that caller must free, or NULL if cancelled
-char* Downloader_openKeyboard(const char* prompt);
-
 #endif

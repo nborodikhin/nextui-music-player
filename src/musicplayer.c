@@ -36,7 +36,7 @@
 
 // Global quit flag
 static bool quit = false;
-static SDL_Surface* screen;
+static DisplayContext* display;
 
 static void sigHandler(int sig) {
     switch (sig) {
@@ -53,8 +53,9 @@ int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
-    screen = GFX_init(MODE_MAIN);
-    Toast_setSurface(screen);
+    SDL_Surface* const screen = GFX_init(MODE_MAIN);
+    display = DisplayHelper_init(screen);
+    Toast_init(display);
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
@@ -138,7 +139,7 @@ int main(int argc, char* argv[]) {
     // Main application loop
     while (!quit) {
         Toast_screenChanged();
-        MenuSelection selection = MenuModule_run(screen);
+        MenuSelection selection = MenuModule_run(display);
 
         if (selection == MENU_QUIT) {
             quit = true;
@@ -153,13 +154,13 @@ int main(int argc, char* argv[]) {
             case MENU_NOW_PLAYING:
                 switch (Background_getActive()) {
                     case BG_MUSIC:
-                        reason = PlayerModule_run(screen, true);  // Now Playing entry
+                        reason = PlayerModule_run(display, true);  // Now Playing entry
                         break;
                     case BG_RADIO:
-                        reason = RadioModule_run(screen);
+                        reason = RadioModule_run(display);
                         break;
                     case BG_PODCAST:
-                        reason = PodcastModule_run(screen);
+                        reason = PodcastModule_run(display);
                         break;
                     default:
                         break;
@@ -169,37 +170,27 @@ int main(int argc, char* argv[]) {
             case MENU_RESUME: {
                 const ResumeState* rs = Resume_getState();
                 if (rs) {
-                    reason = PlayerModule_runResume(screen, rs);
+                    reason = PlayerModule_runResume(display, rs);
                 }
                 break;
             }
             case MENU_LIBRARY:
-                reason = LibraryModule_run(screen);
+                reason = LibraryModule_run(display);
                 break;
             case MENU_RADIO:
-                reason = RadioModule_run(screen);
+                reason = RadioModule_run(display);
                 break;
             case MENU_PODCAST:
-                reason = PodcastModule_run(screen);
+                reason = PodcastModule_run(display);
                 break;
             case MENU_SETTINGS:
-                reason = SettingsModule_run(screen);
+                reason = SettingsModule_run(display);
                 break;
 
             case MENU_NONE:
             case MENU_QUIT:
                 break;
         }
-
-        // TG5050: modules may have triggered display recovery (new screen surface)
-		{
-			SDL_Surface* ns = DisplayHelper_getReinitScreen();
-			if (ns) {
-				screen = ns;
-				Toast_setSurface(screen);
-				Toast_redraw();  // GPU layers do not survive the reinit
-			}
-		}
 
         if (reason == MODULE_EXIT_QUIT) {
             quit = true;
@@ -212,7 +203,9 @@ cleanup:
     Settings_quit();
     ModuleCommon_quit();
     SelfUpdate_cleanup();
+    PlayerModule_quit();
     Player_quit();
+    Toast_quit();
     Icons_quit();
     Fonts_unload();
 

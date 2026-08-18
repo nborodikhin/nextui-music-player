@@ -3,9 +3,10 @@
 
 #include <SDL2/SDL.h>
 #include "module_common.h"
+typedef struct DisplayContext DisplayContext;
 
 // Run the online radio module
 // Handles: Station list, playback, adding stations from curated list
-ModuleExitReason RadioModule_run(SDL_Surface* screen);
+ModuleExitReason RadioModule_run(DisplayContext* display);
 
 #endif

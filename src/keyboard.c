@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "defines.h"
 #include "api.h"
+#include "display_helper.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,26 +42,28 @@ char* Keyboard_open(const char* prompt) {
     char cmd[1024];
     snprintf(cmd, sizeof(cmd), "%s \"%s\" 2>/dev/null", keyboard_path, font_path);
 
+    DisplayHelper_prepareForExternal();
+
+    char* result = NULL;
     FILE* pipe = popen(cmd, "r");
-    if (!pipe) {
-        return NULL;
+    if (pipe) {
+        result = malloc(512);
+        if (result) {
+            result[0] = '\0';
+            if (fgets(result, 512, pipe)) {
+                char* nl = strchr(result, '\n');
+                if (nl) *nl = '\0';
+            }
+
+            // If empty, user cancelled
+            if (result[0] == '\0') {
+                free(result);
+                result = NULL;
+            }
+        }
+        pclose(pipe);
     }
 
-    char* result = malloc(512);
-    if (result) {
-        result[0] = '\0';
-        if (fgets(result, 512, pipe)) {
-            char* nl = strchr(result, '\n');
-            if (nl) *nl = '\0';
-        }
-
-        // If empty, user cancelled
-        if (result[0] == '\0') {
-            free(result);
-            result = NULL;
-        }
-    }
-
-    pclose(pipe);
+    DisplayHelper_recoverDisplay();
     return result;
 }

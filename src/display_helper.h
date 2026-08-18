@@ -1,20 +1,30 @@
 #ifndef __DISPLAY_HELPER_H__
 #define __DISPLAY_HELPER_H__
 
-// Forward declaration — full type comes from SDL via api.h in callers
 struct SDL_Surface;
 
-// TG5050: Release display before launching an external binary (keyboard, etc.)
-// to avoid DRM master conflicts. No-op on non-TG5050 platforms.
+typedef struct DisplayContext DisplayContext;
+typedef void (*DisplayRecreatedCallback)(void);
+
+DisplayContext* DisplayHelper_init(struct SDL_Surface* screen);
+
+// The current screen surface, for drawing code.
+// Could be NULL while the display is released for an external binary (see DisplayHelper_recoverDisplay).
+struct SDL_Surface* DisplayHelper_getSurface(const DisplayContext* display);
+
+// Screen dimensions. Valid at any time, including while the display is released.
+int DisplayHelper_getWidth(const DisplayContext* display);
+int DisplayHelper_getHeight(const DisplayContext* display);
+
+int DisplayHelper_addRecreatedCallback(DisplayRecreatedCallback callback);
+void DisplayHelper_removeRecreatedCallback(DisplayRecreatedCallback callback);
+
+// Release the display before launching an external UI-driving program.
+// Some platforms like TG5050 need the release to avoid a DRM master conflict.
+// Must be paired with DisplayHelper_recoverDisplay() to rebuild the SDL layer.
 void DisplayHelper_prepareForExternal(void);
 
-// TG5050: Restore display after external binary exits.
-// No-op on non-TG5050 platforms or if prepareForExternal was not called.
+// Restore the display after the external binary execution.
 void DisplayHelper_recoverDisplay(void);
-
-// Get the new screen surface after TG5050 display recovery.
-// Returns non-NULL if display was recovered (callers MUST update their screen pointer).
-// Returns NULL if no recovery was needed.
-struct SDL_Surface* DisplayHelper_getReinitScreen(void);
 
 #endif

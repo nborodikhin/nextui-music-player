@@ -6,6 +6,8 @@
 #include "api.h"
 #include "toast_types.h"
 
+typedef struct DisplayContext DisplayContext;
+
 // Toast is a transient message shown at the bottom of the screen, rendered as
 // a GPU layer of its own above all other content. At most one toast exists
 // at a time; showing a new one replaces whatever was up.
@@ -34,16 +36,13 @@ void Toast_dismiss(ToastToken token);
 // Toast system API
 // ============================================
 
+void Toast_init(DisplayContext* display);
+void Toast_quit(void);
+
 // Should be called on every tick, used for managing toast durations.
 void Toast_tick(void);
 
-// The surface toasts are positioned against.
-void Toast_setSurface(SDL_Surface* screen);
-
 // Should be called when screen changes, used for managing screen-bound toasts.
 void Toast_screenChanged(void);
-
-// Repaint the current toast, for when something else has dropped GPU layers.
-void Toast_redraw(void);
 
 #endif

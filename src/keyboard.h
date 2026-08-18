@@ -5,8 +5,11 @@
 // Call this before using Keyboard_open()
 void Keyboard_init(void);
 
-// Open keyboard for text input
-// Returns allocated string that caller must free, or NULL if cancelled
+// Open keyboard for text input - blocking call until keybord returns the text.
+// Returns allocated string that caller must free, or NULL if cancelled.
+//
+// Note: keyboard is an external UI program, which requires ui teardown and setup.
+// The caller is responsible for re-reading SDL_Surface from DisplayContext.
 char* Keyboard_open(const char* prompt);
 
 #endif // __KEYBOARD_H__
