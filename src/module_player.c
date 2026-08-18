@@ -103,6 +103,7 @@ static void load_directory(const char* path) {
 static void init_player(void) {
     if (initialized) return;
     mkdir(MUSIC_PATH, 0755);
+    load_directory(MUSIC_PATH);
     nav_stack_top = 0;
     DisplayHelper_addRecreatedCallback(display_recreated);
     initialized = true;
