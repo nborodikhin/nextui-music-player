@@ -764,6 +764,11 @@ def command_build(args):
     return 0
 
 
+def command_test(_args):
+    run_command(["make", "-C", str(ROOT / "test")])
+    return 0
+
+
 def command_clean(_args):
     clean_local()
     return 0
@@ -931,6 +936,14 @@ def create_parser():
         help="use Podman instead of Docker for device builds",
     )
     build.set_defaults(handler=command_build)
+
+    test = subparsers.add_parser(
+        "test",
+        help="run unit tests",
+        description="run unit tests",
+        usage="%(prog)s [-h]",
+    )
+    test.set_defaults(handler=command_test)
 
     clean = subparsers.add_parser(
         "clean",
