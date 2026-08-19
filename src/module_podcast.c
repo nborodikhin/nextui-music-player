@@ -402,7 +402,8 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                             state = PODCAST_INTERNAL_SEARCH_RESULTS;
                         }
                         if (query) free(query);
-                        // The keyboard may have recreated the display - start a fresh frame.
+                        // The keyboard may have recreated the display,
+                        // use continue to restart the loop to begin a fresh frame.
                         dirty = 1;
                         continue;
                     }
