@@ -15,12 +15,6 @@
             "slogan": "Top 40"
         },
         {
-            "name": "Classic Vinyl HD",
-            "url": "https://icecast.walmradio.com:8443/classic",
-            "genre": "Easy Listening",
-            "slogan": "Classic hits, jazz and light orchestral music"
-        },
-        {
             "name": "Radio Paradise Main Mix",
             "url": "http://stream-uk1.radioparadise.com/aac-320",
             "genre": "Eclectic",
@@ -39,12 +33,6 @@
             "slogan": "CNN news audio"
         },
         {
-            "name": "WALM - Old Time Radio",
-            "url": "https://icecast.walmradio.com:8443/otr",
-            "genre": "Old Time Radio",
-            "slogan": "Classic comedy, drama and mystery"
-        },
-        {
             "name": "Z100 - New York's #1 Hit Music Station",
             "url": "https://stream.revma.ihrhls.com/zc1469",
             "genre": "Pop",
@@ -61,12 +49,6 @@
             "url": "http://npr-ice.streamguys1.com/live.mp3",
             "genre": "Public Radio",
             "slogan": "National Public Radio programs around the clock"
-        },
-        {
-            "name": "Adroit Jazz Underground",
-            "url": "https://icecast.walmradio.com:8443/jazz",
-            "genre": "Jazz",
-            "slogan": "Modern, contemporary and straight-ahead jazz"
         },
         {
             "name": "The Big 80s Station",
@@ -129,7 +111,7 @@
             "slogan": "Traditional Christian music and talk"
         },
         {
-            "name": "Classic Vinyl HD Opus",
+            "name": "Classic Vinyl HD",
             "url": "https://icecast.walmradio.com:8443/classic_opus",
             "genre": "Easy Listening",
             "slogan": "Classic hits, jazz and light orchestral music"
@@ -171,13 +153,13 @@
             "slogan": "Peaceful classical music"
         },
         {
-            "name": "WALM - Old Time Radio Opus",
+            "name": "WALM - Old Time Radio",
             "url": "https://icecast.walmradio.com:8443/otr_opus",
             "genre": "Old Time Radio",
             "slogan": "Classic comedy, drama and mystery"
         },
         {
-            "name": "Adroit Jazz Underground HD Opus",
+            "name": "Adroit Jazz Underground HD",
             "url": "https://icecast.walmradio.com:8443/jazz_opus",
             "genre": "Jazz",
             "slogan": "Modern, contemporary and straight-ahead jazz"
@@ -187,6 +169,18 @@
             "url": "http://usa9.fastcast4u.com/proxy/jamz?mp=/1",
             "genre": "Lofi",
             "slogan": "Lofi and chillout"
+        },
+        {
+            "name": "181.FM - The Beat",
+            "url": "http://listen.181fm.com/181-beat_128k.mp3",
+            "genre": "Hip-Hop & R&B",
+            "slogan": "Hip-hop, R&B and urban music"
+        },
+        {
+            "name": ".977 Hitz",
+            "url": "http://18863.live.streamtheworld.com/977_HITS_SC",
+            "genre": "Top 40",
+            "slogan": "Today's hit music"
         }
     ]
 }
