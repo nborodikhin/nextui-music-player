@@ -1,4 +1,5 @@
 .DS_Store
+.dev
 log.txt
 state/NextUI.code-workspace
 .vscode/

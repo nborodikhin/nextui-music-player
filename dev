@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+#
+# Configuration:
+#   Copy .dev.example to .dev
+# Configuration options:
+#   CONTAINER_RUNTIME: docker (default) or podman
+#     Could be set per call with --docker or --podman
+
 import argparse
 import glob
 import json
@@ -30,6 +37,8 @@ APP_VERSION_FILE = ROOT / "state/app_version.txt"
 SELFUPDATE_HEADER = ROOT / "src/selfupdate.h"
 QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
 QR_CODE_PNG = ROOT / "src/qr-code.png"
+DEV_CONFIG_FILE = ROOT / ".dev"
+DEFAULT_CONTAINER_RUNTIME = "docker"
 
 ALIASES = {
     "tg5040": ("tg5040", "5040", "brick", "brickpro", "tsp", "smartpro"),
@@ -66,6 +75,33 @@ class Device:
     state: str
     platform: str = "unknown"
     hardware: str = "-"
+
+
+def load_container_runtime():
+    runtime = DEFAULT_CONTAINER_RUNTIME
+    if not DEV_CONFIG_FILE.exists():
+        return runtime
+
+    for line_number, raw_line in enumerate(
+        DEV_CONFIG_FILE.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise DevError(".dev:{}: expected KEY=VALUE".format(line_number))
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key != "CONTAINER_RUNTIME":
+            raise DevError(".dev:{}: unknown setting {}".format(line_number, key))
+        runtime = value
+
+    if runtime not in ("docker", "podman"):
+        raise DevError(".dev: CONTAINER_RUNTIME must be docker or podman")
+    return runtime
+
+
+def container_runtime(args):
+    return args.container_runtime or load_container_runtime()
 
 
 def run_command(args, cwd=ROOT, env=None, capture=False, check=True, stdin=None):
@@ -439,6 +475,7 @@ def stop_player(device, restart):
     if not pids:
         return False
     if restart:
+        print("Restarting Music Player on {}".format(device.serial), flush=True)
         adb_shell(device, "touch", RESTART_FLAG)
     adb_shell(device, "kill", "-KILL", *pids)
     return True
@@ -474,6 +511,12 @@ def install_binary(device):
     source = ROOT / "bin" / device.platform / "musicplayer.elf"
     destination_dir = remote_pak_path(device.platform) + "/bin/" + device.platform
     adb_shell(device, "mkdir", "-p", destination_dir)
+    print(
+        "Uploading binary to {}:{}/musicplayer.elf".format(
+            device.serial, destination_dir
+        ),
+        flush=True,
+    )
     adb(device, "push", str(source), destination_dir + "/musicplayer.elf")
 
 
@@ -483,6 +526,12 @@ def install_full(device, package, delete):
         adb_shell(device, "rm", "-rf", remote_pak_path(device.platform))
     adb_shell(
         device, "mkdir", "-p", "{}/{}".format(REMOTE_ROOT, device.platform)
+    )
+    print(
+        "Uploading full pak to {}:{}/{}/".format(
+            device.serial, REMOTE_ROOT, device.platform
+        ),
+        flush=True,
     )
     adb(
         device,
@@ -753,13 +802,13 @@ def command_container(args):
         command = command[1:]
     if not command:
         command = ["/bin/bash"]
-    runtime = "podman" if args.podman else "docker"
+    runtime = container_runtime(args)
     return run_container(runtime, platform, command, check=False).returncode
 
 
 def command_build(args):
     platforms = resolve_build_platforms(args.targets)
-    runtime = "podman" if args.podman else "docker"
+    runtime = container_runtime(args)
     build_platforms(platforms, runtime)
     return 0
 
@@ -781,7 +830,7 @@ def command_dist(args):
             "--strict requires all distribution platforms: "
             + ", ".join(DEVICE_PLATFORMS)
         )
-    runtime = "podman" if args.podman else "docker"
+    runtime = container_runtime(args)
     build_platforms(platforms, runtime)
     if DIST_ZIP.exists():
         DIST_ZIP.unlink()
@@ -807,7 +856,7 @@ def command_install_or_run(args, should_run):
     platforms, device_targets = resolve_device_targets(
         targets, devices, allow_desktop=True
     )
-    runtime = "podman" if args.podman else "docker"
+    runtime = container_runtime(args)
     build_platforms(platforms, runtime)
 
     by_platform = {}
@@ -886,13 +935,28 @@ def command_log(args):
     ).returncode
 
 
+def add_container_runtime_options(parser, device_builds=True):
+    runtime = parser.add_mutually_exclusive_group()
+    suffix = " for device builds" if device_builds else ""
+    runtime.add_argument(
+        "--docker",
+        dest="container_runtime",
+        action="store_const",
+        const="docker",
+        help="use Docker{}".format(suffix),
+    )
+    runtime.add_argument(
+        "--podman",
+        dest="container_runtime",
+        action="store_const",
+        const="podman",
+        help="use Podman{}".format(suffix),
+    )
+
+
 def add_install_options(parser, include_run, target_help):
     parser.add_argument("targets", nargs="*", metavar="target", help=target_help)
-    parser.add_argument(
-        "--podman",
-        action="store_true",
-        help="use Podman instead of Docker for device builds",
-    )
+    add_container_runtime_options(parser)
     parser.add_argument(
         "--full",
         action="store_true",
@@ -922,7 +986,7 @@ def create_parser():
         "build",
         help="build locally",
         description="build locally",
-        usage="%(prog)s target [-h] [--podman]",
+        usage="%(prog)s target [-h] [--docker | --podman]",
     )
     build.add_argument(
         "targets",
@@ -930,11 +994,7 @@ def create_parser():
         metavar="target",
         help="one or more of desktop (default), tg5040, tg5050, all",
     )
-    build.add_argument(
-        "--podman",
-        action="store_true",
-        help="use Podman instead of Docker for device builds",
-    )
+    add_container_runtime_options(build)
     build.set_defaults(handler=command_build)
 
     test = subparsers.add_parser(
@@ -957,7 +1017,10 @@ def create_parser():
         "install",
         help="build and install",
         description="build and install",
-        usage="%(prog)s target [-h] [--podman] [--full] [--delete] [--run]",
+        usage=(
+            "%(prog)s target [-h] [--docker | --podman] "
+            "[--full] [--delete] [--run]"
+        ),
     )
     add_install_options(
         install,
@@ -973,7 +1036,10 @@ def create_parser():
         "run",
         help="build, install, and run",
         description="build, install, and run",
-        usage="%(prog)s target [-h] [--podman] [--full] [--delete] [-f]",
+        usage=(
+            "%(prog)s target [-h] [--docker | --podman] "
+            "[--full] [--delete] [-f]"
+        ),
     )
     add_install_options(
         run,
@@ -990,7 +1056,10 @@ def create_parser():
         "dist",
         help="build the app and create a distribution package",
         description="build the app and create a distribution package",
-        usage="%(prog)s target [-h] [--podman] [--no-zip] [--strict]",
+        usage=(
+            "%(prog)s target [-h] [--docker | --podman] "
+            "[--no-zip] [--strict]"
+        ),
     )
     dist.add_argument(
         "targets",
@@ -998,11 +1067,7 @@ def create_parser():
         metavar="target",
         help="one or more of all (default), tg5040, tg5050",
     )
-    dist.add_argument(
-        "--podman",
-        action="store_true",
-        help="use Podman instead of Docker for device builds",
-    )
+    add_container_runtime_options(dist)
     dist.add_argument(
         "--no-zip",
         action="store_true",
@@ -1114,13 +1179,9 @@ def create_parser():
         "docker",
         help="run the platform toolchain",
         description="run the platform toolchain",
-        usage="%(prog)s platform [-h] [--podman] [--] [command ...]",
+        usage="%(prog)s platform [-h] [--docker | --podman] [--] [command ...]",
     )
-    container.add_argument(
-        "--podman",
-        action="store_true",
-        help="use Podman instead of Docker",
-    )
+    add_container_runtime_options(container, device_builds=False)
     container.add_argument(
         "platform",
         nargs="?",
@@ -1139,23 +1200,27 @@ def create_parser():
     return parser
 
 
-def normalize_docker_options(argv):
+def normalize_container_options(argv):
     argv = list(argv)
     if argv[:1] != ["docker"]:
         return argv
     separator = argv.index("--") if "--" in argv else len(argv)
-    options = [index for index in range(1, separator) if argv[index] == "--podman"]
+    options = [
+        (index, argv[index])
+        for index in range(1, separator)
+        if argv[index] in ("--docker", "--podman")
+    ]
     if not options:
         return argv
-    for index in reversed(options):
+    for index, _option in reversed(options):
         del argv[index]
-    argv.insert(1, "--podman")
+    argv[1:1] = [option for _index, option in options]
     return argv
 
 
 def main():
     parser = create_parser()
-    args = parser.parse_args(normalize_docker_options(sys.argv[1:]))
+    args = parser.parse_args(normalize_container_options(sys.argv[1:]))
     if args.command is None:
         parser.print_help()
         return 0

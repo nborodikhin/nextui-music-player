@@ -1,0 +1,2 @@
+# Container runtime: docker (default) or podman
+CONTAINER_RUNTIME=docker
