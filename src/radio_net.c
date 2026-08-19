@@ -174,6 +174,9 @@ static int radio_net_fetch_internal(const char* url, uint8_t* buffer, int buffer
             LOG_error("[RadioNet] mbedtls_ssl_config_defaults failed: %d\n", ssl_ret);
             goto cleanup;
         }
+        mbedtls_ssl_conf_max_tls_version(
+            &ssl_ctx->conf, MBEDTLS_SSL_VERSION_TLS1_2
+        );
         mbedtls_ssl_conf_authmode(&ssl_ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
         mbedtls_ssl_conf_rng(&ssl_ctx->conf, mbedtls_ctr_drbg_random, &ssl_ctx->ctr_drbg);
 
@@ -698,12 +701,17 @@ int radio_net_resolve_url(const char* url, char* resolved_url, int resolved_url_
                                        (const unsigned char*)pers, strlen(pers)) != 0 ||
                 mbedtls_ssl_config_defaults(&ssl_ctx->conf, MBEDTLS_SSL_IS_CLIENT,
                                             MBEDTLS_SSL_TRANSPORT_STREAM,
-                                            MBEDTLS_SSL_PRESET_DEFAULT) != 0 ||
-                mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf) != 0) {
+                                            MBEDTLS_SSL_PRESET_DEFAULT) != 0) {
                 goto resolve_cleanup;
             }
+            mbedtls_ssl_conf_max_tls_version(
+                &ssl_ctx->conf, MBEDTLS_SSL_VERSION_TLS1_2
+            );
             mbedtls_ssl_conf_authmode(&ssl_ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
             mbedtls_ssl_conf_rng(&ssl_ctx->conf, mbedtls_ctr_drbg_random, &ssl_ctx->ctr_drbg);
+            if (mbedtls_ssl_setup(&ssl_ctx->ssl, &ssl_ctx->conf) != 0) {
+                goto resolve_cleanup;
+            }
             mbedtls_ssl_set_hostname(&ssl_ctx->ssl, host);
 
             char port_str[16];

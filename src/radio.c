@@ -166,6 +166,25 @@ typedef struct {
 
 static RadioContext radio = {0};
 
+static void write_pcm_stereo(const int16_t* samples, int frames, int channels) {
+    if (!samples || frames <= 0 || channels <= 0) return;
+
+    pthread_mutex_lock(&radio.audio_mutex);
+    for (int frame = 0; frame < frames; frame++) {
+        if (radio.audio_ring_count > AUDIO_RING_SIZE - 2) break;
+
+        int offset = frame * channels;
+        int16_t left = samples[offset];
+        int16_t right = channels > 1 ? samples[offset + 1] : left;
+        radio.audio_ring[radio.audio_ring_write] = left;
+        radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
+        radio.audio_ring[radio.audio_ring_write] = right;
+        radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
+        radio.audio_ring_count += 2;
+    }
+    pthread_mutex_unlock(&radio.audio_mutex);
+}
+
 // Use radio_net_parse_url for URL parsing
 
 // Initialize SSL/TLS
@@ -196,6 +215,9 @@ static int ssl_init(const char* host) {
         LOG_error("mbedtls_ssl_config_defaults failed: %d\n", ret);
         goto ssl_init_error;
     }
+    mbedtls_ssl_conf_max_tls_version(
+        &radio.ssl_conf, MBEDTLS_SSL_VERSION_TLS1_2
+    );
 
     // Skip certificate verification (radio streams use various CAs)
     mbedtls_ssl_conf_authmode(&radio.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
@@ -511,6 +533,20 @@ static int parse_headers(void) {
     return 0;
 }
 
+static void normalize_icy_title(char* title, int title_size) {
+    char* text_start = strstr(title, "text=\"");
+    if (!text_start) return;
+
+    text_start += 6;
+    char* text_end = strchr(text_start, '"');
+    if (!text_end) return;
+
+    int text_len = text_end - text_start;
+    if (text_len >= title_size) text_len = title_size - 1;
+    memmove(title, text_start, text_len);
+    title[text_len] = '\0';
+}
+
 // Parse ICY metadata block
 static void parse_icy_metadata(const uint8_t* data, int len) {
     // Format: StreamTitle='Artist - Title';StreamUrl='...';
@@ -532,16 +568,19 @@ static void parse_icy_metadata(const uint8_t* data, int len) {
         if (title_end) {
             *title_end = '\0';
             strncpy(radio.metadata.title, title_start, sizeof(radio.metadata.title) - 1);
+            radio.metadata.title[sizeof(radio.metadata.title) - 1] = '\0';
 
             // Try to parse "Artist - Title" format
             char* separator = strstr(radio.metadata.title, " - ");
             if (separator) {
                 *separator = '\0';
                 strncpy(radio.metadata.artist, radio.metadata.title, sizeof(radio.metadata.artist) - 1);
+                radio.metadata.artist[sizeof(radio.metadata.artist) - 1] = '\0';
                 memmove(radio.metadata.title, separator + 3, strlen(separator + 3) + 1);
             } else {
                 radio.metadata.artist[0] = '\0';
             }
+            normalize_icy_title(radio.metadata.title, sizeof(radio.metadata.title));
 
             // Fetch album art if metadata changed
             if (strcmp(old_artist, radio.metadata.artist) != 0 ||
@@ -866,19 +905,11 @@ static void* hls_stream_thread_func(void* arg) {
 
                     if (info && info->frameSize > 0) {
                         frames_decoded++;
-
-                        pthread_mutex_lock(&radio.audio_mutex);
-
-                        int samples = info->frameSize * info->numChannels;
-                        for (int s = 0; s < samples; s++) {
-                            if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                                radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                                radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                                radio.audio_ring_count++;
-                            }
-                        }
-
-                        pthread_mutex_unlock(&radio.audio_mutex);
+                        write_pcm_stereo(
+                            (const int16_t*)decode_buf,
+                            info->frameSize,
+                            info->numChannels
+                        );
                     }
                 } else if (err == AAC_DEC_NOT_ENOUGH_BITS) {
                     break;
@@ -1105,19 +1136,11 @@ static void* stream_thread_func(void* arg) {
                     }
 
                     if (info && info->frameSize > 0) {
-                        pthread_mutex_lock(&radio.audio_mutex);
-
-                        // Add to ring buffer
-                        int samples = info->frameSize * info->numChannels;
-                        for (int s = 0; s < samples; s++) {
-                            if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                                radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                                radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                                radio.audio_ring_count++;
-                            }
-                        }
-
-                        pthread_mutex_unlock(&radio.audio_mutex);
+                        write_pcm_stereo(
+                            (const int16_t*)decode_buf,
+                            info->frameSize,
+                            info->numChannels
+                        );
                     }
                 } else if (err == AAC_DEC_NOT_ENOUGH_BITS) {
                     // Need more data
@@ -1190,19 +1213,7 @@ static void* stream_thread_func(void* arg) {
                             radio.stream_buffer_pos - frame_info.frame_bytes);
                     radio.stream_buffer_pos -= frame_info.frame_bytes;
 
-                    // Add decoded samples to ring buffer
-                    pthread_mutex_lock(&radio.audio_mutex);
-
-                    int total_samples = samples * frame_info.channels;
-                    for (int s = 0; s < total_samples; s++) {
-                        if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                            radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                            radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                            radio.audio_ring_count++;
-                        }
-                    }
-
-                    pthread_mutex_unlock(&radio.audio_mutex);
+                    write_pcm_stereo(decode_buf, samples, frame_info.channels);
                 } else if (frame_info.frame_bytes > 0) {
                     // Invalid frame, skip it
                     memmove(radio.stream_buffer, radio.stream_buffer + frame_info.frame_bytes,

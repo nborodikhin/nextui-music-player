@@ -8,15 +8,19 @@
 
 import argparse
 import glob
+import http.client
 import json
 import os
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +43,8 @@ QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
 QR_CODE_PNG = ROOT / "src/qr-code.png"
 DEV_CONFIG_FILE = ROOT / ".dev"
 DEFAULT_CONTAINER_RUNTIME = "docker"
+RADIO_SAMPLE_SIZE = 64 * 1024
+RADIO_TIMEOUT_SECONDS = 15
 
 ALIASES = {
     "tg5040": ("tg5040", "5040", "brick", "brickpro", "tsp", "smartpro"),
@@ -576,6 +582,216 @@ def clean_local():
             path.unlink()
 
 
+def fetch_legacy_icy(url, size):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "http":
+        raise ValueError("legacy ICY fallback only supports HTTP")
+
+    port = parsed.port or 80
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+
+    with socket.create_connection(
+        (parsed.hostname, port), timeout=RADIO_TIMEOUT_SECONDS
+    ) as stream:
+        request = (
+            "GET {} HTTP/1.0\r\n"
+            "Host: {}\r\n"
+            "User-Agent: NextUI stream check\r\n"
+            "Icy-MetaData: 0\r\n"
+            "Connection: close\r\n\r\n"
+        ).format(path, parsed.netloc)
+        stream.sendall(request.encode("ascii"))
+        response = bytearray()
+        while b"\r\n\r\n" not in response and len(response) < 16 * 1024:
+            response.extend(stream.recv(4096))
+
+        headers, separator, body = response.partition(b"\r\n\r\n")
+        if not separator or not headers.startswith(b"ICY 200"):
+            raise ValueError("invalid ICY response")
+        while len(body) < size:
+            chunk = stream.recv(min(4096, size - len(body)))
+            if not chunk:
+                break
+            body += chunk
+        return bytes(body), url
+
+
+def fetch_radio_url(url, size=RADIO_SAMPLE_SIZE):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "NextUI stream check"},
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=RADIO_TIMEOUT_SECONDS
+        ) as response:
+            return response.read(size), response.geturl()
+    except http.client.BadStatusLine as error:
+        if str(error).startswith("ICY 200"):
+            return fetch_legacy_icy(url, size)
+        raise
+
+
+def find_mp3_frame(data):
+    for index in range(len(data) - 3):
+        first, second, third = data[index : index + 3]
+        if first != 0xFF or second & 0xE0 != 0xE0:
+            continue
+        if second & 0x18 == 0x08 or second & 0x06 == 0:
+            continue
+        if third & 0xF0 in (0, 0xF0) or third & 0x0C == 0x0C:
+            continue
+        return index
+    return None
+
+
+def find_aac_frame(data):
+    for index in range(len(data) - 6):
+        first, second = data[index : index + 2]
+        if first != 0xFF or second & 0xF6 != 0xF0:
+            continue
+        if data[index + 2] & 0x3C == 0x3C:
+            continue
+        frame_length = ((data[index + 3] & 0x03) << 11) | (data[index + 4] << 3)
+        frame_length |= data[index + 5] >> 5
+        if frame_length >= 7:
+            return index
+    return None
+
+
+def first_radio_media_url(manifest, base_url):
+    for line in manifest.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return urllib.parse.urljoin(base_url, line)
+    raise ValueError("HLS manifest contains no media URL")
+
+
+def sample_radio_stream(url):
+    data, final_url = fetch_radio_url(url)
+    if data.lstrip().startswith(b"#EXTM3U"):
+        media_url = first_radio_media_url(data, final_url)
+        data, media_url = fetch_radio_url(media_url)
+        if data.lstrip().startswith(b"#EXTM3U"):
+            segment_url = first_radio_media_url(data, media_url)
+            data, _final_url = fetch_radio_url(segment_url)
+    return data
+
+
+def detect_radio_format(data):
+    mp3_offset = find_mp3_frame(data)
+    aac_offset = find_aac_frame(data)
+    if mp3_offset is not None and (
+        aac_offset is None or mp3_offset < aac_offset
+    ):
+        return "MP3"
+    if aac_offset is not None:
+        return "AAC"
+    return None
+
+
+def check_radio_url(url, name=None, declared=None):
+    label = name or url
+    try:
+        actual = detect_radio_format(sample_radio_stream(url))
+    except Exception as error:
+        print("FAIL {}: {}".format(label, error))
+        return 1
+
+    if actual is None:
+        print("FAIL {}: format not recognized".format(label))
+        return 1
+    if declared and actual != declared.upper():
+        print(
+            "FAIL {}: declared {}, detected {}".format(
+                label, declared.upper(), actual
+            )
+        )
+        return 1
+
+    print("PASS {}: live {}".format(label, actual))
+    return 0
+
+
+def check_radio_catalog(path):
+    try:
+        with path.open(encoding="utf-8") as catalog_file:
+            catalog = json.load(catalog_file)
+    except (OSError, json.JSONDecodeError) as error:
+        print("FAIL {}: {}".format(path, error))
+        return 1
+
+    stations = catalog.get("stations")
+    if not isinstance(stations, list):
+        print("FAIL {}: missing stations array".format(path))
+        return 1
+
+    failures = 0
+    for station in stations:
+        if not isinstance(station, dict):
+            print("FAIL {}: invalid station entry".format(path))
+            failures += 1
+            continue
+        name = station.get("name")
+        url = station.get("url")
+        declared = station.get("format", "")
+        if not name or not url:
+            print("FAIL {}: station missing name or URL".format(path))
+            failures += 1
+            continue
+        if declared.upper() not in ("AAC", "MP3"):
+            print(
+                "FAIL {}: unsupported or missing format {!r}".format(
+                    name, declared
+                )
+            )
+            failures += 1
+            continue
+        failures += check_radio_url(url, name=name, declared=declared)
+    return failures
+
+
+def resolve_radio_catalog(selector):
+    candidate = Path(selector).expanduser()
+    if not candidate.is_absolute():
+        cwd_candidate = Path.cwd() / candidate
+        root_candidate = ROOT / candidate
+        candidate = cwd_candidate if cwd_candidate.exists() else root_candidate
+    if candidate.is_file():
+        return candidate
+
+    region = selector.upper()
+    matches = [
+        path
+        for path in (ROOT / "stations").glob("*.json")
+        if path.stem.upper() == region
+    ]
+    if matches:
+        return matches[0]
+    raise DevError("Unknown radio catalog or region: " + selector)
+
+
+def command_radio(args):
+    if args.radio_command is None:
+        args.command_parser.print_help()
+        return 0
+    return args.radio_handler(args)
+
+
+def command_radio_check(args):
+    selector = args.selector
+    if selector.startswith(("http://", "https://")):
+        return check_radio_url(selector)
+    if selector.lower() == "all":
+        catalogs = sorted((ROOT / "stations").glob("*.json"))
+        if not catalogs:
+            raise DevError("No radio catalogs found")
+        return 1 if sum(check_radio_catalog(path) for path in catalogs) else 0
+    return 1 if check_radio_catalog(resolve_radio_catalog(selector)) else 0
+
+
 def load_pak():
     with PAK_FILE.open() as source:
         return json.load(source)
@@ -1106,6 +1322,32 @@ def create_parser():
         usage="%(prog)s [-h]",
     )
     devices.set_defaults(handler=command_devices)
+
+    radio = subparsers.add_parser(
+        "radio",
+        help="manage and validate radio stations",
+        description="manage and validate radio stations",
+        formatter_class=CommandHelpFormatter,
+    )
+    radio_commands = radio.add_subparsers(
+        dest="radio_command",
+        title="commands",
+        metavar="command",
+    )
+    radio_check = radio_commands.add_parser(
+        "check",
+        help="check radio streams",
+        description="check radio streams",
+        usage="%(prog)s <file|region|all|url> [-h]",
+    )
+    radio_check.add_argument(
+        "selector",
+        metavar="file|region|all|url",
+        help="catalog path, region code, all catalogs, or one stream URL",
+    )
+    radio_check.set_defaults(radio_handler=command_radio_check)
+    radio.usage = "%(prog)s [-h] command args"
+    radio.set_defaults(handler=command_radio, command_parser=radio)
 
     version = subparsers.add_parser(
         "version",
