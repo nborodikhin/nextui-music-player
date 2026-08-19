@@ -54,7 +54,8 @@ A comprehensive music playback application for NextUI featuring local file playb
 ### Online Radio
 - Preset station management (add, remove, save)
 - Curated station browser organized by country (Only Malaysia for now - others will be added later; please suggest)
-- Support for `MP3` and `AAC` streams, direct streaming (Shoutcast/Icecast) and `HLS` (m3u8).
+- Support for `MP3`, `AAC`, Ogg Vorbis, and Ogg Opus streams, direct streaming
+  (Shoutcast/Icecast) and `HLS` (m3u8).
 - HTTPS support via mbedTLS
 - Metadata display (song title, artist, station info)
 - Album art display (Downloaded from internet based on current song)

@@ -681,6 +681,14 @@ def sample_radio_stream(url):
 
 
 def detect_radio_format(data):
+    ogg_offset = data.find(b"OggS")
+    opus_offset = data.find(b"OpusHead")
+    vorbis_offset = data.find(b"\x01vorbis")
+    if ogg_offset >= 0 and opus_offset >= ogg_offset:
+        return "OPUS"
+    if ogg_offset >= 0 and vorbis_offset >= ogg_offset:
+        return "OGG"
+
     mp3_offset = find_mp3_frame(data)
     aac_offset = find_aac_frame(data)
     if mp3_offset is not None and (
@@ -741,7 +749,7 @@ def check_radio_catalog(path):
             print("FAIL {}: station missing name or URL".format(path))
             failures += 1
             continue
-        if declared.upper() not in ("AAC", "MP3"):
+        if declared and declared.upper() not in ("AAC", "MP3", "OGG", "OPUS"):
             print(
                 "FAIL {}: unsupported or missing format {!r}".format(
                     name, declared
@@ -749,7 +757,7 @@ def check_radio_catalog(path):
             )
             failures += 1
             continue
-        failures += check_radio_url(url, name=name, declared=declared)
+        failures += check_radio_url(url, name=name, declared=declared or None)
     return failures
 
 

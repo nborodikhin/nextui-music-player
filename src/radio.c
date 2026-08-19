@@ -37,6 +37,10 @@
 
 // MP3 streaming decoder (implementation is in player.c)
 #include "audio/dr_mp3.h"
+#define STB_VORBIS_HEADER_ONLY
+#include "audio/stb_vorbis.h"
+#include <ogg/ogg.h>
+#include <opus.h>
 
 // AAC decoder (FDK-AAC)
 #include <fdk-aac/aacdecoder_lib.h>
@@ -45,7 +49,9 @@
 typedef enum {
     RADIO_FORMAT_UNKNOWN = 0,
     RADIO_FORMAT_MP3,
-    RADIO_FORMAT_AAC
+    RADIO_FORMAT_AAC,
+    RADIO_FORMAT_OGG,
+    RADIO_FORMAT_OPUS
 } RadioAudioFormat;
 
 // Stream types
@@ -124,6 +130,21 @@ typedef struct {
     int aac_sample_rate;
     int aac_channels;
 
+    // Ogg Vorbis decoder
+    stb_vorbis* ogg_decoder;
+    bool ogg_initialized;
+    int ogg_sample_rate;
+    int ogg_channels;
+
+    // Ogg Opus decoder
+    ogg_sync_state opus_sync;
+    ogg_stream_state opus_stream;
+    OpusDecoder* opus_decoder;
+    bool opus_sync_initialized;
+    bool opus_stream_initialized;
+    int opus_channels;
+    int opus_pre_skip;
+
     // HLS support
     StreamType stream_type;
     HLSContext hls;
@@ -183,6 +204,167 @@ static void write_pcm_stereo(const int16_t* samples, int frames, int channels) {
         radio.audio_ring_count += 2;
     }
     pthread_mutex_unlock(&radio.audio_mutex);
+}
+
+static void consume_stream_bytes(int count) {
+    if (count <= 0 || count > radio.stream_buffer_pos) return;
+    memmove(
+        radio.stream_buffer,
+        radio.stream_buffer + count,
+        radio.stream_buffer_pos - count
+    );
+    radio.stream_buffer_pos -= count;
+}
+
+static void decode_ogg_vorbis(void) {
+    if (!radio.ogg_initialized) {
+        int consumed = 0;
+        int error = 0;
+        radio.ogg_decoder = stb_vorbis_open_pushdata(
+            radio.stream_buffer,
+            radio.stream_buffer_pos,
+            &consumed,
+            &error,
+            NULL
+        );
+        if (!radio.ogg_decoder) return;
+
+        stb_vorbis_info info = stb_vorbis_get_info(radio.ogg_decoder);
+        if (info.channels < 1 || info.channels > 2) {
+            stb_vorbis_close(radio.ogg_decoder);
+            radio.ogg_decoder = NULL;
+            radio.state = RADIO_STATE_ERROR;
+            snprintf(
+                radio.error_msg,
+                sizeof(radio.error_msg),
+                "Unsupported Ogg Vorbis channel count"
+            );
+            return;
+        }
+        radio.ogg_initialized = true;
+        radio.ogg_sample_rate = info.sample_rate;
+        radio.ogg_channels = info.channels;
+        consume_stream_bytes(consumed);
+        Player_setSampleRate(info.sample_rate);
+        Player_resumeAudio();
+        radio.state = RADIO_STATE_BUFFERING;
+    }
+
+    while (radio.stream_buffer_pos > 0) {
+        int channels = 0;
+        int frames = 0;
+        float** output = NULL;
+        int consumed = stb_vorbis_decode_frame_pushdata(
+            radio.ogg_decoder,
+            radio.stream_buffer,
+            radio.stream_buffer_pos,
+            &channels,
+            &output,
+            &frames
+        );
+        if (consumed <= 0) break;
+        consume_stream_bytes(consumed);
+
+        if (frames > 0 && channels > 0) {
+            int16_t pcm[8192 * 2];
+            if (frames > 8192) frames = 8192;
+            for (int frame = 0; frame < frames; frame++) {
+                for (int channel = 0; channel < channels && channel < 2; channel++) {
+                    float sample = output[channel][frame];
+                    if (sample > 1.0f) sample = 1.0f;
+                    if (sample < -1.0f) sample = -1.0f;
+                    pcm[frame * channels + channel] = (int16_t)(sample * 32767.0f);
+                }
+            }
+            write_pcm_stereo(pcm, frames, channels);
+        }
+    }
+}
+
+static void decode_ogg_opus(void) {
+    if (!radio.opus_sync_initialized) {
+        if (ogg_sync_init(&radio.opus_sync) != 0) return;
+        radio.opus_sync_initialized = true;
+    }
+
+    if (radio.stream_buffer_pos > 0) {
+        char* sync_buffer = ogg_sync_buffer(
+            &radio.opus_sync,
+            radio.stream_buffer_pos
+        );
+        if (!sync_buffer) return;
+        memcpy(sync_buffer, radio.stream_buffer, radio.stream_buffer_pos);
+        ogg_sync_wrote(&radio.opus_sync, radio.stream_buffer_pos);
+        radio.stream_buffer_pos = 0;
+    }
+
+    ogg_page page;
+    while (ogg_sync_pageout(&radio.opus_sync, &page) == 1) {
+        if (!radio.opus_stream_initialized || ogg_page_bos(&page)) {
+            if (radio.opus_stream_initialized) {
+                ogg_stream_clear(&radio.opus_stream);
+            }
+            if (ogg_stream_init(&radio.opus_stream, ogg_page_serialno(&page)) != 0) {
+                continue;
+            }
+            radio.opus_stream_initialized = true;
+        }
+        if (ogg_stream_pagein(&radio.opus_stream, &page) != 0) continue;
+
+        ogg_packet packet;
+        while (ogg_stream_packetout(&radio.opus_stream, &packet) == 1) {
+            if (packet.bytes >= 19 && memcmp(packet.packet, "OpusHead", 8) == 0) {
+                int channels = packet.packet[9];
+                int mapping_family = packet.packet[18];
+                if (channels < 1 || channels > 2 || mapping_family != 0) {
+                    radio.state = RADIO_STATE_ERROR;
+                    snprintf(
+                        radio.error_msg,
+                        sizeof(radio.error_msg),
+                        "Unsupported Opus channel mapping"
+                    );
+                    return;
+                }
+
+                if (radio.opus_decoder) opus_decoder_destroy(radio.opus_decoder);
+                int error = OPUS_OK;
+                radio.opus_decoder = opus_decoder_create(48000, channels, &error);
+                if (!radio.opus_decoder || error != OPUS_OK) return;
+                radio.opus_channels = channels;
+                radio.opus_pre_skip = packet.packet[10] | (packet.packet[11] << 8);
+                Player_setSampleRate(48000);
+                Player_resumeAudio();
+                radio.state = RADIO_STATE_BUFFERING;
+                continue;
+            }
+            if (packet.bytes >= 8 && memcmp(packet.packet, "OpusTags", 8) == 0) {
+                continue;
+            }
+            if (!radio.opus_decoder) continue;
+
+            int16_t pcm[5760 * 2];
+            int frames = opus_decode(
+                radio.opus_decoder,
+                packet.packet,
+                packet.bytes,
+                pcm,
+                5760,
+                0
+            );
+            if (frames <= 0) continue;
+
+            int skip = radio.opus_pre_skip;
+            if (skip > frames) skip = frames;
+            radio.opus_pre_skip -= skip;
+            if (frames > skip) {
+                write_pcm_stereo(
+                    pcm + skip * radio.opus_channels,
+                    frames - skip,
+                    radio.opus_channels
+                );
+            }
+        }
+    }
 }
 
 // Use radio_net_parse_url for URL parsing
@@ -520,7 +702,12 @@ static int parse_headers(void) {
         // Skip leading whitespace
         while (*ct == ' ') ct++;
 
-        if (strcasestr(ct, "aac") != NULL ||
+        if (strcasestr(ct, "opus") != NULL) {
+            radio.audio_format = RADIO_FORMAT_OPUS;
+        } else if (strcasestr(ct, "ogg") != NULL ||
+                   strcasestr(ct, "vorbis") != NULL) {
+            radio.audio_format = RADIO_FORMAT_OGG;
+        } else if (strcasestr(ct, "aac") != NULL ||
             strcasestr(ct, "mp4") != NULL ||
             strcasestr(ct, "m4a") != NULL) {
             radio.audio_format = RADIO_FORMAT_AAC;
@@ -1051,6 +1238,16 @@ static void* stream_thread_func(void* arg) {
 
         // Initialize decoder once we have enough data
         if (radio.stream_buffer_pos >= 16384) {
+            if (radio.stream_buffer_pos >= 4 &&
+                memcmp(radio.stream_buffer, "OggS", 4) == 0) {
+                radio.audio_format = memmem(
+                    radio.stream_buffer,
+                    radio.stream_buffer_pos,
+                    "OpusHead",
+                    8
+                ) ? RADIO_FORMAT_OPUS : RADIO_FORMAT_OGG;
+            }
+
             if (radio.audio_format == RADIO_FORMAT_AAC && !radio.aac_initialized) {
                 // Initialize FDK-AAC decoder (TT_MP4_ADTS for ADTS-framed AAC streams)
                 radio.aac_decoder = aacDecoder_Open(TT_MP4_ADTS, 1);
@@ -1230,6 +1427,15 @@ static void* stream_thread_func(void* arg) {
                 radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
                 radio.state = RADIO_STATE_PLAYING;
             }
+        } else if (radio.audio_format == RADIO_FORMAT_OGG) {
+            decode_ogg_vorbis();
+        } else if (radio.audio_format == RADIO_FORMAT_OPUS) {
+            decode_ogg_opus();
+        }
+
+        if (radio.state == RADIO_STATE_BUFFERING &&
+            radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
+            radio.state = RADIO_STATE_PLAYING;
         }
 
         // If buffering and have enough data
@@ -1663,6 +1869,29 @@ void Radio_stop(void) {
         radio.aac_sample_rate = 0;
         radio.aac_channels = 0;
     }
+
+    if (radio.ogg_decoder) {
+        stb_vorbis_close(radio.ogg_decoder);
+        radio.ogg_decoder = NULL;
+    }
+    radio.ogg_initialized = false;
+    radio.ogg_sample_rate = 0;
+    radio.ogg_channels = 0;
+
+    if (radio.opus_decoder) {
+        opus_decoder_destroy(radio.opus_decoder);
+        radio.opus_decoder = NULL;
+    }
+    if (radio.opus_stream_initialized) {
+        ogg_stream_clear(&radio.opus_stream);
+        radio.opus_stream_initialized = false;
+    }
+    if (radio.opus_sync_initialized) {
+        ogg_sync_clear(&radio.opus_sync);
+        radio.opus_sync_initialized = false;
+    }
+    radio.opus_channels = 0;
+    radio.opus_pre_skip = 0;
 
     // Reset HLS state
     radio.stream_type = STREAM_TYPE_DIRECT;
