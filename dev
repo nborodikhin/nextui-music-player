@@ -466,6 +466,17 @@ def create_zip(package_dir):
     return DIST_ZIP
 
 
+def extract_package(archive, destination):
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as bundle:
+        for info in bundle.infolist():
+            extracted = Path(bundle.extract(info, destination))
+            mode = (info.external_attr >> 16) & 0o7777
+            if mode:
+                extracted.chmod(mode)
+    return destination
+
+
 def remote_pak_path(platform):
     return "{}/{}/{}".format(REMOTE_ROOT, platform, PAK_NAME)
 
@@ -1066,47 +1077,74 @@ def command_dist(args):
     return 0
 
 
+def split_archive_targets(targets):
+    selectors = []
+    archives = []
+    for target in targets:
+        if target.lower().endswith(".zip"):
+            archives.append(Path(target))
+        else:
+            selectors.append(target)
+    if len(archives) > 1:
+        raise DevError("only one pak zip can be installed at a time")
+    archive = archives[0] if archives else None
+    if archive and not archive.is_file():
+        raise DevError("No such pak zip: " + str(archive))
+    return selectors, archive
+
+
 def command_install_or_run(args, should_run):
-    targets = args.targets
+    targets, archive = split_archive_targets(args.targets)
     if not targets:
+        if archive:
+            raise DevError("installing a pak zip requires a device target")
         if should_run:
             targets = ["desktop"]
         else:
             raise DevError("install requires at least one target")
-    full = args.full or args.delete
+    full = args.full or args.delete or archive is not None
 
     only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
+    if archive and only_desktop:
+        raise DevError("installing a pak zip requires a device target")
     devices = [] if only_desktop else list_devices()
     platforms, device_targets = resolve_device_targets(
         targets, devices, allow_desktop=True
     )
-    runtime = container_runtime(args)
-    build_platforms(platforms, runtime)
+    if not archive:
+        runtime = container_runtime(args)
+        build_platforms(platforms, runtime)
 
     by_platform = {}
     for device in device_targets:
         by_platform.setdefault(device.platform, []).append(device)
 
     failures = []
-    for platform, matching_devices in by_platform.items():
-        package = None
-        if full:
-            try:
-                package = stage_package((platform,), strict=False)
-            except DevError as error:
-                failures.append(str(error))
-                continue
+    with tempfile.TemporaryDirectory(prefix="music-player-pak-") as temp_dir:
+        unpacked = None
+        if archive:
+            print("Unpacking " + str(archive), flush=True)
+            unpacked = extract_package(archive, Path(temp_dir) / PAK_NAME)
 
-        for device in matching_devices:
-            try:
-                if package:
-                    install_full(device, package, delete=args.delete)
-                else:
-                    install_binary(device)
-                if should_run:
-                    run_on_device(device)
-            except DevError as error:
-                failures.append(str(error))
+        for platform, matching_devices in by_platform.items():
+            package = unpacked
+            if full and not package:
+                try:
+                    package = stage_package((platform,), strict=False)
+                except DevError as error:
+                    failures.append(str(error))
+                    continue
+
+            for device in matching_devices:
+                try:
+                    if package:
+                        install_full(device, package, delete=args.delete)
+                    else:
+                        install_binary(device)
+                    if should_run:
+                        run_on_device(device)
+                except DevError as error:
+                    failures.append(str(error))
 
     if should_run and "desktop" in platforms:
         run_desktop()
@@ -1242,7 +1280,7 @@ def create_parser():
         help="build and install",
         description="build and install",
         usage=(
-            "%(prog)s target [-h] [--docker | --podman] "
+            "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
             "[--full] [--delete] [--run]"
         ),
     )
@@ -1250,8 +1288,9 @@ def create_parser():
         install,
         include_run=True,
         target_help=(
-            "one or more of desktop, tg5040, tg5050, device, or an ADB serial; "
-            "no default"
+            "one or more of desktop, tg5040, tg5050, device, or an ADB serial "
+            "(no default), plus an optional path to a pak zip to install "
+            "instead of building"
         ),
     )
     install.set_defaults(handler=command_install)
@@ -1261,7 +1300,7 @@ def create_parser():
         help="build, install, and run",
         description="build, install, and run",
         usage=(
-            "%(prog)s target [-h] [--docker | --podman] "
+            "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
             "[--full] [--delete] [-f]"
         ),
     )
@@ -1270,7 +1309,8 @@ def create_parser():
         include_run=False,
         target_help=(
             "one or more of desktop (default), tg5040, tg5050, device, or an "
-            "ADB serial"
+            "ADB serial, plus an optional path to a pak zip to install "
+            "instead of building"
         ),
     )
     run.add_argument("-f", "--follow", action="store_true", help="follow the log")

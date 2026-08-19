@@ -145,6 +145,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 # Build, install, and run on connected devices
 ./dev devices
 ./dev install device
+./dev install device dist/Music.Player.pak.zip   # install a prebuilt pak (no build)
 ./dev run device
 ./dev log device --follow
 
@@ -172,6 +173,8 @@ accepted.
 By default, install and run only update the binary.
 Use `--full` to install the complete pak and `--delete` to remove stale files
 from the installed pak before uploading it (userdata is not cleared).
+Passing a path to a `.zip` pak alongside a device target skips the build and
+installs that archive as a full pak (`--delete` still applies).
 
 ### Project Structure
 
