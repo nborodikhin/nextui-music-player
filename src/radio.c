@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <errno.h>
@@ -37,6 +38,10 @@
 
 // MP3 streaming decoder (implementation is in player.c)
 #include "audio/dr_mp3.h"
+#define STB_VORBIS_HEADER_ONLY
+#include "audio/stb_vorbis.h"
+#include <ogg/ogg.h>
+#include <opus.h>
 
 // AAC decoder (FDK-AAC)
 #include <fdk-aac/aacdecoder_lib.h>
@@ -45,7 +50,9 @@
 typedef enum {
     RADIO_FORMAT_UNKNOWN = 0,
     RADIO_FORMAT_MP3,
-    RADIO_FORMAT_AAC
+    RADIO_FORMAT_AAC,
+    RADIO_FORMAT_OGG,
+    RADIO_FORMAT_OPUS
 } RadioAudioFormat;
 
 // Stream types
@@ -124,6 +131,21 @@ typedef struct {
     int aac_sample_rate;
     int aac_channels;
 
+    // Ogg Vorbis decoder
+    stb_vorbis* ogg_decoder;
+    bool ogg_initialized;
+    int ogg_sample_rate;
+    int ogg_channels;
+
+    // Ogg Opus decoder
+    ogg_sync_state opus_sync;
+    ogg_stream_state opus_stream;
+    OpusDecoder* opus_decoder;
+    bool opus_sync_initialized;
+    bool opus_stream_initialized;
+    int opus_channels;
+    int opus_pre_skip;
+
     // HLS support
     StreamType stream_type;
     HLSContext hls;
@@ -166,6 +188,186 @@ typedef struct {
 
 static RadioContext radio = {0};
 
+static void write_pcm_stereo(const int16_t* samples, int frames, int channels) {
+    if (!samples || frames <= 0 || channels <= 0) return;
+
+    pthread_mutex_lock(&radio.audio_mutex);
+    for (int frame = 0; frame < frames; frame++) {
+        if (radio.audio_ring_count > AUDIO_RING_SIZE - 2) break;
+
+        int offset = frame * channels;
+        int16_t left = samples[offset];
+        int16_t right = channels > 1 ? samples[offset + 1] : left;
+        radio.audio_ring[radio.audio_ring_write] = left;
+        radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
+        radio.audio_ring[radio.audio_ring_write] = right;
+        radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
+        radio.audio_ring_count += 2;
+    }
+    pthread_mutex_unlock(&radio.audio_mutex);
+}
+
+static void consume_stream_bytes(int count) {
+    if (count <= 0 || count > radio.stream_buffer_pos) return;
+    memmove(
+        radio.stream_buffer,
+        radio.stream_buffer + count,
+        radio.stream_buffer_pos - count
+    );
+    radio.stream_buffer_pos -= count;
+}
+
+static void decode_ogg_vorbis(void) {
+    if (!radio.ogg_initialized) {
+        int consumed = 0;
+        int error = 0;
+        radio.ogg_decoder = stb_vorbis_open_pushdata(
+            radio.stream_buffer,
+            radio.stream_buffer_pos,
+            &consumed,
+            &error,
+            NULL
+        );
+        if (!radio.ogg_decoder) return;
+
+        stb_vorbis_info info = stb_vorbis_get_info(radio.ogg_decoder);
+        if (info.channels < 1 || info.channels > 2) {
+            stb_vorbis_close(radio.ogg_decoder);
+            radio.ogg_decoder = NULL;
+            radio.state = RADIO_STATE_ERROR;
+            snprintf(
+                radio.error_msg,
+                sizeof(radio.error_msg),
+                "Unsupported Ogg Vorbis channel count"
+            );
+            return;
+        }
+        radio.ogg_initialized = true;
+        radio.ogg_sample_rate = info.sample_rate;
+        radio.ogg_channels = info.channels;
+        consume_stream_bytes(consumed);
+        Player_setSampleRate(info.sample_rate);
+        Player_resumeAudio();
+        radio.state = RADIO_STATE_BUFFERING;
+    }
+
+    while (radio.stream_buffer_pos > 0) {
+        int channels = 0;
+        int frames = 0;
+        float** output = NULL;
+        int consumed = stb_vorbis_decode_frame_pushdata(
+            radio.ogg_decoder,
+            radio.stream_buffer,
+            radio.stream_buffer_pos,
+            &channels,
+            &output,
+            &frames
+        );
+        if (consumed <= 0) break;
+        consume_stream_bytes(consumed);
+
+        if (frames > 0 && channels > 0) {
+            int16_t pcm[8192 * 2];
+            if (frames > 8192) frames = 8192;
+            for (int frame = 0; frame < frames; frame++) {
+                for (int channel = 0; channel < channels && channel < 2; channel++) {
+                    float sample = output[channel][frame];
+                    if (sample > 1.0f) sample = 1.0f;
+                    if (sample < -1.0f) sample = -1.0f;
+                    pcm[frame * channels + channel] = (int16_t)(sample * 32767.0f);
+                }
+            }
+            write_pcm_stereo(pcm, frames, channels);
+        }
+    }
+}
+
+static void decode_ogg_opus(void) {
+    if (!radio.opus_sync_initialized) {
+        if (ogg_sync_init(&radio.opus_sync) != 0) return;
+        radio.opus_sync_initialized = true;
+    }
+
+    if (radio.stream_buffer_pos > 0) {
+        char* sync_buffer = ogg_sync_buffer(
+            &radio.opus_sync,
+            radio.stream_buffer_pos
+        );
+        if (!sync_buffer) return;
+        memcpy(sync_buffer, radio.stream_buffer, radio.stream_buffer_pos);
+        ogg_sync_wrote(&radio.opus_sync, radio.stream_buffer_pos);
+        radio.stream_buffer_pos = 0;
+    }
+
+    ogg_page page;
+    while (ogg_sync_pageout(&radio.opus_sync, &page) == 1) {
+        if (!radio.opus_stream_initialized || ogg_page_bos(&page)) {
+            if (radio.opus_stream_initialized) {
+                ogg_stream_clear(&radio.opus_stream);
+            }
+            if (ogg_stream_init(&radio.opus_stream, ogg_page_serialno(&page)) != 0) {
+                continue;
+            }
+            radio.opus_stream_initialized = true;
+        }
+        if (ogg_stream_pagein(&radio.opus_stream, &page) != 0) continue;
+
+        ogg_packet packet;
+        while (ogg_stream_packetout(&radio.opus_stream, &packet) == 1) {
+            if (packet.bytes >= 19 && memcmp(packet.packet, "OpusHead", 8) == 0) {
+                int channels = packet.packet[9];
+                int mapping_family = packet.packet[18];
+                if (channels < 1 || channels > 2 || mapping_family != 0) {
+                    radio.state = RADIO_STATE_ERROR;
+                    snprintf(
+                        radio.error_msg,
+                        sizeof(radio.error_msg),
+                        "Unsupported Opus channel mapping"
+                    );
+                    return;
+                }
+
+                if (radio.opus_decoder) opus_decoder_destroy(radio.opus_decoder);
+                int error = OPUS_OK;
+                radio.opus_decoder = opus_decoder_create(48000, channels, &error);
+                if (!radio.opus_decoder || error != OPUS_OK) return;
+                radio.opus_channels = channels;
+                radio.opus_pre_skip = packet.packet[10] | (packet.packet[11] << 8);
+                Player_setSampleRate(48000);
+                Player_resumeAudio();
+                radio.state = RADIO_STATE_BUFFERING;
+                continue;
+            }
+            if (packet.bytes >= 8 && memcmp(packet.packet, "OpusTags", 8) == 0) {
+                continue;
+            }
+            if (!radio.opus_decoder) continue;
+
+            int16_t pcm[5760 * 2];
+            int frames = opus_decode(
+                radio.opus_decoder,
+                packet.packet,
+                packet.bytes,
+                pcm,
+                5760,
+                0
+            );
+            if (frames <= 0) continue;
+
+            int skip = radio.opus_pre_skip;
+            if (skip > frames) skip = frames;
+            radio.opus_pre_skip -= skip;
+            if (frames > skip) {
+                write_pcm_stereo(
+                    pcm + skip * radio.opus_channels,
+                    frames - skip,
+                    radio.opus_channels
+                );
+            }
+        }
+    }
+}
+
 // Use radio_net_parse_url for URL parsing
 
 // Initialize SSL/TLS
@@ -196,6 +398,9 @@ static int ssl_init(const char* host) {
         LOG_error("mbedtls_ssl_config_defaults failed: %d\n", ret);
         goto ssl_init_error;
     }
+    mbedtls_ssl_conf_max_tls_version(
+        &radio.ssl_conf, MBEDTLS_SSL_VERSION_TLS1_2
+    );
 
     // Skip certificate verification (radio streams use various CAs)
     mbedtls_ssl_conf_authmode(&radio.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
@@ -498,7 +703,12 @@ static int parse_headers(void) {
         // Skip leading whitespace
         while (*ct == ' ') ct++;
 
-        if (strcasestr(ct, "aac") != NULL ||
+        if (strcasestr(ct, "opus") != NULL) {
+            radio.audio_format = RADIO_FORMAT_OPUS;
+        } else if (strcasestr(ct, "ogg") != NULL ||
+                   strcasestr(ct, "vorbis") != NULL) {
+            radio.audio_format = RADIO_FORMAT_OGG;
+        } else if (strcasestr(ct, "aac") != NULL ||
             strcasestr(ct, "mp4") != NULL ||
             strcasestr(ct, "m4a") != NULL) {
             radio.audio_format = RADIO_FORMAT_AAC;
@@ -509,6 +719,34 @@ static int parse_headers(void) {
     }
 
     return 0;
+}
+
+static bool extract_icy_title_tag(char* title, int title_size, const char* tag) {
+    int tag_len = strlen(tag);
+    char* match = title;
+    while ((match = strstr(match, tag)) != NULL) {
+        if (match == title || isspace((unsigned char)match[-1]) ||
+            match[-1] == ',' || match[-1] == ';') {
+            char* value = match + tag_len;
+            char* value_end = strchr(value, '"');
+            if (value_end) {
+                int value_len = value_end - value;
+                if (value_len >= title_size) value_len = title_size - 1;
+                memmove(title, value, value_len);
+                title[value_len] = '\0';
+                return true;
+            }
+        }
+        match += tag_len;
+    }
+    return false;
+}
+
+static void normalize_icy_title(char* title, int title_size) {
+    if (!strchr(title, '=')) return;
+    if (extract_icy_title_tag(title, title_size, "text=\"")) return;
+    if (extract_icy_title_tag(title, title_size, "title=\"")) return;
+    title[0] = '\0';
 }
 
 // Parse ICY metadata block
@@ -532,16 +770,19 @@ static void parse_icy_metadata(const uint8_t* data, int len) {
         if (title_end) {
             *title_end = '\0';
             strncpy(radio.metadata.title, title_start, sizeof(radio.metadata.title) - 1);
+            radio.metadata.title[sizeof(radio.metadata.title) - 1] = '\0';
 
             // Try to parse "Artist - Title" format
             char* separator = strstr(radio.metadata.title, " - ");
             if (separator) {
                 *separator = '\0';
                 strncpy(radio.metadata.artist, radio.metadata.title, sizeof(radio.metadata.artist) - 1);
+                radio.metadata.artist[sizeof(radio.metadata.artist) - 1] = '\0';
                 memmove(radio.metadata.title, separator + 3, strlen(separator + 3) + 1);
             } else {
                 radio.metadata.artist[0] = '\0';
             }
+            normalize_icy_title(radio.metadata.title, sizeof(radio.metadata.title));
 
             // Fetch album art if metadata changed
             if (strcmp(old_artist, radio.metadata.artist) != 0 ||
@@ -866,19 +1107,11 @@ static void* hls_stream_thread_func(void* arg) {
 
                     if (info && info->frameSize > 0) {
                         frames_decoded++;
-
-                        pthread_mutex_lock(&radio.audio_mutex);
-
-                        int samples = info->frameSize * info->numChannels;
-                        for (int s = 0; s < samples; s++) {
-                            if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                                radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                                radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                                radio.audio_ring_count++;
-                            }
-                        }
-
-                        pthread_mutex_unlock(&radio.audio_mutex);
+                        write_pcm_stereo(
+                            (const int16_t*)decode_buf,
+                            info->frameSize,
+                            info->numChannels
+                        );
                     }
                 } else if (err == AAC_DEC_NOT_ENOUGH_BITS) {
                     break;
@@ -921,6 +1154,159 @@ static int find_mp3_sync(const uint8_t* buf, int size) {
         }
     }
     return -1;
+}
+
+static void decode_mp3(void) {
+    if (!radio.mp3_initialized) {
+        if (radio.stream_buffer_pos < 16384) return;
+
+        int sync_offset = find_mp3_sync(
+            radio.stream_buffer,
+            radio.stream_buffer_pos
+        );
+        if (sync_offset < 0) {
+            LOG_error("No MP3 sync found in buffer\n");
+            return;
+        }
+
+        consume_stream_bytes(sync_offset);
+        drmp3dec_init(&radio.mp3_decoder);
+        radio.mp3_initialized = true;
+        radio.mp3_sample_rate = 0;
+        radio.mp3_channels = 0;
+        radio.state = RADIO_STATE_BUFFERING;
+    }
+
+    if (radio.stream_buffer_pos < 1024) return;
+
+    int16_t decode_buf[2304 * 2];
+    drmp3dec_frame_info frame_info;
+    while (radio.stream_buffer_pos >= 512) {
+        int sync_offset = find_mp3_sync(
+            radio.stream_buffer,
+            radio.stream_buffer_pos
+        );
+        if (sync_offset < 0) {
+            if (radio.stream_buffer_pos > 4) {
+                memmove(
+                    radio.stream_buffer,
+                    radio.stream_buffer + radio.stream_buffer_pos - 4,
+                    4
+                );
+                radio.stream_buffer_pos = 4;
+            }
+            break;
+        }
+
+        consume_stream_bytes(sync_offset);
+        int frames = drmp3dec_decode_frame(
+            &radio.mp3_decoder,
+            radio.stream_buffer,
+            radio.stream_buffer_pos,
+            decode_buf,
+            &frame_info
+        );
+
+        if (frames > 0 && frame_info.frame_bytes > 0) {
+            if (radio.mp3_sample_rate == 0) {
+                radio.mp3_sample_rate = frame_info.sample_rate;
+                radio.mp3_channels = frame_info.channels;
+                Player_setSampleRate(frame_info.sample_rate);
+                Player_resumeAudio();
+            }
+            consume_stream_bytes(frame_info.frame_bytes);
+            write_pcm_stereo(decode_buf, frames, frame_info.channels);
+        } else if (frame_info.frame_bytes > 0) {
+            consume_stream_bytes(frame_info.frame_bytes);
+        } else {
+            break;
+        }
+    }
+}
+
+static void decode_aac(void) {
+    if (!radio.aac_initialized) {
+        if (radio.stream_buffer_pos < 16384) return;
+
+        radio.aac_decoder = aacDecoder_Open(TT_MP4_ADTS, 1);
+        if (!radio.aac_decoder) {
+            LOG_error("AAC decoder init failed\n");
+            return;
+        }
+        radio.aac_initialized = true;
+        radio.aac_inbuf_size = 0;
+        radio.aac_sample_rate = 0;
+        radio.aac_channels = 0;
+        radio.state = RADIO_STATE_BUFFERING;
+    }
+
+    if (radio.stream_buffer_pos < 4096) return;
+
+    int copy_size = radio.stream_buffer_pos;
+    if (radio.aac_inbuf_size + copy_size > (int)sizeof(radio.aac_inbuf)) {
+        copy_size = sizeof(radio.aac_inbuf) - radio.aac_inbuf_size;
+    }
+    if (copy_size > 0) {
+        memcpy(
+            radio.aac_inbuf + radio.aac_inbuf_size,
+            radio.stream_buffer,
+            copy_size
+        );
+        radio.aac_inbuf_size += copy_size;
+        consume_stream_bytes(copy_size);
+    }
+
+    while (radio.aac_inbuf_size >= 768) {
+        UCHAR* in_buffer[] = { radio.aac_inbuf };
+        UINT in_buffer_length[] = { (UINT)radio.aac_inbuf_size };
+        UINT bytes_valid[] = { (UINT)radio.aac_inbuf_size };
+        aacDecoder_Fill(
+            radio.aac_decoder,
+            in_buffer,
+            in_buffer_length,
+            bytes_valid
+        );
+
+        INT_PCM decode_buf[2048 * 2];
+        AAC_DECODER_ERROR error = aacDecoder_DecodeFrame(
+            radio.aac_decoder,
+            decode_buf,
+            sizeof(decode_buf) / sizeof(INT_PCM),
+            0
+        );
+
+        int consumed = radio.aac_inbuf_size - bytes_valid[0];
+        if (consumed > 0) {
+            memmove(radio.aac_inbuf, radio.aac_inbuf + consumed, bytes_valid[0]);
+            radio.aac_inbuf_size = bytes_valid[0];
+        }
+
+        if (IS_OUTPUT_VALID(error)) {
+            CStreamInfo* info = aacDecoder_GetStreamInfo(radio.aac_decoder);
+            if (info && radio.aac_sample_rate == 0 && info->sampleRate > 0) {
+                radio.aac_sample_rate = info->sampleRate;
+                radio.aac_channels = info->numChannels;
+                Player_setSampleRate(info->sampleRate);
+                Player_resumeAudio();
+            }
+            if (info && info->frameSize > 0) {
+                write_pcm_stereo(
+                    (const int16_t*)decode_buf,
+                    info->frameSize,
+                    info->numChannels
+                );
+            }
+        } else if (error == AAC_DEC_NOT_ENOUGH_BITS) {
+            break;
+        } else if (consumed == 0 && radio.aac_inbuf_size > 0) {
+            memmove(
+                radio.aac_inbuf,
+                radio.aac_inbuf + 1,
+                radio.aac_inbuf_size - 1
+            );
+            radio.aac_inbuf_size--;
+        }
+    }
 }
 
 // Streaming thread
@@ -1018,207 +1404,32 @@ static void* stream_thread_func(void* arg) {
             }
         }
 
-        // Initialize decoder once we have enough data
+        // Detect Ogg codec when the server uses a generic content type.
         if (radio.stream_buffer_pos >= 16384) {
-            if (radio.audio_format == RADIO_FORMAT_AAC && !radio.aac_initialized) {
-                // Initialize FDK-AAC decoder (TT_MP4_ADTS for ADTS-framed AAC streams)
-                radio.aac_decoder = aacDecoder_Open(TT_MP4_ADTS, 1);
-                if (radio.aac_decoder) {
-                    radio.aac_initialized = true;
-                    radio.aac_inbuf_size = 0;
-                    radio.aac_sample_rate = 0;  // Will be set on first frame
-                    radio.state = RADIO_STATE_BUFFERING;
-                } else {
-                    LOG_error("AAC decoder init failed\n");
-                }
-            } else if (radio.audio_format == RADIO_FORMAT_MP3 && !radio.mp3_initialized) {
-                // Initialize low-level MP3 decoder for streaming
-
-                // Find MP3 sync word first
-                int sync_offset = find_mp3_sync(radio.stream_buffer, radio.stream_buffer_pos);
-                if (sync_offset >= 0) {
-                    // Skip to sync word
-                    if (sync_offset > 0) {
-                        memmove(radio.stream_buffer, radio.stream_buffer + sync_offset,
-                                radio.stream_buffer_pos - sync_offset);
-                        radio.stream_buffer_pos -= sync_offset;
-                    }
-
-                    // Initialize low-level decoder
-                    drmp3dec_init(&radio.mp3_decoder);
-                    radio.mp3_initialized = true;
-                    radio.mp3_sample_rate = 0;  // Will be set on first frame
-                    radio.mp3_channels = 0;
-                    radio.state = RADIO_STATE_BUFFERING;
-                } else {
-                    LOG_error("No MP3 sync found in buffer\n");
-                }
+            if (radio.stream_buffer_pos >= 4 &&
+                memcmp(radio.stream_buffer, "OggS", 4) == 0) {
+                radio.audio_format = memmem(
+                    radio.stream_buffer,
+                    radio.stream_buffer_pos,
+                    "OpusHead",
+                    8
+                ) ? RADIO_FORMAT_OPUS : RADIO_FORMAT_OGG;
             }
         }
 
-        // Decode audio based on format
-        if (radio.audio_format == RADIO_FORMAT_AAC && radio.aac_initialized && radio.stream_buffer_pos >= 4096) {
-            // AAC decoding
-            // Copy data to AAC input buffer
-            int copy_size = radio.stream_buffer_pos;
-            if (radio.aac_inbuf_size + copy_size > sizeof(radio.aac_inbuf)) {
-                copy_size = sizeof(radio.aac_inbuf) - radio.aac_inbuf_size;
-            }
-            if (copy_size > 0) {
-                memcpy(radio.aac_inbuf + radio.aac_inbuf_size, radio.stream_buffer, copy_size);
-                radio.aac_inbuf_size += copy_size;
-                // Shift stream buffer
-                memmove(radio.stream_buffer, radio.stream_buffer + copy_size, radio.stream_buffer_pos - copy_size);
-                radio.stream_buffer_pos -= copy_size;
-            }
+        if (radio.audio_format == RADIO_FORMAT_AAC) {
+            decode_aac();
+        } else if (radio.audio_format == RADIO_FORMAT_MP3) {
+            decode_mp3();
+        } else if (radio.audio_format == RADIO_FORMAT_OGG) {
+            decode_ogg_vorbis();
+        } else if (radio.audio_format == RADIO_FORMAT_OPUS) {
+            decode_ogg_opus();
+        }
 
-            // Decode AAC frames using FDK-AAC (handles ADTS sync internally)
-            while (radio.aac_inbuf_size >= 768) {
-                // Feed data to FDK-AAC
-                UCHAR* inBuffer[] = { radio.aac_inbuf };
-                UINT inBufferLength[] = { (UINT)radio.aac_inbuf_size };
-                UINT bytesValid[] = { (UINT)radio.aac_inbuf_size };
-
-                aacDecoder_Fill(radio.aac_decoder, inBuffer, inBufferLength, bytesValid);
-
-                // Decode one frame
-                INT_PCM decode_buf[2048 * 2];  // HE-AAC can output 2048 frames stereo
-                AAC_DECODER_ERROR err = aacDecoder_DecodeFrame(radio.aac_decoder, decode_buf, sizeof(decode_buf) / sizeof(INT_PCM), 0);
-
-                // Consume the data that FDK-AAC processed
-                int consumed = radio.aac_inbuf_size - bytesValid[0];
-                if (consumed > 0) {
-                    memmove(radio.aac_inbuf, radio.aac_inbuf + consumed, bytesValid[0]);
-                    radio.aac_inbuf_size = bytesValid[0];
-                }
-
-                if (IS_OUTPUT_VALID(err)) {
-                    CStreamInfo* info = aacDecoder_GetStreamInfo(radio.aac_decoder);
-
-                    // Update sample rate/channels on first successful decode
-                    if (info && radio.aac_sample_rate == 0 && info->sampleRate > 0) {
-                        radio.aac_sample_rate = info->sampleRate;
-                        radio.aac_channels = info->numChannels;
-                        // Reconfigure audio device to match stream's sample rate
-                        Player_setSampleRate(info->sampleRate);
-                        Player_resumeAudio();  // Resume after reconfiguration
-                    }
-
-                    if (info && info->frameSize > 0) {
-                        pthread_mutex_lock(&radio.audio_mutex);
-
-                        // Add to ring buffer
-                        int samples = info->frameSize * info->numChannels;
-                        for (int s = 0; s < samples; s++) {
-                            if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                                radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                                radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                                radio.audio_ring_count++;
-                            }
-                        }
-
-                        pthread_mutex_unlock(&radio.audio_mutex);
-                    }
-                } else if (err == AAC_DEC_NOT_ENOUGH_BITS) {
-                    // Need more data
-                    break;
-                } else if (err == AAC_DEC_TRANSPORT_SYNC_ERROR) {
-                    // Sync lost, skip a byte if nothing was consumed
-                    if (consumed == 0 && radio.aac_inbuf_size > 0) {
-                        memmove(radio.aac_inbuf, radio.aac_inbuf + 1, radio.aac_inbuf_size - 1);
-                        radio.aac_inbuf_size--;
-                    }
-                } else {
-                    // Other error, skip a byte and try again
-                    if (consumed == 0 && radio.aac_inbuf_size > 0) {
-                        memmove(radio.aac_inbuf, radio.aac_inbuf + 1, radio.aac_inbuf_size - 1);
-                        radio.aac_inbuf_size--;
-                    }
-                }
-            }
-
-            // Update state based on buffer level
-            if (radio.state == RADIO_STATE_BUFFERING &&
-                radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
-                radio.state = RADIO_STATE_PLAYING;
-            }
-        } else if (radio.audio_format == RADIO_FORMAT_MP3 && radio.mp3_initialized && radio.stream_buffer_pos >= 1024) {
-            // MP3 decoding using low-level frame decoder
-            // DRMP3_MAX_SAMPLES_PER_FRAME = 1152*2 = 2304
-            int16_t decode_buf[2304 * 2];  // Stereo samples
-            drmp3dec_frame_info frame_info;
-
-            // Decode frames while we have data
-            while (radio.stream_buffer_pos >= 512) {
-                // Find sync word
-                int sync_offset = find_mp3_sync(radio.stream_buffer, radio.stream_buffer_pos);
-                if (sync_offset < 0) {
-                    // No sync found, keep last few bytes in case sync spans buffer boundary
-                    if (radio.stream_buffer_pos > 4) {
-                        memmove(radio.stream_buffer, radio.stream_buffer + radio.stream_buffer_pos - 4, 4);
-                        radio.stream_buffer_pos = 4;
-                    }
-                    break;
-                }
-
-                // Skip to sync
-                if (sync_offset > 0) {
-                    memmove(radio.stream_buffer, radio.stream_buffer + sync_offset,
-                            radio.stream_buffer_pos - sync_offset);
-                    radio.stream_buffer_pos -= sync_offset;
-                }
-
-                // Decode frame
-                int samples = drmp3dec_decode_frame(&radio.mp3_decoder,
-                                                     radio.stream_buffer,
-                                                     radio.stream_buffer_pos,
-                                                     decode_buf,
-                                                     &frame_info);
-
-                if (samples > 0 && frame_info.frame_bytes > 0) {
-                    // Update sample rate/channels on first successful decode
-                    if (radio.mp3_sample_rate == 0) {
-                        radio.mp3_sample_rate = frame_info.sample_rate;
-                        radio.mp3_channels = frame_info.channels;
-                       // Reconfigure audio device to match stream's sample rate
-                        Player_setSampleRate(frame_info.sample_rate);
-                        Player_resumeAudio();  // Resume after reconfiguration
-                    }
-
-                    // Consume the frame
-                    memmove(radio.stream_buffer, radio.stream_buffer + frame_info.frame_bytes,
-                            radio.stream_buffer_pos - frame_info.frame_bytes);
-                    radio.stream_buffer_pos -= frame_info.frame_bytes;
-
-                    // Add decoded samples to ring buffer
-                    pthread_mutex_lock(&radio.audio_mutex);
-
-                    int total_samples = samples * frame_info.channels;
-                    for (int s = 0; s < total_samples; s++) {
-                        if (radio.audio_ring_count < AUDIO_RING_SIZE) {
-                            radio.audio_ring[radio.audio_ring_write] = decode_buf[s];
-                            radio.audio_ring_write = (radio.audio_ring_write + 1) % AUDIO_RING_SIZE;
-                            radio.audio_ring_count++;
-                        }
-                    }
-
-                    pthread_mutex_unlock(&radio.audio_mutex);
-                } else if (frame_info.frame_bytes > 0) {
-                    // Invalid frame, skip it
-                    memmove(radio.stream_buffer, radio.stream_buffer + frame_info.frame_bytes,
-                            radio.stream_buffer_pos - frame_info.frame_bytes);
-                    radio.stream_buffer_pos -= frame_info.frame_bytes;
-                } else {
-                    // Need more data
-                    break;
-                }
-            }
-
-            // Update state based on buffer level
-            if (radio.state == RADIO_STATE_BUFFERING &&
-                radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
-                radio.state = RADIO_STATE_PLAYING;
-            }
+        if (radio.state == RADIO_STATE_BUFFERING &&
+            radio.audio_ring_count > AUDIO_RING_SIZE * 2 / 3) {
+            radio.state = RADIO_STATE_PLAYING;
         }
 
         // If buffering and have enough data
@@ -1652,6 +1863,29 @@ void Radio_stop(void) {
         radio.aac_sample_rate = 0;
         radio.aac_channels = 0;
     }
+
+    if (radio.ogg_decoder) {
+        stb_vorbis_close(radio.ogg_decoder);
+        radio.ogg_decoder = NULL;
+    }
+    radio.ogg_initialized = false;
+    radio.ogg_sample_rate = 0;
+    radio.ogg_channels = 0;
+
+    if (radio.opus_decoder) {
+        opus_decoder_destroy(radio.opus_decoder);
+        radio.opus_decoder = NULL;
+    }
+    if (radio.opus_stream_initialized) {
+        ogg_stream_clear(&radio.opus_stream);
+        radio.opus_stream_initialized = false;
+    }
+    if (radio.opus_sync_initialized) {
+        ogg_sync_clear(&radio.opus_sync);
+        radio.opus_sync_initialized = false;
+    }
+    radio.opus_channels = 0;
+    radio.opus_pre_skip = 0;
 
     // Reset HLS state
     radio.stream_type = STREAM_TYPE_DIRECT;

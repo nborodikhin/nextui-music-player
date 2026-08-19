@@ -7,6 +7,180 @@
             "url": "https://am820.wnyc.org/wnycfm-mobile.aac",
             "genre": "Public Radio",
             "slogan": "NPR Public Radio from New York to the World"
+        },
+        {
+            "name": "102.7 KIIS FM",
+            "url": "https://stream.revma.ihrhls.com/zc185",
+            "genre": "Pop",
+            "slogan": "Top 40"
+        },
+        {
+            "name": "Radio Paradise Main Mix",
+            "url": "http://stream-uk1.radioparadise.com/aac-320",
+            "genre": "Eclectic",
+            "slogan": "Listener-supported eclectic radio"
+        },
+        {
+            "name": "101 Smooth Jazz",
+            "url": "http://jking.cdnstream1.com/b22139_128mp3",
+            "genre": "Smooth Jazz",
+            "slogan": "Smooth jazz and easy listening"
+        },
+        {
+            "name": "CNN",
+            "url": "https://tunein.cdnstream1.com/2868_96.mp3",
+            "genre": "News",
+            "slogan": "CNN news audio"
+        },
+        {
+            "name": "Z100 - New York's #1 Hit Music Station",
+            "url": "https://stream.revma.ihrhls.com/zc1469",
+            "genre": "Pop",
+            "slogan": "WHTZ New York"
+        },
+        {
+            "name": "Fox News Radio",
+            "url": "https://live.amperwave.net/direct/foxnewsradio-foxnewsradioaac-imc?source=fnr.web",
+            "genre": "News",
+            "slogan": "Fox News audio"
+        },
+        {
+            "name": "NPR 24 Hour Program Stream",
+            "url": "http://npr-ice.streamguys1.com/live.mp3",
+            "genre": "Public Radio",
+            "slogan": "National Public Radio programs around the clock"
+        },
+        {
+            "name": "The Big 80s Station",
+            "url": "http://158.69.114.190:8065/;",
+            "genre": "80s",
+            "slogan": "All 80s, all the time"
+        },
+        {
+            "name": "181.FM - Old School HipHop/RnB",
+            "url": "http://listen.181fm.com/181-oldschool_128k.mp3",
+            "genre": "Hip-Hop & R&B",
+            "slogan": "Old-school hip-hop and R&B"
+        },
+        {
+            "name": ".977 80s",
+            "url": "http://17573.live.streamtheworld.com/977_80_SC",
+            "genre": "80s",
+            "slogan": "The 80s channel"
+        },
+        {
+            "name": "SomaFM Groove Salad",
+            "url": "https://ice5.somafm.com/groovesalad-128-mp3",
+            "genre": "Ambient",
+            "slogan": "Chillout, downtempo and lounge"
+        },
+        {
+            "name": "Christmas Vinyl HD",
+            "url": "https://icecast.walmradio.com:8443/christmas",
+            "genre": "Christmas",
+            "slogan": "Seasonal and vintage holiday music"
+        },
+        {
+            "name": "MSNBC",
+            "url": "https://tunein.cdnstream1.com/3511_96.mp3",
+            "genre": "News",
+            "slogan": "MSNBC news audio"
+        },
+        {
+            "name": "WALM HD",
+            "url": "https://icecast.walmradio.com:8443/walm",
+            "genre": "Christian",
+            "slogan": "Contemporary Christian music"
+        },
+        {
+            "name": ".977 Country",
+            "url": "http://26343.live.streamtheworld.com/977_COUNTRY_SC",
+            "genre": "Country",
+            "slogan": "Today's country hits"
+        },
+        {
+            "name": "Ambient Sleeping Pill",
+            "url": "http://radio.stereoscenic.com/asp-h",
+            "genre": "Ambient",
+            "slogan": "Ambient music for sleep and meditation"
+        },
+        {
+            "name": "WALM 2 HD",
+            "url": "https://icecast.walmradio.com:8443/walm2",
+            "genre": "Christian",
+            "slogan": "Traditional Christian music and talk"
+        },
+        {
+            "name": "Classic Vinyl HD",
+            "url": "https://icecast.walmradio.com:8443/classic_opus",
+            "genre": "Easy Listening",
+            "slogan": "Classic hits, jazz and light orchestral music"
+        },
+        {
+            "name": "SomaFM Secret Agent",
+            "url": "https://ice6.somafm.com/secretagent-128-mp3",
+            "genre": "Lounge",
+            "slogan": "Downtempo jazz and lounge"
+        },
+        {
+            "name": "Hard Rock Radio FM",
+            "url": "http://67.249.184.45:8015/",
+            "genre": "Hard Rock",
+            "slogan": "80s and 90s hard rock and heavy metal"
+        },
+        {
+            "name": "Classic Hits Radio",
+            "url": "https://radiopanther.radiolebowski.com/play",
+            "genre": "Classic Hits",
+            "slogan": "70s and 80s disco, funk, soul and boogie"
+        },
+        {
+            "name": "Jazz24",
+            "url": "https://knkx-live-a.edge.audiocdn.com/6285_256k",
+            "genre": "Jazz",
+            "slogan": "Jazz from KNKX Public Radio"
+        },
+        {
+            "name": "Infowars",
+            "url": "http://stream-mp3.infowars.com/",
+            "genre": "Talk",
+            "slogan": "Talk radio"
+        },
+        {
+            "name": "Your Classical - Relax",
+            "url": "http://relax.stream.publicradio.org/relax.mp3",
+            "genre": "Classical",
+            "slogan": "Peaceful classical music"
+        },
+        {
+            "name": "WALM - Old Time Radio",
+            "url": "https://icecast.walmradio.com:8443/otr_opus",
+            "genre": "Old Time Radio",
+            "slogan": "Classic comedy, drama and mystery"
+        },
+        {
+            "name": "Adroit Jazz Underground HD",
+            "url": "https://icecast.walmradio.com:8443/jazz_opus",
+            "genre": "Jazz",
+            "slogan": "Modern, contemporary and straight-ahead jazz"
+        },
+        {
+            "name": "Lofi 24/7",
+            "url": "http://usa9.fastcast4u.com/proxy/jamz?mp=/1",
+            "genre": "Lofi",
+            "slogan": "Lofi and chillout"
+        },
+        {
+            "name": "181.FM - The Beat",
+            "url": "http://listen.181fm.com/181-beat_128k.mp3",
+            "genre": "Hip-Hop & R&B",
+            "slogan": "Hip-hop, R&B and urban music"
+        },
+        {
+            "name": ".977 Hitz",
+            "url": "http://18863.live.streamtheworld.com/977_HITS_SC",
+            "genre": "Top 40",
+            "slogan": "Today's hit music"
         }
     ]
 }
