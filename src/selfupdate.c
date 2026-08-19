@@ -11,6 +11,8 @@
 #include <zip.h>
 
 #include "include/parson/parson.h"
+#include "defines.h"
+#include "api.h"
 
 // Paths
 static char pak_path[512] = "";
@@ -271,6 +273,15 @@ void SelfUpdate_update(void) {
 
 bool SelfUpdate_isPendingRestart(void) {
     return update_status.state == SELFUPDATE_STATE_COMPLETED;
+}
+
+void SelfUpdate_requestRestart(void) {
+    FILE* f = fopen(SELFUPDATE_RESTART_FLAG, "w");
+    if (!f) {
+        LOG_error("Could not write %s, app will not restart itself\n", SELFUPDATE_RESTART_FLAG);
+        return;
+    }
+    fclose(f);
 }
 
 SelfUpdateState SelfUpdate_getState(void) {
@@ -670,7 +681,7 @@ static void* update_thread_func(void* arg) {
     system(cmd);
 
     update_status.progress_percent = 100;
-    strcpy(update_status.status_message, "Update complete! Restart to apply.");
+    strcpy(update_status.status_message, "Update complete!");
     update_status.state = SELFUPDATE_STATE_COMPLETED;
     update_running = false;
 

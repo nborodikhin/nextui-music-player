@@ -196,7 +196,9 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
 
                 if (update_state == SELFUPDATE_STATE_COMPLETED) {
                     if (PAD_justPressed(BTN_A)) {
-                        // Quit to apply update
+                        // The new binary is already on disk; exiting with the
+                        // flag set lets launch.sh bring it straight back up
+                        SelfUpdate_requestRestart();
                         ModuleCommon_setAutosleepDisabled(false);
                         return MODULE_EXIT_QUIT;
                     }

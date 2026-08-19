@@ -11,6 +11,9 @@
 #include "selfupdate.h"
 #include "qr_code_data.h"
 
+// Ceiling on wrapped release-note lines; the screen usually allows fewer
+#define MAX_NOTE_LINES 16
+
 // Render the app update screen
 void render_app_updating(SDL_Surface* screen, int show_setting) {
     GFX_clear(screen);
@@ -37,11 +40,26 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         SDL_FreeSurface(ver_text);
     }
 
+    // Anchors for everything below the notes, shared so the notes can measure
+    // against whichever of them is actually on screen
+    int bar_y = hh - SCALE1(PILL_SIZE + PADDING * 10);
+    int status_y = hh - SCALE1(PILL_SIZE + PADDING * 6);
+    bool bar_visible = (state == SELFUPDATE_STATE_DOWNLOADING ||
+                        state == SELFUPDATE_STATE_EXTRACTING ||
+                        state == SELFUPDATE_STATE_APPLYING);
+
     // Release notes area with word wrapping (positioned right below version info)
+    int notes_x = SCALE1(PADDING * 3);
     int notes_y = ver_y + SCALE1(30);
-    int notes_max_lines = 5;
     int line_height = SCALE1(18);
     int max_line_width = hw - SCALE1(PADDING * 6);
+
+    // Fill the space the screen actually has rather than a fixed count: the
+    // notes run down to whatever comes next, one padding gap short of it
+    int notes_bottom = (bar_visible ? bar_y : status_y) - SCALE1(PADDING);
+    int notes_max_lines = (notes_bottom - notes_y) / line_height;
+    if (notes_max_lines > MAX_NOTE_LINES) notes_max_lines = MAX_NOTE_LINES;
+    if (notes_max_lines < 1) notes_max_lines = 1;
 
     if (strlen(status->release_notes) > 0 && state != SELFUPDATE_STATE_CHECKING) {
         // Word-wrap release notes
@@ -49,49 +67,64 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         strncpy(notes_copy, status->release_notes, sizeof(notes_copy) - 1);
         notes_copy[sizeof(notes_copy) - 1] = '\0';
 
-        // Replace newlines with spaces for continuous wrapping
+        // Carriage returns are noise; newlines are the author's structure
         for (int i = 0; notes_copy[i]; i++) {
-            if (notes_copy[i] == '\n' || notes_copy[i] == '\r') notes_copy[i] = ' ';
+            if (notes_copy[i] == '\r') notes_copy[i] = ' ';
         }
 
-        char wrapped_lines[5][128];
+        char wrapped_lines[MAX_NOTE_LINES][128];
         int line_count = 0;
         char* src = notes_copy;
 
+        // Each newline is a hard break, and every line is wrapped on its own,
+        // so a bullet list stays a bullet list. Blank lines are skipped rather
+        // than spent - only notes_max_lines fit on screen.
         while (*src && line_count < notes_max_lines) {
-            // Skip leading spaces
-            while (*src == ' ') src++;
-            if (!*src) break;
+            char* break_at = strchr(src, '\n');
+            size_t segment_len = break_at ? (size_t)(break_at - src) : strlen(src);
 
-            // Find how many characters fit in max_line_width
-            char test_line[128] = "";
-            int char_count = 0;
-            int last_space = -1;
+            char segment[512];
+            if (segment_len >= sizeof(segment)) segment_len = sizeof(segment) - 1;
+            memcpy(segment, src, segment_len);
+            segment[segment_len] = '\0';
 
-            while (src[char_count] && char_count < 127) {
-                test_line[char_count] = src[char_count];
-                test_line[char_count + 1] = '\0';
+            char* seg = segment;
+            while (*seg && line_count < notes_max_lines) {
+                // Skip leading spaces
+                while (*seg == ' ') seg++;
+                if (!*seg) break;
 
-                if (src[char_count] == ' ') last_space = char_count;
+                // Find how many characters fit in max_line_width
+                char test_line[128] = "";
+                int char_count = 0;
+                int last_space = -1;
 
-                // Check width
-                int text_w, text_h;
-                TTF_SizeUTF8(Fonts_getSmall(), test_line, &text_w, &text_h);
-                if (text_w > max_line_width) {
-                    // Line too long, break at last space or current position
-                    if (last_space > 0) {
-                        char_count = last_space;
+                while (seg[char_count] && char_count < 127) {
+                    test_line[char_count] = seg[char_count];
+                    test_line[char_count + 1] = '\0';
+
+                    if (seg[char_count] == ' ') last_space = char_count;
+
+                    int text_w, text_h;
+                    TTF_SizeUTF8(Fonts_getSmall(), test_line, &text_w, &text_h);
+                    if (text_w > max_line_width) {
+                        // Line too long, break at last space or current position
+                        if (last_space > 0) {
+                            char_count = last_space;
+                        }
+                        break;
                     }
-                    break;
+                    char_count++;
                 }
-                char_count++;
+
+                strncpy(wrapped_lines[line_count], seg, char_count);
+                wrapped_lines[line_count][char_count] = '\0';
+                seg += char_count;
+                line_count++;
             }
 
-            // Copy the line
-            strncpy(wrapped_lines[line_count], src, char_count);
-            wrapped_lines[line_count][char_count] = '\0';
-            src += char_count;
-            line_count++;
+            if (!break_at) break;
+            src = break_at + 1;
         }
 
         // Render wrapped lines
@@ -99,7 +132,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
             if (strlen(wrapped_lines[i]) > 0) {
                 SDL_Surface* line_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), wrapped_lines[i], COLOR_WHITE);
                 if (line_text) {
-                    SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){(hw - line_text->w) / 2, notes_y + i * line_height});
+                    SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){notes_x, notes_y + i * line_height});
                     SDL_FreeSurface(line_text);
                 }
             }
@@ -119,7 +152,6 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         int bar_w = hw - SCALE1(PADDING * 8);
         int bar_h = SCALE1(12);
         int bar_x = SCALE1(PADDING * 4);
-        int bar_y = hh - SCALE1(PILL_SIZE + PADDING * 10);
 
         // Background
         SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
@@ -171,7 +203,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
         SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status_msg, status_color);
         if (status_text) {
-            SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh - SCALE1(PILL_SIZE + PADDING * 6)});
+            SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, status_y});
             SDL_FreeSurface(status_text);
         }
     }

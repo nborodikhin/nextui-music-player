@@ -25,8 +25,8 @@ echo conservative > "$CPU_FREQ/scaling_governor"
 cat "$CPU_FREQ/cpuinfo_min_freq" > "$CPU_FREQ/scaling_min_freq"
 cat "$CPU_FREQ/cpuinfo_max_freq" > "$CPU_FREQ/scaling_max_freq"
 
-# Development hook:
-# - if the restart flag file is present when app exits, restart the app.
+# Restart hook: if the flag file is present when the app exits, launch it again.
+# Used to bring the app back up after a self-update, and by ./dev install --run.
 RESTART_FLAG_FILE=/tmp/nextui-music-player.restart
 
 while :; do

@@ -4,6 +4,9 @@
 #include <stdbool.h>
 
 // GitHub repository (format: "owner/repo")
+// Watched by launch.sh: present when the app exits means launch it again
+#define SELFUPDATE_RESTART_FLAG "/tmp/nextui-music-player.restart"
+
 #define APP_GITHUB_REPO "nborodikhin/nextui-music-player"
 
 // Release asset name pattern (the .pak.zip file)
@@ -70,6 +73,11 @@ void SelfUpdate_update(void);
 
 // Check if restart is required to apply update
 bool SelfUpdate_isPendingRestart(void);
+
+// Touch the flag launch.sh watches for, so the app comes back up by itself
+// after it exits. Without it the user is dropped back to NextUI and has to
+// launch again by hand.
+void SelfUpdate_requestRestart(void);
 
 // Get current state
 SelfUpdateState SelfUpdate_getState(void);
