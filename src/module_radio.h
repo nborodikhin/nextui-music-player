@@ -2,8 +2,9 @@
 #define __MODULE_RADIO_H__
 
 #include <SDL2/SDL.h>
+
+#include "display_helper.h"
 #include "module_common.h"
-typedef struct DisplayContext DisplayContext;
 
 // Run the online radio module
 // Handles: Station list, playback, adding stations from curated list

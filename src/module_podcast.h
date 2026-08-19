@@ -3,8 +3,9 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+
+#include "display_helper.h"
 #include "module_common.h"
-typedef struct DisplayContext DisplayContext;
 
 // Run the podcast module
 // Handles: Subscriptions, search, top shows, episodes, playback

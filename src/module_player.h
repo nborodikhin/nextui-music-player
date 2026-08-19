@@ -3,10 +3,11 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+
+#include "display_helper.h"
 #include "module_common.h"
 #include "playlist.h"
 #include "resume.h"
-typedef struct DisplayContext DisplayContext;
 
 // Run the local files player module
 // Handles: File browser, music playback, playlist, shuffle/repeat

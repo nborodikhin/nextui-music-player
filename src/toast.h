@@ -4,9 +4,9 @@
 #include <stdbool.h>
 
 #include "api.h"
-#include "toast_types.h"
 
-typedef struct DisplayContext DisplayContext;
+#include "display_helper.h"
+#include "toast_types.h"
 
 // Toast is a transient message shown at the bottom of the screen, rendered as
 // a GPU layer of its own above all other content. At most one toast exists
