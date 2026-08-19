@@ -66,6 +66,15 @@ static char resume_playlist_path[512] = "";
 // Resume: last save timestamp for periodic updates
 static uint32_t last_resume_save = 0;
 
+// A display recreate drops every GPU layer. The scrolling title and spectrum
+// come back with the next render of the playing screen, and the elapsed time
+// repaints as soon as the position moves again - but the lyric cache would still
+// match the vanished layer, so drop both caches to force one repaint.
+static void display_recreated(void) {
+    PlayTime_invalidate();
+    Lyrics_invalidateGPU();
+}
+
 
 // Clear all player GPU overlay layers
 static void clear_gpu_layers(void) {
@@ -96,7 +105,17 @@ static void init_player(void) {
     mkdir(MUSIC_PATH, 0755);
     load_directory(MUSIC_PATH);
     nav_stack_top = 0;
+    DisplayHelper_addRecreatedCallback(display_recreated);
     initialized = true;
+}
+
+void PlayerModule_quit(void) {
+    if (!initialized) return;
+
+    DisplayHelper_removeRecreatedCallback(display_recreated);
+    Browser_freeEntries(&browser);
+    Playlist_free(&playlist);
+    initialized = false;
 }
 
 // Try to load and play a track, returns true on success
@@ -193,6 +212,22 @@ static bool handle_track_ended(void) {
         return playlist_try_play(next_idx);
     }
     return browser_pick_next();
+}
+
+static void refresh_gpu_layers(int* dirty) {
+    if (ModuleCommon_isScreenOffHintActive()) return;
+
+    bool repaint_layer = false;
+
+    if (player_needs_scroll_refresh()) repaint_layer = true;
+    if (player_title_scroll_needs_render()) *dirty = 1;
+    if (Spectrum_needsRefresh()) {
+        Spectrum_update();
+        repaint_layer = true;
+    }
+    if (repaint_layer) paint_player_layer();
+    if (PlayTime_needsRefresh()) PlayTime_renderGPU();
+    if (Lyrics_GPUneedsRefresh()) Lyrics_renderGPU();
 }
 
 // Start playback of a track (load + play + init spectrum)
@@ -542,28 +577,12 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     // Re-render when async album art fetch completes
     if (album_art_is_fetching()) *dirty = 1;
 
-    // Animate player GPU layers (skip if screen-off hint just activated)
-    if (!ModuleCommon_isScreenOffHintActive()) {
-        bool repaint_layer = false;
-        if (player_needs_scroll_refresh()) repaint_layer = true;
-        if (player_title_scroll_needs_render()) *dirty = 1;
-        if (Spectrum_needsRefresh()) {
-            Spectrum_update();
-            repaint_layer = true;
-        }
-        if (repaint_layer) paint_player_layer();
-        if (PlayTime_needsRefresh()) {
-            PlayTime_renderGPU();
-        }
-        if (Lyrics_GPUneedsRefresh()) {
-            Lyrics_renderGPU();
-        }
-    }
+    refresh_gpu_layers(dirty);
 
     return false;
 }
 
-ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
+ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entry) {
     init_player();
     load_directory(browser.current_path[0] ? browser.current_path : MUSIC_PATH);
 
@@ -587,15 +606,11 @@ ModuleExitReason PlayerModule_run(SDL_Surface* screen, bool now_playing_entry) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
             if (AddToPlaylist_handleInput()) {
-                // TG5050: keyboard in add-to-playlist may have triggered display recovery
-				{
-					SDL_Surface* ns = DisplayHelper_getReinitScreen();
-					if (ns) screen = ns;
-				}
                 // Dialog closed — skip rest of input to avoid double-handling buttons
                 dirty = 1;
                 continue;
@@ -737,11 +752,13 @@ void PlayerModule_prevTrack(void) {
 }
 
 // Run the player directly with a pre-built playlist (from PlaylistModule)
-ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
+ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                                               PlaylistTrack* tracks,
                                               int track_count,
                                               int start_index) {
     if (!tracks || track_count <= 0) return MODULE_EXIT_TO_MENU;
+
+    init_player();
 
     // Set up the playlist context
     Playlist_free(&playlist);
@@ -770,15 +787,11 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle add-to-playlist dialog overlay
         if (AddToPlaylist_isActive()) {
             if (AddToPlaylist_handleInput()) {
-                // TG5050: keyboard in add-to-playlist may have triggered display recovery
-				{
-					SDL_Surface* ns = DisplayHelper_getReinitScreen();
-					if (ns) screen = ns;
-				}
                 // Dialog closed — skip rest of input to avoid double-handling buttons
                 dirty = 1;
                 continue;
@@ -952,23 +965,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(SDL_Surface* screen,
             dirty = 1;
         }
 
-        // Animate player GPU layers
-        if (!ModuleCommon_isScreenOffHintActive()) {
-            bool repaint_layer = false;
-            if (player_needs_scroll_refresh()) repaint_layer = true;
-            if (player_title_scroll_needs_render()) dirty = 1;
-            if (Spectrum_needsRefresh()) {
-                Spectrum_update();
-                repaint_layer = true;
-            }
-            if (repaint_layer) paint_player_layer();
-            if (PlayTime_needsRefresh()) {
-                PlayTime_renderGPU();
-            }
-            if (Lyrics_GPUneedsRefresh()) {
-                Lyrics_renderGPU();
-            }
-        }
+        refresh_gpu_layers(&dirty);
 
         // Handle power management
         if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
@@ -1001,7 +998,7 @@ void PlayerModule_setResumePlaylistPath(const char* m3u_path) {
 }
 
 // Run player restoring a saved resume state
-ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* resume) {
+ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeState* resume) {
     if (!resume) return MODULE_EXIT_TO_MENU;
 
     if (resume->type == RESUME_TYPE_FILES) {
@@ -1046,15 +1043,11 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
 
         while (1) {
             ModuleCommon_frameBegin();
+            SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
             // Handle add-to-playlist dialog overlay
             if (AddToPlaylist_isActive()) {
                 if (AddToPlaylist_handleInput()) {
-                    // TG5050: keyboard in add-to-playlist may have triggered display recovery
-					{
-						SDL_Surface* ns = DisplayHelper_getReinitScreen();
-						if (ns) screen = ns;
-					}
                     dirty = 1;
                     continue;
                 }
@@ -1140,7 +1133,7 @@ ModuleExitReason PlayerModule_runResume(SDL_Surface* screen, const ResumeState* 
         PlayerModule_setResumePlaylistPath(resume->playlist_path);
 
         // Run with the playlist
-        ModuleExitReason reason = PlayerModule_runWithPlaylist(screen, m3u_tracks, m3u_count, start_idx);
+        ModuleExitReason reason = PlayerModule_runWithPlaylist(display, m3u_tracks, m3u_count, start_idx);
 
         resume_playlist_path[0] = '\0';
         return reason;

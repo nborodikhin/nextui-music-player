@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "downloader.h"
 #include "keyboard.h"
-#include "display_helper.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1390,14 +1389,6 @@ void Downloader_loadQueue(void) {
 
 const char* Downloader_getDownloadPath(void) {
     return download_dir;
-}
-
-char* Downloader_openKeyboard(const char* prompt) {
-    // TG5050: release display before keyboard (external binary takes DRM master)
-	DisplayHelper_prepareForExternal();
-	char* result = Keyboard_open(prompt);
-	DisplayHelper_recoverDisplay();
-	return result;
 }
 
 static void sanitize_filename(const char* input, char* output, size_t max_len) {

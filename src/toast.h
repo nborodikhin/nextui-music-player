@@ -4,6 +4,8 @@
 #include <stdbool.h>
 
 #include "api.h"
+
+#include "display_helper.h"
 #include "toast_types.h"
 
 // Toast is a transient message shown at the bottom of the screen, rendered as
@@ -34,16 +36,13 @@ void Toast_dismiss(ToastToken token);
 // Toast system API
 // ============================================
 
+void Toast_init(DisplayContext* display);
+void Toast_quit(void);
+
 // Should be called on every tick, used for managing toast durations.
 void Toast_tick(void);
 
-// The surface toasts are positioned against.
-void Toast_setSurface(SDL_Surface* screen);
-
 // Should be called when screen changes, used for managing screen-bound toasts.
 void Toast_screenChanged(void);
-
-// Repaint the current toast, for when something else has dropped GPU layers.
-void Toast_redraw(void);
 
 #endif

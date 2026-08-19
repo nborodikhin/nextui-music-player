@@ -13,6 +13,7 @@
 #include "ui_fonts.h"
 #include "list_nav.h"
 #include "list_nav_pad.h"
+#include "display_helper.h"
 
 // Library submenu items
 #define LIBRARY_FILES       0
@@ -39,7 +40,7 @@ static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_
     render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
 }
 
-ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
+ModuleExitReason LibraryModule_run(DisplayContext* display) {
     ListNav nav = {
         .selected = 0,
         .scroll = 0,
@@ -51,6 +52,7 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, LIBRARY_MENU_HELP_STATE);
@@ -73,13 +75,13 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
 
             switch (nav.selected) {
                 case LIBRARY_FILES:
-                    reason = PlayerModule_run(screen, false);  // File browser entry
+                    reason = PlayerModule_run(display, false);  // File browser entry
                     break;
                 case LIBRARY_PLAYLISTS:
-                    reason = PlaylistModule_run(screen);
+                    reason = PlaylistModule_run(display);
                     break;
                 case LIBRARY_DOWNLOADER:
-                    reason = DownloaderModule_run(screen);
+                    reason = DownloaderModule_run(display);
                     break;
             }
 
@@ -87,8 +89,10 @@ ModuleExitReason LibraryModule_run(SDL_Surface* screen) {
                 return MODULE_EXIT_QUIT;
             }
 
-            // Sub-module returned to library menu
+            // Sub-module returned to library menu. Start a fresh frame: it may
+            // have recreated the display, freeing this frame's surface.
             dirty = 1;
+            continue;
         }
         else if (PAD_justPressed(BTN_B)) {
             return MODULE_EXIT_TO_MENU;

@@ -152,7 +152,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     *dirty = 1;
 }
 
-ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
+ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
     Keyboard_init();
 
@@ -183,6 +183,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -393,16 +394,7 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                             dirty = 1;
                             break;
                         }
-                        DisplayHelper_prepareForExternal();
                         char* query = Keyboard_open("Search podcasts");
-                        PAD_poll(); PAD_reset();
-                        DisplayHelper_recoverDisplay();
-					{
-						SDL_Surface* ns = DisplayHelper_getReinitScreen();
-						if (ns) screen = ns;
-					}
-                        SDL_Delay(100);
-                        PAD_poll(); PAD_reset();
                         if (query && query[0]) {
                             strncpy(podcast_search_query, query, sizeof(podcast_search_query) - 1);
                             Podcast_startSearch(podcast_search_query);
@@ -410,8 +402,10 @@ ModuleExitReason PodcastModule_run(SDL_Surface* screen) {
                             state = PODCAST_INTERNAL_SEARCH_RESULTS;
                         }
                         if (query) free(query);
+                        // The keyboard may have recreated the display,
+                        // use continue to restart the loop to begin a fresh frame.
                         dirty = 1;
-                        break;
+                        continue;
                     }
                     case PODCAST_MANAGE_TOP_SHOWS:
                         if (!Wifi_ensureConnected(screen, show_setting)) {

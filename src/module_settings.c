@@ -2,6 +2,7 @@
 #include "api.h"
 #include "module_common.h"
 #include "module_settings.h"
+#include "display_helper.h"
 #include "ui_main.h"
 #include "settings.h"
 #include "selfupdate.h"
@@ -28,7 +29,7 @@ typedef enum {
 #define SETTINGS_INTERNAL_MENU      40
 #define SETTINGS_INTERNAL_ABOUT     41
 
-ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
+ModuleExitReason SettingsModule_run(DisplayContext* display) {
     SettingsState state = SETTINGS_STATE_MENU;
     ListNav nav = {
         .selected           = 0,
@@ -41,6 +42,7 @@ ModuleExitReason SettingsModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input first
         int app_state = (state == SETTINGS_STATE_MENU) ? SETTINGS_INTERNAL_MENU : SETTINGS_INTERNAL_ABOUT;

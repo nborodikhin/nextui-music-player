@@ -5,6 +5,7 @@
 #include "api.h"
 #include "module_common.h"
 #include "module_menu.h"
+#include "display_helper.h"
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "resume.h"
@@ -37,7 +38,7 @@ static MenuSelection menu_playing_item(void) {
     return MENU_NONE;
 }
 
-MenuSelection MenuModule_run(SDL_Surface* screen) {
+MenuSelection MenuModule_run(DisplayContext* display) {
     ListNav nav = {
         .selected = 0,
         .scroll = 0,
@@ -57,6 +58,7 @@ MenuSelection MenuModule_run(SDL_Surface* screen) {
 
     while (1) {
         ModuleCommon_frameBegin();
+        SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle background player updates (track advancement, resume saving)
         Background_tick();
