@@ -17,8 +17,13 @@
 #include "defines.h"
 #include "api.h"
 
+// Identifies the app to GitHub on every fetch
+#define HTTP_USER_AGENT "NextUI-Music-Player"
+
 // Paths
 static char ytdlp_path[512] = "";
+static char qjs_path[512] = "";
+static char ffmpeg_path[512] = "";
 static char download_dir[512] = "";
 static char queue_file[512] = "";
 static char version_file[512] = "";
@@ -58,8 +63,11 @@ static int search_max_results = DOWNLOADER_MAX_RESULTS;
 
 // Current yt-dlp version
 static char current_version[32] = "unknown";
+static bool paths_ready = false;
 
 // Forward declarations
+static bool ytdlp_present(void);
+static bool ffmpeg_present(void);
 static void* download_thread_func(void* arg);
 static void* update_thread_func(void* arg);
 static void* search_thread_func(void* arg);
@@ -107,72 +115,106 @@ static void clean_title(char* title) {
     title[511] = '\0';
 }
 
-int Downloader_init(void) {
-    if (youtube_initialized) return 0;  // Already initialized
+// Set up paths and directories that do not depend on the binary being present.
+// Safe to call repeatedly; only the first call does the work.
+static void ensure_paths(void) {
+    if (paths_ready) return;
 
     // Pak directory is current working directory (launch.sh sets cwd to pak folder)
     strncpy(pak_path, ".", sizeof(pak_path) - 1);
     pak_path[sizeof(pak_path) - 1] = '\0';
 
-    // Verify yt-dlp binary exists
-    if (access("./bin/yt-dlp", F_OK) != 0) {
-        LOG_error("yt-dlp binary not found\n");
-        strncpy(error_message, "yt-dlp not found", sizeof(error_message) - 1);
-        error_message[sizeof(error_message) - 1] = '\0';
-        return -1;
-    }
-
-    // Set paths
     snprintf(ytdlp_path, sizeof(ytdlp_path), "%s/bin/yt-dlp", pak_path);
+    snprintf(qjs_path, sizeof(qjs_path), "%s/bin/qjs", pak_path);
+    snprintf(ffmpeg_path, sizeof(ffmpeg_path), "%s/bin/ffmpeg", pak_path);
     snprintf(version_file, sizeof(version_file), "%s/state/yt-dlp_version.txt", pak_path);
     snprintf(queue_file, sizeof(queue_file), "%s/state/youtube_queue.txt", pak_path);
     snprintf(download_dir, sizeof(download_dir), "%s/Music/Downloaded", SDCARD_PATH);
 
-    // Ensure binaries are executable
-    chmod(ytdlp_path, 0755);
-
-    // Initialize keyboard module
     Keyboard_init();
 
-    // Create music directories if needed
     char music_dir[512];
     snprintf(music_dir, sizeof(music_dir), "%s/Music", SDCARD_PATH);
     mkdir(music_dir, 0755);
     mkdir(download_dir, 0755);
 
-    // Load current version from version file first
+    Downloader_loadQueue();
+
+    paths_ready = true;
+}
+
+void Downloader_refreshVersion(void) {
+    ensure_paths();
+
+    // Without a binary there is no version to report, whatever the version
+    // file claims - it outlives the binary it describes.
+    if (!ytdlp_present()) {
+        strncpy(current_version, DOWNLOADER_VERSION_NOT_INSTALLED, sizeof(current_version) - 1);
+        current_version[sizeof(current_version) - 1] = '\0';
+        unlink(version_file);
+        return;
+    }
+
+    current_version[0] = '\0';
+
     FILE* f = fopen(version_file, "r");
     if (f) {
         if (fgets(current_version, sizeof(current_version), f)) {
-            // Remove newline
             char* nl = strchr(current_version, '\n');
             if (nl) *nl = '\0';
         }
         fclose(f);
     }
 
-    // If version is still unknown, try to get it from yt-dlp --version
-    if (strcmp(current_version, "unknown") == 0) {
+    // No cached version, or one left behind by a binary that is no longer
+    // there: ask the binary itself and cache the answer.
+    if (current_version[0] == '\0' ||
+        strcmp(current_version, "unknown") == 0 ||
+        strcmp(current_version, DOWNLOADER_VERSION_NOT_INSTALLED) == 0) {
+        strncpy(current_version, "unknown", sizeof(current_version) - 1);
+        current_version[sizeof(current_version) - 1] = '\0';
+
         char cmd[600];
         snprintf(cmd, sizeof(cmd), "%s --version 2>/dev/null", ytdlp_path);
         FILE* pipe = popen(cmd, "r");
         if (pipe) {
-            if (fgets(current_version, sizeof(current_version), pipe)) {
-                char* nl = strchr(current_version, '\n');
+            char probed[32] = "";
+            if (fgets(probed, sizeof(probed), pipe)) {
+                char* nl = strchr(probed, '\n');
                 if (nl) *nl = '\0';
-                // Save to version file for future
+            }
+            pclose(pipe);
+
+            if (probed[0] != '\0') {
+                strncpy(current_version, probed, sizeof(current_version) - 1);
+                current_version[sizeof(current_version) - 1] = '\0';
                 FILE* vf = fopen(version_file, "w");
                 if (vf) {
                     fprintf(vf, "%s\n", current_version);
                     fclose(vf);
                 }
             }
-            pclose(pipe);
         }
     }
+}
 
-    // Load queue from file
-    Downloader_loadQueue();
+int Downloader_init(void) {
+    ensure_paths();
+    Downloader_refreshVersion();
+
+    // The binary is installed on demand, so its absence is an ordinary state:
+    // paths stay valid and a later install can finish initialization without
+    // restarting the app.
+    if (!Downloader_isAvailable()) {
+        strncpy(error_message, "Youtube download helpers not installed", sizeof(error_message) - 1);
+        error_message[sizeof(error_message) - 1] = '\0';
+        return -1;
+    }
+
+    if (youtube_initialized) return 0;
+
+    error_message[0] = '\0';
+    chmod(ytdlp_path, 0755);
 
     // Auto-resume pending downloads if queue has items and network is available
     if (queue_count > 0 && Downloader_checkNetwork()) {
@@ -201,8 +243,52 @@ void Downloader_cleanup(void) {
     Downloader_saveQueue();
 }
 
-bool Downloader_isAvailable(void) {
+// yt-dlp alone; the version file describes this binary
+static bool ytdlp_present(void) {
     return access(ytdlp_path, X_OK) == 0;
+}
+
+// The JS interpreter is only ever ours: nothing in the firmware provides it
+static bool qjs_present(void) {
+    return access(qjs_path, X_OK) == 0;
+}
+
+// Where the firmware keeps ffmpeg, "" once we have looked and found none.
+// The lookup costs a fork and the answer cannot change under us, so it is
+// resolved once - this is reached from menu rendering.
+static char system_ffmpeg[512] = "";
+static bool system_ffmpeg_resolved = false;
+
+// The ffmpeg yt-dlp should run: ours when installed, else the firmware's.
+// Empty when there is none. Our copy is checked first and costs no fork, so an
+// install is picked up immediately without invalidating anything.
+static const char* ffmpeg_command(void) {
+    if (access(ffmpeg_path, X_OK) == 0) return ffmpeg_path;
+
+    if (!system_ffmpeg_resolved) {
+        system_ffmpeg_resolved = true;
+        FILE* pipe = popen("command -v ffmpeg 2>/dev/null", "r");
+        if (pipe) {
+            if (fgets(system_ffmpeg, sizeof(system_ffmpeg), pipe)) {
+                char* nl = strchr(system_ffmpeg, '\n');
+                if (nl) *nl = '\0';
+            }
+            pclose(pipe);
+        }
+    }
+    return system_ffmpeg;
+}
+
+// The firmware normally provides ffmpeg; ours is only a fallback for images
+// that do not. Returns true when either is usable.
+static bool ffmpeg_present(void) {
+    return ffmpeg_command()[0] != '\0';
+}
+
+// yt-dlp needs an interpreter to solve YouTube's JS challenges and ffmpeg to
+// repackage and tag what it downloads, so all three must be in place.
+bool Downloader_isAvailable(void) {
+    return ytdlp_present() && qjs_present() && ffmpeg_present();
 }
 
 bool Downloader_checkNetwork(void) {
@@ -655,8 +741,10 @@ static void* download_thread_func(void* arg) {
         if (access(output_file, F_OK) == 0) {
             success = true;
         } else {
-            // Build download command - download M4A directly with metadata
-            // Metadata is embedded by yt-dlp (uses mutagen, no ffmpeg needed)
+            // Build download command - audio-only itag 140 (AAC-LC in m4a),
+            // so nothing is ever merged or re-encoded. yt-dlp still shells out
+            // to ffmpeg for two stream-copy passes: repackaging the DASH
+            // container and writing the tags.
             // Album art will be fetched by player during playback
             // Force M4A only - no fallback to other formats
             // socket-timeout prevents network hangs
@@ -664,6 +752,8 @@ static void* download_thread_func(void* arg) {
             snprintf(cmd, sizeof(cmd),
                 "%s "
                 "-f \"bestaudio[ext=m4a]\" "
+                "--js-runtimes \"quickjs:%s\" "
+                "--ffmpeg-location \"%s\" "
                 "--embed-metadata "
                 "--socket-timeout 30 "
                 "--parse-metadata \"title:%%(artist)s - %%(title)s\" "
@@ -672,7 +762,7 @@ static void* download_thread_func(void* arg) {
                 "--no-playlist "
                 "\"https://music.youtube.com/watch?v=%s\" "
                 "2>&1",
-                ytdlp_path, temp_file, video_id);
+                ytdlp_path, qjs_path, ffmpeg_command(), temp_file, video_id);
 
 
             // Use popen to read progress in real-time
@@ -888,6 +978,273 @@ const DownloaderDownloadStatus* Downloader_getDownloadStatus(void) {
     return &download_status;
 }
 
+// Roughly what each transfer costs today, used only to weight the progress bar
+// across whatever is actually missing. ffmpeg is the long pole by far.
+#define YTDLP_EXPECTED_BYTES   40000000L
+#define QJS_EXPECTED_BYTES      2600000L
+#define FFMPEG_EXPECTED_BYTES  25600000L
+
+// The percent range the running step owns, so a download can report its own
+// 0-100 without knowing what else is queued behind it.
+static int step_base_pct = 0;
+static int step_span_pct = 0;
+
+static void begin_step(const char* message, int base_pct, int span_pct) {
+    step_base_pct = base_pct;
+    step_span_pct = span_pct;
+    update_status.progress_percent = base_pct;
+    update_status.step_index++;
+    strncpy(update_status.step_message, message, sizeof(update_status.step_message) - 1);
+    update_status.step_message[sizeof(update_status.step_message) - 1] = '\0';
+    update_status.status_detail[0] = '\0';
+    update_status.download_bytes = 0;
+    update_status.download_total = 0;
+}
+
+static void step_progress(long done, long total) {
+    if (total <= 0) return;
+    if (done > total) done = total;
+    update_status.download_bytes = done;
+    update_status.download_total = total;
+    update_status.progress_percent = step_base_pct + (int)((long long)step_span_pct * done / total);
+    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+        "%.1fMB / %.1fMB", done / (1024.0 * 1024.0), total / (1024.0 * 1024.0));
+}
+
+// Stop the transfer writing to `dest`. Matching the destination rather than the
+// user agent keeps this from killing an unrelated self-update download.
+static void stop_fetch(const char* dest) {
+    char cmd[900];
+    snprintf(cmd, sizeof(cmd), "pkill -f 'wget.*%s' 2>/dev/null", dest);
+    system(cmd);
+}
+
+// Ask the server how big the transfer is, following GitHub's redirects to the
+// CDN that actually reports a length. Returns fallback when it cannot tell.
+static long probe_download_size(const char* url, const char* temp_dir, long fallback) {
+    char cmd[1600];
+    char size_file[700];
+    snprintf(size_file, sizeof(size_file), "%s/size.txt", temp_dir);
+
+    // The last Content-Length is the CDN's, after GitHub's redirects
+    char wget_bin[600];
+    snprintf(wget_bin, sizeof(wget_bin), "%s/bin/wget", pak_path);
+    snprintf(cmd, sizeof(cmd),
+        "%s --spider -S --max-redirect=10 -T 30 -U \"%s\" \"%s\" 2>&1 "
+        "| grep -i 'Content-Length' | tail -1 | awk '{print $2}' | tr -d '\\r' > \"%s\"",
+        wget_bin, HTTP_USER_AGENT, url, size_file);
+    system(cmd);
+
+    long size = 0;
+    FILE* f = fopen(size_file, "r");
+    if (f) {
+        if (fscanf(f, "%ld", &size) != 1) size = 0;
+        fclose(f);
+    }
+    unlink(size_file);
+    return size > 100000 ? size : fallback;
+}
+
+// Fetch `url` to `dest`, driving the current step's slice of the progress bar
+// from the growing file. Returns false on cancel, transfer failure, or a file
+// that came out too small to be the real thing.
+static bool fetch_with_progress(const char* url, const char* dest,
+                                long expected_bytes, long min_bytes,
+                                const char* temp_dir) {
+    char cmd[1800];
+    char wget_bin[600];
+    char done_marker[700];
+    snprintf(wget_bin, sizeof(wget_bin), "%s/bin/wget", pak_path);
+    snprintf(done_marker, sizeof(done_marker), "%s/fetch_done.txt", temp_dir);
+    unlink(done_marker);
+
+    long total = probe_download_size(url, temp_dir, expected_bytes);
+    step_progress(0, total);
+
+    if (update_should_stop) return false;
+
+    // wget runs detached so the file size can be sampled while it works, and
+    // records its exit status: a file of plausible size proves nothing on its own
+    snprintf(cmd, sizeof(cmd),
+        "(%s -T 120 -t 3 -q -U \"%s\" -O \"%s\" \"%s\"; echo $? > \"%s\") &",
+        wget_bin, HTTP_USER_AGENT, dest, url, done_marker);
+    system(cmd);
+
+    const int poll_interval_us = 500000;
+    const int max_polls = 600 * (1000000 / poll_interval_us);  // 10 minutes
+    int elapsed_polls = 0;
+
+    while (elapsed_polls < max_polls) {
+        if (update_should_stop) {
+            stop_fetch(dest);
+            unlink(dest);
+            return false;
+        }
+        if (access(done_marker, F_OK) == 0) break;
+
+        struct stat st;
+        if (stat(dest, &st) == 0 && st.st_size > 0) {
+            step_progress(st.st_size, total);
+        }
+
+        usleep(poll_interval_us);
+        elapsed_polls++;
+    }
+
+    // Timing out only ends the wait; without this the transfer keeps running
+    // and writing to a file we are about to remove
+    if (elapsed_polls >= max_polls) {
+        stop_fetch(dest);
+    }
+
+    int fetch_exit = -1;
+    FILE* marker = fopen(done_marker, "r");
+    if (marker) {
+        if (fscanf(marker, "%d", &fetch_exit) != 1) fetch_exit = -1;
+        fclose(marker);
+    }
+    unlink(done_marker);
+
+    struct stat st;
+    if (fetch_exit != 0 || stat(dest, &st) != 0 || st.st_size < min_bytes) {
+        unlink(dest);
+        return false;
+    }
+
+    step_progress(st.st_size, st.st_size);
+    return true;
+}
+
+// yt-dlp tracks the nightly channel: YouTube changes how it serves audio every
+// few weeks, and a fix reaches nightly the same day but a stable release only
+// when one is cut. Its version is compared against state/yt-dlp_version.txt.
+#define YTDLP_RELEASE_API_URL "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest"
+#define YTDLP_ASSET_NAME "yt-dlp_linux_aarch64"
+
+// The other two are single static aarch64 binaries published as release assets,
+// so a plain fetch is enough - no version tracking, since any build yt-dlp
+// accepts will do and neither is on YouTube's moving side. ffmpeg is taken
+// gzipped: half the bytes of the 51 MB binary, and the firmware has gunzip.
+#define QJS_DOWNLOAD_URL "https://github.com/quickjs-ng/quickjs/releases/latest/download/qjs-linux-aarch64"
+#define FFMPEG_DOWNLOAD_URL "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-linux-arm64.gz"
+
+// Move `src` to `dst` durably, across filesystems: staging is on tmpfs and the
+// pak is on the SD card, so rename(2) is unusable here - it fails with EXDEV.
+// Returns true once `dst` holds the whole file and it has reached the card, at
+// which point `src` has been removed. On failure `dst` is cleaned up and `src`
+// is left untouched, so the caller still has the download to retry from.
+static bool safe_rename(const char* src, const char* dst) {
+    int in = open(src, O_RDONLY);
+    if (in < 0) return false;
+
+    int out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (out < 0) {
+        close(in);
+        return false;
+    }
+
+    char buf[64 * 1024];
+    bool ok = true;
+    ssize_t got;
+    while ((got = read(in, buf, sizeof(buf))) > 0) {
+        ssize_t done = 0;
+        while (done < got) {
+            ssize_t put = write(out, buf + done, (size_t)(got - done));
+            if (put < 0) {
+                if (errno == EINTR) continue;
+                ok = false;
+                break;
+            }
+            done += put;
+        }
+        if (!ok) break;
+    }
+    if (got < 0) ok = false;
+
+    // Without this the rename below can publish a name whose contents are still
+    // only in page cache, so losing power leaves a truncated binary in place
+    if (ok && fsync(out) != 0) ok = false;
+    if (close(out) != 0) ok = false;
+    close(in);
+
+    if (!ok) {
+        unlink(dst);
+        return false;
+    }
+    unlink(src);
+    return true;
+}
+
+// Put a staged file into place without ever leaving a partial copy at dest.
+// It lands beside the target as .new, and only a same-directory rename - atomic
+// - swaps it in.
+static bool install_staged_binary(const char* staged, const char* dest, long min_bytes) {
+    char pending[700];
+    snprintf(pending, sizeof(pending), "%s.new", dest);
+    unlink(pending);
+
+    if (!safe_rename(staged, pending)) {
+        unlink(pending);
+        return false;
+    }
+
+    struct stat st;
+    if (stat(pending, &st) != 0 || st.st_size < min_bytes) {
+        unlink(pending);
+        return false;
+    }
+
+    chmod(pending, 0755);
+    if (rename(pending, dest) != 0) {
+        unlink(pending);
+        return false;
+    }
+    return true;
+}
+
+// Fetch the interpreter that solves YouTube's JS challenges.
+static bool install_quickjs(const char* temp_dir, int base_pct, int span_pct) {
+    begin_step("Downloading qjs", base_pct, span_pct);
+
+    char staged[700];
+    snprintf(staged, sizeof(staged), "%s/qjs.new", temp_dir);
+    if (!fetch_with_progress(QJS_DOWNLOAD_URL, staged, QJS_EXPECTED_BYTES, 100000, temp_dir)) {
+        return false;
+    }
+
+    return install_staged_binary(staged, qjs_path, 100000);
+}
+
+// Fetch ffmpeg for images whose firmware has none, expanding it in place.
+static bool install_ffmpeg(const char* temp_dir, int base_pct, int span_pct) {
+    begin_step("Downloading ffmpeg", base_pct, span_pct);
+
+    char staged_gz[700];
+    char staged[700];
+    snprintf(staged_gz, sizeof(staged_gz), "%s/ffmpeg.gz", temp_dir);
+    snprintf(staged, sizeof(staged), "%s/ffmpeg.new", temp_dir);
+    if (!fetch_with_progress(FFMPEG_DOWNLOAD_URL, staged_gz, FFMPEG_EXPECTED_BYTES, 10000000, temp_dir)) {
+        return false;
+    }
+
+    strncpy(update_status.step_message, "Extracting ffmpeg",
+            sizeof(update_status.step_message) - 1);
+    update_status.status_detail[0] = '\0';
+
+    char cmd[1600];
+    snprintf(cmd, sizeof(cmd), "gunzip -c \"%s\" > \"%s\"", staged_gz, staged);
+    int rc = system(cmd);
+    unlink(staged_gz);
+
+    struct stat st;
+    if (rc != 0 || stat(staged, &st) != 0 || st.st_size < 20000000) {
+        unlink(staged);
+        return false;
+    }
+
+    return install_staged_binary(staged, ffmpeg_path, 20000000);
+}
+
 static void* update_thread_func(void* arg) {
     (void)arg;
 
@@ -936,11 +1293,12 @@ static void* update_thread_func(void* arg) {
 
     // Use timeout to prevent indefinite blocking on slow/unstable WiFi
     snprintf(cmd, sizeof(cmd),
-        "%s -q -T 30 -t 2 -U \"NextUI-Music-Player\" -O \"%s\" \"https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest\" 2>\"%s\"",
-        wget_bin, latest_file, error_file);
+        "%s -q -T 30 -t 2 -U \"%s\" -O \"%s\" "
+        "\"" YTDLP_RELEASE_API_URL "\" 2>\"%s\"",
+        wget_bin, HTTP_USER_AGENT, latest_file, error_file);
 
-    int wget_result = system(cmd);
-    if (wget_result != 0 || access(latest_file, F_OK) != 0) {
+    int fetch_result = system(cmd);
+    if (fetch_result != 0 || access(latest_file, F_OK) != 0) {
         // Copy error file to pak for debugging
         char debug_cmd[1024];
         snprintf(debug_cmd, sizeof(debug_cmd), "cp \"%s\" \"%s/state/wget_error.txt\" 2>/dev/null", error_file, pak_path);
@@ -957,7 +1315,7 @@ static void* update_thread_func(void* arg) {
                 strncpy(update_status.error_message, err_line, sizeof(update_status.error_message) - 1);
             } else {
                 snprintf(update_status.error_message, sizeof(update_status.error_message),
-                    "wget error %d", WEXITSTATUS(wget_result));
+                    "wget error %d", WEXITSTATUS(fetch_result));
             }
             fclose(ef);
         } else {
@@ -969,7 +1327,7 @@ static void* update_thread_func(void* arg) {
         return NULL;
     }
 
-    // Check for cancellation after wget
+    // Check for cancellation after the fetch
     if (update_should_stop) {
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);
@@ -1007,16 +1365,35 @@ static void* update_thread_func(void* arg) {
     strncpy(update_status.latest_version, latest_version, sizeof(update_status.latest_version));
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
 
-    // Compare versions
-    if (strcmp(latest_version, current_version) == 0) {
-        update_status.update_available = false;
-        update_status.progress_percent = 100;  // Signal completion for UI
+    // Work out what this run actually has to fetch. Any of the three can be
+    // missing on its own: an interrupted install, a pak that predates them, or
+    // simply a current yt-dlp with no interpreter beside it.
+    bool need_ytdlp  = (strcmp(latest_version, current_version) != 0);
+    bool need_qjs    = !qjs_present();
+    bool need_ffmpeg = !ffmpeg_present();
+
+    update_status.update_available = need_ytdlp;
+    update_status.step_index = 0;
+    update_status.step_count = (need_ytdlp ? 1 : 0) + (need_qjs ? 1 : 0) + (need_ffmpeg ? 1 : 0);
+
+    if (update_status.step_count == 0) {
+        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
+        system(cmd);
+        update_status.progress_percent = 100;
         update_status.updating = false;
         update_running = false;
         return NULL;
     }
 
-    // Check for cancellation before download
+    // Share the bar out by transfer size, so the 25 MB ffmpeg does not race
+    // past in the same width as the 2 MB interpreter
+    const int span_start = 20;
+    const int span_all = 78;
+    long weight_total = (need_ytdlp ? YTDLP_EXPECTED_BYTES : 0) +
+                        (need_qjs ? QJS_EXPECTED_BYTES : 0) +
+                        (need_ffmpeg ? FFMPEG_EXPECTED_BYTES : 0);
+    long weight_done = 0;
+
     if (update_should_stop) {
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);
@@ -1025,113 +1402,28 @@ static void* update_thread_func(void* arg) {
         return NULL;
     }
 
-    update_status.update_available = true;
-    update_status.progress_percent = 40;
+    if (need_ytdlp) {
+        int base = span_start + (int)((long long)span_all * weight_done / weight_total);
+        int span = (int)((long long)span_all * YTDLP_EXPECTED_BYTES / weight_total);
 
-    // Get download URL for aarch64
-    char url_cmd[1024];
-    snprintf(url_cmd, sizeof(url_cmd),
-        "grep -o '\"browser_download_url\": *\"[^\"]*yt-dlp_linux_aarch64\"' \"%s\" | cut -d'\"' -f4",
-        latest_file);
+        char url_cmd[1024];
+        snprintf(url_cmd, sizeof(url_cmd),
+            "grep -o '\"browser_download_url\": *\"[^\"]*" YTDLP_ASSET_NAME "\"' \"%s\" | cut -d'\"' -f4",
+            latest_file);
 
-    char download_url[512] = "";
-    pipe = popen(url_cmd, "r");
-    if (pipe) {
-        if (fgets(download_url, sizeof(download_url), pipe)) {
-            char* nl = strchr(download_url, '\n');
-            if (nl) *nl = '\0';
+        char download_url[512] = "";
+        pipe = popen(url_cmd, "r");
+        if (pipe) {
+            if (fgets(download_url, sizeof(download_url), pipe)) {
+                char* nl = strchr(download_url, '\n');
+                if (nl) *nl = '\0';
+            }
+            pclose(pipe);
         }
-        pclose(pipe);
-    }
 
-    if (strlen(download_url) == 0) {
-        strncpy(update_status.error_message, "No ARM64 binary found", sizeof(update_status.error_message) - 1);
-        update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    // Check for cancellation before large download
-    if (update_should_stop) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    update_status.progress_percent = 50;
-
-    // Download new binary with real-time progress via file size monitoring
-    char new_binary[600];
-    snprintf(new_binary, sizeof(new_binary), "%s/yt-dlp.new", temp_dir);
-
-    update_status.progress_percent = 50;
-    update_status.download_bytes = 0;
-    update_status.download_total = 0;
-    strncpy(update_status.status_detail, "Getting file info...", sizeof(update_status.status_detail) - 1);
-
-    // First, get the actual file size from server using wget --spider
-    // GitHub releases redirect to CDN, so we need to follow redirects and get the final Content-Length
-    char size_file[600];
-    snprintf(size_file, sizeof(size_file), "%s/size.txt", temp_dir);
-
-    // Use --max-redirect to follow GitHub's redirects, get last Content-Length (from final destination)
-    snprintf(cmd, sizeof(cmd),
-        "%s --spider -S --max-redirect=10 -T 30 -U \"NextUI-Music-Player\" \"%s\" 2>&1 | grep -i 'Content-Length' | tail -1 | awk '{print $2}' | tr -d '\\r' > \"%s\"",
-        wget_bin, download_url, size_file);
-    system(cmd);
-
-    // Read the file size
-    FILE* size_f = fopen(size_file, "r");
-    if (size_f) {
-        long file_size = 0;
-        if (fscanf(size_f, "%ld", &file_size) == 1 && file_size > 1000000) {
-            update_status.download_total = file_size;
-        }
-        fclose(size_f);
-    }
-
-    // Fallback to approximate size if we couldn't get it (yt-dlp is ~34MB as of 2024+)
-    if (update_status.download_total == 0) {
-        update_status.download_total = 35000000;  // ~35MB fallback
-    }
-
-    // Check for cancellation
-    if (update_should_stop) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    strncpy(update_status.status_detail, "Starting download...", sizeof(update_status.status_detail) - 1);
-
-    // Create a marker file to track wget completion
-    char done_marker[600];
-    snprintf(done_marker, sizeof(done_marker), "%s/wget.done", temp_dir);
-
-    // Start wget in background, create marker file when done
-    // Using shell to chain commands: wget && touch done_marker
-    snprintf(cmd, sizeof(cmd),
-        "(%s -T 120 -t 3 -q -U \"NextUI-Music-Player\" -O \"%s\" \"%s\"; echo $? > \"%s\") &",
-        wget_bin, new_binary, download_url, done_marker);
-    system(cmd);
-
-    // Monitor download progress
-    int timeout_seconds = 0;
-    const int max_timeout = 180;  // 3 minutes
-    long last_size = 0;
-    int stable_count = 0;
-
-    while (timeout_seconds < max_timeout) {
-        // Check for cancellation
-        if (update_should_stop) {
-            system("pkill -f 'wget.*yt-dlp' 2>/dev/null");
+        if (strlen(download_url) == 0) {
+            strncpy(update_status.error_message, "No ARM64 binary found", sizeof(update_status.error_message) - 1);
+            update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
             snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
             system(cmd);
             update_status.updating = false;
@@ -1139,137 +1431,72 @@ static void* update_thread_func(void* arg) {
             return NULL;
         }
 
-        // Check if wget finished (marker file exists)
-        if (access(done_marker, F_OK) == 0) {
-            break;
-        }
+        begin_step("Downloading yt-dlp", base, span);
 
-        // Check current file size
-        struct stat st;
-        if (stat(new_binary, &st) == 0 && st.st_size > 0) {
-            update_status.download_bytes = st.st_size;
-
-            // Calculate progress (map to 50-78% range, save 78-80 for verification)
-            int dl_percent = (int)((st.st_size * 100) / update_status.download_total);
-            if (dl_percent > 100) dl_percent = 100;
-            update_status.progress_percent = 50 + (dl_percent * 28 / 100);
-
-            // Format MB display
-            float mb_done = st.st_size / (1024.0f * 1024.0f);
-            float mb_total = update_status.download_total / (1024.0f * 1024.0f);
-            snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-                "%.1fMB / %.1fMB", mb_done, mb_total);
-
-            // Track if file stopped growing (might be done or stalled)
-            if (st.st_size == last_size) {
-                stable_count++;
-            } else {
-                stable_count = 0;
+        char new_binary[600];
+        snprintf(new_binary, sizeof(new_binary), "%s/yt-dlp.new", temp_dir);
+        if (!fetch_with_progress(download_url, new_binary, YTDLP_EXPECTED_BYTES, 1000000, temp_dir)) {
+            if (!update_should_stop) {
+                strncpy(update_status.error_message, "Download failed", sizeof(update_status.error_message) - 1);
+                update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
             }
-            last_size = st.st_size;
-        } else {
-            // File not created yet
-            snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-                "Connecting...");
+            snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
+            system(cmd);
+            update_status.updating = false;
+            update_running = false;
+            return NULL;
         }
 
-        usleep(500000);  // Check every 0.5 seconds for smoother updates
-        timeout_seconds++;
-        if (timeout_seconds % 2 == 0) {
-            // Only increment actual timeout counter every second
+        strncpy(update_status.step_message, "Installing yt-dlp", sizeof(update_status.step_message) - 1);
+
+        // The working binary stays untouched until the swap succeeds
+        if (!install_staged_binary(new_binary, ytdlp_path, 1000000)) {
+            strncpy(update_status.error_message, "Failed to install update", sizeof(update_status.error_message) - 1);
+            update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
+            snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
+            system(cmd);
+            update_status.updating = false;
+            update_running = false;
+            return NULL;
+        }
+
+        // Only now does the recorded version describe what is on disk
+        FILE* vf = fopen(version_file, "w");
+        if (vf) {
+            fprintf(vf, "%s\n", latest_version);
+            fclose(vf);
+        }
+        strncpy(current_version, latest_version, sizeof(current_version) - 1);
+        current_version[sizeof(current_version) - 1] = '\0';
+
+        weight_done += YTDLP_EXPECTED_BYTES;
+    }
+
+    if (need_qjs && !update_should_stop) {
+        int base = span_start + (int)((long long)span_all * weight_done / weight_total);
+        int span = (int)((long long)span_all * QJS_EXPECTED_BYTES / weight_total);
+        if (!install_quickjs(temp_dir, base, span)) {
+            strncpy(update_status.error_message, "Could not install script engine",
+                    sizeof(update_status.error_message) - 1);
+            update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
+        }
+        weight_done += QJS_EXPECTED_BYTES;
+    }
+
+    if (need_ffmpeg && !update_should_stop && update_status.error_message[0] == '\0') {
+        int base = span_start + (int)((long long)span_all * weight_done / weight_total);
+        int span = (int)((long long)span_all * FFMPEG_EXPECTED_BYTES / weight_total);
+        if (!install_ffmpeg(temp_dir, base, span)) {
+            strncpy(update_status.error_message, "Could not install media tools",
+                    sizeof(update_status.error_message) - 1);
+            update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
         }
     }
 
-    // Wait a moment for wget to fully finish writing
-    usleep(500000);
-
-    // Kill any remaining wget just in case
-    system("pkill -f 'wget.*yt-dlp' 2>/dev/null");
-
-    // Check wget exit status from marker file
-    int wget_exit = -1;
-    FILE* marker_f = fopen(done_marker, "r");
-    if (marker_f) {
-        fscanf(marker_f, "%d", &wget_exit);
-        fclose(marker_f);
-    }
-
-    update_status.progress_percent = 78;
-
-    // Verify download completed
-    struct stat final_st;
-    if (stat(new_binary, &final_st) != 0 || final_st.st_size < 1000000) {
-        // File doesn't exist or too small (< 1MB)
-        if (wget_exit != 0 && wget_exit != -1) {
-            snprintf(update_status.error_message, sizeof(update_status.error_message),
-                "Download failed (error %d)", wget_exit);
-        } else if (timeout_seconds >= max_timeout) {
-            strncpy(update_status.error_message, "Download timed out", sizeof(update_status.error_message) - 1);
-        } else {
-            snprintf(update_status.error_message, sizeof(update_status.error_message),
-                "Incomplete (%ld bytes)", (long)(stat(new_binary, &final_st) == 0 ? final_st.st_size : 0));
-        }
-        update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    // Update final size for display
-    update_status.download_bytes = final_st.st_size;
-    update_status.download_total = final_st.st_size;
-    float final_mb = final_st.st_size / (1024.0f * 1024.0f);
-    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-        "%.1f MB downloaded", final_mb);
-
-    // Check for cancellation after download
-    if (update_should_stop) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    update_status.progress_percent = 80;
-
-    // Make executable
-    chmod(new_binary, 0755);
-
-    // Backup old binary
-    char backup_path[600];
-    snprintf(backup_path, sizeof(backup_path), "%s.old", ytdlp_path);
-    rename(ytdlp_path, backup_path);
-
-    // Move new binary
-    snprintf(cmd, sizeof(cmd), "mv \"%s\" \"%s\"", new_binary, ytdlp_path);
-    if (system(cmd) != 0) {
-        // Restore backup
-        rename(backup_path, ytdlp_path);
-        strncpy(update_status.error_message, "Failed to install update", sizeof(update_status.error_message) - 1);
-        update_status.error_message[sizeof(update_status.error_message) - 1] = '\0';
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
-        update_status.updating = false;
-        update_running = false;
-        return NULL;
-    }
-
-    // Update version file
-    FILE* vf = fopen(version_file, "w");
-    if (vf) {
-        fprintf(vf, "%s\n", latest_version);
-        fclose(vf);
-    }
-
-    strncpy(current_version, latest_version, sizeof(current_version));
-
-    // Cleanup
     snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
     system(cmd);
 
+    update_status.step_message[0] = '\0';
     update_status.progress_percent = 100;
     update_status.updating = false;
     update_running = false;
@@ -1295,10 +1522,12 @@ int Downloader_startUpdate(void) {
 
     update_running = true;
     update_should_stop = false;
+    update_status.updating = true;
     youtube_state = DOWNLOADER_STATE_UPDATING;
 
     if (pthread_create(&update_thread, NULL, update_thread_func, NULL) != 0) {
         update_running = false;
+        update_status.updating = false;
         youtube_state = DOWNLOADER_STATE_ERROR;
         strncpy(error_message, "Failed to create update thread", sizeof(error_message) - 1);
         error_message[sizeof(error_message) - 1] = '\0';

@@ -67,9 +67,31 @@ static int mkpath(const char* path, mode_t mode) {
     return mkdir(tmp, mode);
 }
 
+// Written on the device rather than shipped, keyed by their path relative to the
+// pak root. They are absent from the package on purpose, so orphan removal must
+// not treat them as leftovers: the binaries cost tens of megabytes to re-fetch,
+// and the queue is the user's own pending work.
+// state/yt-dlp_version.txt is deliberately absent: it is a cache the next launch
+// rebuilds from the binary.
+static const char* const preserved_paths[] = {
+    "bin/yt-dlp",
+    "bin/qjs",
+    "bin/ffmpeg",
+    "state/youtube_queue.txt",
+    NULL
+};
+
+static bool is_preserved(const char* rel_path) {
+    for (int i = 0; preserved_paths[i]; i++) {
+        if (strcmp(preserved_paths[i], rel_path) == 0) return true;
+    }
+    return false;
+}
+
 // Sync directories: copy all from src to dst, remove orphans in dst
-// This replaces all files and removes files that no longer exist in the update
-static int sync_directories(const char* src, const char* dst) {
+// This replaces all files and removes files that no longer exist in the update.
+// rel is the path of dst relative to the pak root ("" at the top level).
+static int sync_directories(const char* src, const char* dst, const char* rel) {
     char cmd[1024];
     DIR* dir;
     struct dirent* entry;
@@ -88,12 +110,16 @@ static int sync_directories(const char* src, const char* dst) {
             continue;
         }
 
-        char src_path[600], dst_path[600];
+        char src_path[600], dst_path[600], rel_path[600];
         snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
         snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
+        snprintf(rel_path, sizeof(rel_path), "%s%s%s", rel, rel[0] ? "/" : "", entry->d_name);
 
         // If file/folder doesn't exist in src, remove it from dst
         if (access(src_path, F_OK) != 0) {
+            if (is_preserved(rel_path)) {
+                continue;
+            }
             if (entry->d_type == DT_DIR) {
                 snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", dst_path);
             } else {
@@ -103,7 +129,7 @@ static int sync_directories(const char* src, const char* dst) {
         }
         // If both are directories, recursively sync them
         else if (entry->d_type == DT_DIR) {
-            sync_directories(src_path, dst_path);
+            sync_directories(src_path, dst_path, rel_path);
         }
     }
 
@@ -643,7 +669,7 @@ static void* update_thread_func(void* arg) {
     // Sync all files: copy everything from update, remove orphaned files
     // This handles: musicplayer.elf, launch.sh, bin/, fonts/, stations/, state/, etc.
     // Note: Linux allows replacing a running binary - it continues from memory
-    if (sync_directories(update_root, pak_path) != 0) {
+    if (sync_directories(update_root, pak_path, "") != 0) {
         strcpy(update_status.error_message, "Failed to install update");
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);
