@@ -185,10 +185,12 @@ workspace/
 │   ├── bin/                 # Platform binaries and runtime tools
 │   │   ├── tg5040/          # TrimUI Brick binary (musicplayer.elf)
 │   │   ├── tg5050/          # TrimUI Smart Pro S binary (musicplayer.elf)
-│   │   ├── yt-dlp           # YouTube downloader
+│   │   ├── yt-dlp           # YouTube downloader (installed on demand, not shipped)
+│   │   ├── qjs              # QuickJS, required by yt-dlp (installed on demand)
+│   │   ├── ffmpeg           # Fallback only; the firmware normally provides it
 │   │   ├── wget             # HTTP downloader
 │   │   └── keyboard         # On-screen keyboard
-│   ├── res/                 # Resources (fonts, images)
+│   ├── res/                 # Resources (fonts, images, CA bundle)
 │   ├── stations/            # Curated radio stations
 │   └── state/               # Runtime state files
 ├── all/                     # Shared code

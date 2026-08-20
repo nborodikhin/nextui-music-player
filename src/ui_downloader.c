@@ -407,3 +407,116 @@ void downloader_results_clear_scroll(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
 }
 
+void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
+    GFX_clear(screen);
+
+    int hw = screen->w;
+    int hh = screen->h;
+
+    const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
+    bool installing = strcmp(status->current_version, DOWNLOADER_VERSION_NOT_INSTALLED) == 0;
+
+    render_screen_header(screen,
+                         installing ? "Installing Youtube helpers" : "Updating Youtube helpers",
+                         show_setting);
+
+    // Current version
+    char ver_str[128];
+    snprintf(ver_str, sizeof(ver_str), "Current: %s", status->current_version);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
+    if (ver_text) {
+        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
+        SDL_FreeSurface(ver_text);
+    }
+
+    // Status message
+    // The worker names each step as it starts one; the percentage-derived
+    // fallbacks only cover the preamble before any step exists, and the
+    // terminal states after the last one finishes.
+    char status_buf[96];
+    const char* status_msg = "Checking connection...";
+    if (!status->updating && strlen(status->error_message) > 0) {
+        status_msg = status->error_message;
+    } else if (!status->updating && !status->update_available && status->progress_percent >= 100) {
+        status_msg = "Already up to date!";
+    } else if (!status->updating && status->progress_percent >= 100) {
+        status_msg = installing ? "Install complete!" : "Update complete!";
+    } else if (status->step_message[0] != '\0') {
+        if (status->step_count > 1) {
+            snprintf(status_buf, sizeof(status_buf), "%s (%d of %d)",
+                     status->step_message, status->step_index, status->step_count);
+        } else {
+            snprintf(status_buf, sizeof(status_buf), "%s", status->step_message);
+        }
+        status_msg = status_buf;
+    } else if (status->progress_percent >= 15) {
+        status_msg = "Checking for updates...";
+    }
+
+    SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), status_msg, COLOR_WHITE);
+    if (status_text) {
+        SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh / 2});
+        SDL_FreeSurface(status_text);
+    }
+
+    // Latest version (if known)
+    if (strlen(status->latest_version) > 0) {
+        snprintf(ver_str, sizeof(ver_str), "Latest: %s", status->latest_version);
+        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), ver_str, COLOR_GRAY);
+        if (latest_text) {
+            SDL_BlitSurface(latest_text, NULL, screen, &(SDL_Rect){(hw - latest_text->w) / 2, hh / 2 + SCALE1(30)});
+            SDL_FreeSurface(latest_text);
+        }
+    }
+
+    // Progress bar
+    if (status->updating) {
+        int bar_w = hw - SCALE1(PADDING * 8);
+        int bar_h = SCALE1(12);
+        int bar_x = SCALE1(PADDING * 4);
+        int bar_y = hh / 2 + SCALE1(55);
+
+        // Background
+        SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
+        SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 64, 64, 64));
+
+        // Progress fill
+        int prog_w = (bar_w * status->progress_percent) / 100;
+        if (prog_w > 0) {
+            SDL_Rect prog_rect = {bar_x, bar_y, prog_w, bar_h};
+            SDL_FillRect(screen, &prog_rect, SDL_MapRGB(screen->format, 100, 200, 100));
+        }
+
+        // Download detail text
+        if (strlen(status->status_detail) > 0) {
+            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status->status_detail, COLOR_GRAY);
+            if (detail_text) {
+                SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
+                SDL_FreeSurface(detail_text);
+            }
+        }
+
+        // Percentage text
+        char pct_str[16];
+        snprintf(pct_str, sizeof(pct_str), "%d%%", status->progress_percent);
+        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), pct_str, COLOR_WHITE);
+        if (pct_text) {
+            int pct_x = bar_x + (bar_w - pct_text->w) / 2;
+            int pct_y = bar_y + (bar_h - pct_text->h) / 2;
+            SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){pct_x, pct_y});
+            SDL_FreeSurface(pct_text);
+        }
+    }
+
+    // Button hints
+    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    if (status->updating) {
+        GFX_blitButtonGroup((char*[]){"B", "CANCEL", NULL}, 1, screen, 1);
+    } else {
+        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+    }
+
+    if (!status->updating) {
+        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 0, screen, 1);
+    }
+}

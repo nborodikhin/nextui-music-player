@@ -14,3 +14,11 @@ bin/desktop/musicplayer.elf
 test/bin/
 dist/
 __pycache__/
+# Downloaded on the device on first use, not shipped
+bin/yt-dlp
+bin/qjs
+bin/ffmpeg
+bin/*.new
+# Runtime state written by the app
+state/yt-dlp_version.txt
+state/youtube_queue.txt

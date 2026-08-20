@@ -5,10 +5,9 @@ pak.json
 launch.sh
 bin/keyboard
 bin/wget
-bin/yt-dlp
 res/font.ttf
 res/icon-*
-state/*.txt
+state/app_version.txt
 stations/*.json
 
 # Platform payload

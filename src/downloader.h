@@ -68,6 +68,9 @@ typedef struct {
     long download_bytes;        // Bytes downloaded so far
     long download_total;        // Total bytes to download (0 if unknown)
     char status_detail[64];     // Detailed status (e.g., "2.5 MB / 5.0 MB")
+    char step_message[64];      // Current step (e.g., "Downloading media tools")
+    int step_index;             // 1-based position of the current step
+    int step_count;             // Total steps this run
     char error_message[256];
 } DownloaderUpdateStatus;
 
@@ -79,9 +82,18 @@ typedef struct {
     char error_message[256];    // Error message if failed
 } DownloaderSearchStatus;
 
+// Reported version when the yt-dlp binary is not installed
+#define DOWNLOADER_VERSION_NOT_INSTALLED "Not installed"
+
 // Initialize downloader module
-// Returns 0 on success, -1 if yt-dlp not found
+// Safe to call repeatedly: paths and the queue are set up on the first call,
+// so a later install can finish initialization without an app restart.
+// Returns 0 on success, -1 if yt-dlp is not installed
 int Downloader_init(void);
+
+// Re-read the yt-dlp version, probing the binary when the cached value is
+// missing or stale. Reports DOWNLOADER_VERSION_NOT_INSTALLED when absent.
+void Downloader_refreshVersion(void);
 
 // Cleanup resources
 void Downloader_cleanup(void);

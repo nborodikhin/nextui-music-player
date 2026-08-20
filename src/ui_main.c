@@ -485,6 +485,10 @@ void render_controls_help(SDL_Surface* screen, int app_state) {
             controls = about_controls;
             page_title = "About";
             break;
+        case 42: // DOWNLOADER_YTDLP_HELP_STATE
+            controls = default_controls;
+            page_title = "Youtube download helpers";
+            break;
         default:
             controls = default_controls;
             page_title = "Controls";
