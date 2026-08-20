@@ -248,24 +248,47 @@ static bool ytdlp_present(void) {
     return access(ytdlp_path, X_OK) == 0;
 }
 
+// The JS interpreter is only ever ours: nothing in the firmware provides it
+static bool qjs_present(void) {
+    return access(qjs_path, X_OK) == 0;
+}
+
+// Where the firmware keeps ffmpeg, "" once we have looked and found none.
+// The lookup costs a fork and the answer cannot change under us, so it is
+// resolved once - this is reached from menu rendering.
+static char system_ffmpeg[512] = "";
+static bool system_ffmpeg_resolved = false;
+
+// The ffmpeg yt-dlp should run: ours when installed, else the firmware's.
+// Empty when there is none. Our copy is checked first and costs no fork, so an
+// install is picked up immediately without invalidating anything.
+static const char* ffmpeg_command(void) {
+    if (access(ffmpeg_path, X_OK) == 0) return ffmpeg_path;
+
+    if (!system_ffmpeg_resolved) {
+        system_ffmpeg_resolved = true;
+        FILE* pipe = popen("command -v ffmpeg 2>/dev/null", "r");
+        if (pipe) {
+            if (fgets(system_ffmpeg, sizeof(system_ffmpeg), pipe)) {
+                char* nl = strchr(system_ffmpeg, '\n');
+                if (nl) *nl = '\0';
+            }
+            pclose(pipe);
+        }
+    }
+    return system_ffmpeg;
+}
+
 // The firmware normally provides ffmpeg; ours is only a fallback for images
 // that do not. Returns true when either is usable.
-// Probing PATH costs a fork, and this is called from menu rendering, so the
-// answer is cached until an install could have changed it.
-static int ffmpeg_on_path = -1;  // -1 unknown, 0 no, 1 yes
-
 static bool ffmpeg_present(void) {
-    if (access(ffmpeg_path, X_OK) == 0) return true;
-    if (ffmpeg_on_path < 0) {
-        ffmpeg_on_path = (system("command -v ffmpeg >/dev/null 2>&1") == 0) ? 1 : 0;
-    }
-    return ffmpeg_on_path == 1;
+    return ffmpeg_command()[0] != '\0';
 }
 
 // yt-dlp needs an interpreter to solve YouTube's JS challenges and ffmpeg to
 // repackage and tag what it downloads, so all three must be in place.
 bool Downloader_isAvailable(void) {
-    return ytdlp_present() && access(qjs_path, X_OK) == 0 && ffmpeg_present();
+    return ytdlp_present() && qjs_present() && ffmpeg_present();
 }
 
 bool Downloader_checkNetwork(void) {
@@ -725,19 +748,12 @@ static void* download_thread_func(void* arg) {
             // Album art will be fetched by player during playback
             // Force M4A only - no fallback to other formats
             // socket-timeout prevents network hangs
-            // Point yt-dlp at our copy only when we had to supply one;
-            // otherwise it finds the firmware's on PATH
-            char ffmpeg_arg[600] = "";
-            if (access(ffmpeg_path, X_OK) == 0) {
-                snprintf(ffmpeg_arg, sizeof(ffmpeg_arg), "--ffmpeg-location \"%s\" ", ffmpeg_path);
-            }
-
             char cmd[2048];
             snprintf(cmd, sizeof(cmd),
                 "%s "
                 "-f \"bestaudio[ext=m4a]\" "
                 "--js-runtimes \"quickjs:%s\" "
-                "%s"
+                "--ffmpeg-location \"%s\" "
                 "--embed-metadata "
                 "--socket-timeout 30 "
                 "--parse-metadata \"title:%%(artist)s - %%(title)s\" "
@@ -746,7 +762,7 @@ static void* download_thread_func(void* arg) {
                 "--no-playlist "
                 "\"https://music.youtube.com/watch?v=%s\" "
                 "2>&1",
-                ytdlp_path, qjs_path, ffmpeg_arg, temp_file, video_id);
+                ytdlp_path, qjs_path, ffmpeg_command(), temp_file, video_id);
 
 
             // Use popen to read progress in real-time
@@ -1099,25 +1115,75 @@ static bool fetch_with_progress(const char* url, const char* dest,
     return true;
 }
 
-// Both are single static aarch64 binaries published as release assets, so a
-// plain fetch is enough - no version tracking, since any build yt-dlp accepts
-// will do and neither is on YouTube's moving side. ffmpeg is taken gzipped:
-// half the bytes of the 51 MB binary, and the firmware has gunzip.
+// yt-dlp tracks the nightly channel: YouTube changes how it serves audio every
+// few weeks, and a fix reaches nightly the same day but a stable release only
+// when one is cut. Its version is compared against state/yt-dlp_version.txt.
+#define YTDLP_RELEASE_API_URL "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest"
+#define YTDLP_ASSET_NAME "yt-dlp_linux_aarch64"
+
+// The other two are single static aarch64 binaries published as release assets,
+// so a plain fetch is enough - no version tracking, since any build yt-dlp
+// accepts will do and neither is on YouTube's moving side. ffmpeg is taken
+// gzipped: half the bytes of the 51 MB binary, and the firmware has gunzip.
 #define QJS_DOWNLOAD_URL "https://github.com/quickjs-ng/quickjs/releases/latest/download/qjs-linux-aarch64"
 #define FFMPEG_DOWNLOAD_URL "https://github.com/eugeneware/ffmpeg-static/releases/latest/download/ffmpeg-linux-arm64.gz"
 
+// Move `src` to `dst` durably, across filesystems: staging is on tmpfs and the
+// pak is on the SD card, so rename(2) is unusable here - it fails with EXDEV.
+// Returns true once `dst` holds the whole file and it has reached the card, at
+// which point `src` has been removed. On failure `dst` is cleaned up and `src`
+// is left untouched, so the caller still has the download to retry from.
+static bool safe_rename(const char* src, const char* dst) {
+    int in = open(src, O_RDONLY);
+    if (in < 0) return false;
+
+    int out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (out < 0) {
+        close(in);
+        return false;
+    }
+
+    char buf[64 * 1024];
+    bool ok = true;
+    ssize_t got;
+    while ((got = read(in, buf, sizeof(buf))) > 0) {
+        ssize_t done = 0;
+        while (done < got) {
+            ssize_t put = write(out, buf + done, (size_t)(got - done));
+            if (put < 0) {
+                if (errno == EINTR) continue;
+                ok = false;
+                break;
+            }
+            done += put;
+        }
+        if (!ok) break;
+    }
+    if (got < 0) ok = false;
+
+    // Without this the rename below can publish a name whose contents are still
+    // only in page cache, so losing power leaves a truncated binary in place
+    if (ok && fsync(out) != 0) ok = false;
+    if (close(out) != 0) ok = false;
+    close(in);
+
+    if (!ok) {
+        unlink(dst);
+        return false;
+    }
+    unlink(src);
+    return true;
+}
+
 // Put a staged file into place without ever leaving a partial copy at dest.
-// The staging area is tmpfs and dest is the SD card, so the move between them
-// is a copy that can truncate; it lands beside the target as .new, and only a
-// same-directory rename - atomic - swaps it in.
+// It lands beside the target as .new, and only a same-directory rename - atomic
+// - swaps it in.
 static bool install_staged_binary(const char* staged, const char* dest, long min_bytes) {
     char pending[700];
-    char cmd[1600];
     snprintf(pending, sizeof(pending), "%s.new", dest);
     unlink(pending);
 
-    snprintf(cmd, sizeof(cmd), "mv \"%s\" \"%s\"", staged, pending);
-    if (system(cmd) != 0) {
+    if (!safe_rename(staged, pending)) {
         unlink(pending);
         return false;
     }
@@ -1176,10 +1242,7 @@ static bool install_ffmpeg(const char* temp_dir, int base_pct, int span_pct) {
         return false;
     }
 
-    if (!install_staged_binary(staged, ffmpeg_path, 20000000)) return false;
-
-    ffmpeg_on_path = -1;  // our copy changes the answer
-    return true;
+    return install_staged_binary(staged, ffmpeg_path, 20000000);
 }
 
 static void* update_thread_func(void* arg) {
@@ -1231,7 +1294,7 @@ static void* update_thread_func(void* arg) {
     // Use timeout to prevent indefinite blocking on slow/unstable WiFi
     snprintf(cmd, sizeof(cmd),
         "%s -q -T 30 -t 2 -U \"%s\" -O \"%s\" "
-        "\"https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest\" 2>\"%s\"",
+        "\"" YTDLP_RELEASE_API_URL "\" 2>\"%s\"",
         wget_bin, HTTP_USER_AGENT, latest_file, error_file);
 
     int fetch_result = system(cmd);
@@ -1306,7 +1369,7 @@ static void* update_thread_func(void* arg) {
     // missing on its own: an interrupted install, a pak that predates them, or
     // simply a current yt-dlp with no interpreter beside it.
     bool need_ytdlp  = (strcmp(latest_version, current_version) != 0);
-    bool need_qjs    = (access(qjs_path, X_OK) != 0);
+    bool need_qjs    = !qjs_present();
     bool need_ffmpeg = !ffmpeg_present();
 
     update_status.update_available = need_ytdlp;
@@ -1345,7 +1408,7 @@ static void* update_thread_func(void* arg) {
 
         char url_cmd[1024];
         snprintf(url_cmd, sizeof(url_cmd),
-            "grep -o '\"browser_download_url\": *\"[^\"]*yt-dlp_linux_aarch64\"' \"%s\" | cut -d'\"' -f4",
+            "grep -o '\"browser_download_url\": *\"[^\"]*" YTDLP_ASSET_NAME "\"' \"%s\" | cut -d'\"' -f4",
             latest_file);
 
         char download_url[512] = "";

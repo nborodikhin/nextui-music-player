@@ -67,15 +67,17 @@ static int mkpath(const char* path, mode_t mode) {
     return mkdir(tmp, mode);
 }
 
-// Downloaded on the device rather than shipped, keyed by their path relative to
-// the pak root. They are absent from the package on purpose, so orphan removal
-// must not treat them as leftovers - re-fetching them costs tens of megabytes.
-// State files are deliberately not listed: they are cheap to rebuild, and were
-// being clobbered by the package on every update before it stopped shipping them.
+// Written on the device rather than shipped, keyed by their path relative to the
+// pak root. They are absent from the package on purpose, so orphan removal must
+// not treat them as leftovers: the binaries cost tens of megabytes to re-fetch,
+// and the queue is the user's own pending work.
+// state/yt-dlp_version.txt is deliberately absent: it is a cache the next launch
+// rebuilds from the binary.
 static const char* const preserved_paths[] = {
     "bin/yt-dlp",
     "bin/qjs",
     "bin/ffmpeg",
+    "state/youtube_queue.txt",
     NULL
 };
 
