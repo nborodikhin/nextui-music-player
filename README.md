@@ -188,7 +188,6 @@ workspace/
 │   │   ├── yt-dlp           # YouTube downloader (installed on demand, not shipped)
 │   │   ├── qjs              # QuickJS, required by yt-dlp (installed on demand)
 │   │   ├── ffmpeg           # Fallback only; the firmware normally provides it
-│   │   ├── wget             # HTTP downloader
 │   │   └── keyboard         # On-screen keyboard
 │   ├── res/                 # Resources (fonts, images, CA bundle)
 │   ├── stations/            # Curated radio stations

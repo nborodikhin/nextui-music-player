@@ -16,6 +16,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "wget_fetch.h"
 
 // Identifies the app to GitHub on every fetch
 #define HTTP_USER_AGENT "NextUI-Music-Player"
@@ -1011,11 +1012,11 @@ static void step_progress(long done, long total) {
         "%.1fMB / %.1fMB", done / (1024.0 * 1024.0), total / (1024.0 * 1024.0));
 }
 
-// Stop the transfer writing to `dest`. Matching the destination rather than the
-// user agent keeps this from killing an unrelated self-update download.
-static void stop_fetch(const char* dest) {
+// Stop the transfer whose pid we recorded, and only that one: a pattern match on
+// the shared user agent would also kill an unrelated self-update download.
+static void stop_fetch(const char* pid_file) {
     char cmd[900];
-    snprintf(cmd, sizeof(cmd), "pkill -f 'wget.*%s' 2>/dev/null", dest);
+    snprintf(cmd, sizeof(cmd), "kill $(cat \"%s\") 2>/dev/null", pid_file);
     system(cmd);
 }
 
@@ -1027,12 +1028,11 @@ static long probe_download_size(const char* url, const char* temp_dir, long fall
     snprintf(size_file, sizeof(size_file), "%s/size.txt", temp_dir);
 
     // The last Content-Length is the CDN's, after GitHub's redirects
-    char wget_bin[600];
-    snprintf(wget_bin, sizeof(wget_bin), "%s/bin/wget", pak_path);
+    // The last Content-Length is the CDN's, after GitHub's redirects
     snprintf(cmd, sizeof(cmd),
-        "%s --spider -S --max-redirect=10 -T 30 -U \"%s\" \"%s\" 2>&1 "
-        "| grep -i 'Content-Length' | tail -1 | awk '{print $2}' | tr -d '\\r' > \"%s\"",
-        wget_bin, HTTP_USER_AGENT, url, size_file);
+        "curl -sIL %s --connect-timeout 30 -A \"%s\" \"%s\" | tr -d '\\r' "
+        "| grep -i '^content-length:' | tail -1 | awk '{print $2}' > \"%s\"",
+        http_tls_flags(), HTTP_USER_AGENT, url, size_file);
     system(cmd);
 
     long size = 0;
@@ -1052,22 +1052,29 @@ static bool fetch_with_progress(const char* url, const char* dest,
                                 long expected_bytes, long min_bytes,
                                 const char* temp_dir) {
     char cmd[1800];
-    char wget_bin[600];
     char done_marker[700];
-    snprintf(wget_bin, sizeof(wget_bin), "%s/bin/wget", pak_path);
+    char pid_file[700];
     snprintf(done_marker, sizeof(done_marker), "%s/fetch_done.txt", temp_dir);
+    snprintf(pid_file, sizeof(pid_file), "%s/fetch_pid.txt", temp_dir);
     unlink(done_marker);
+    unlink(pid_file);
 
     long total = probe_download_size(url, temp_dir, expected_bytes);
     step_progress(0, total);
 
     if (update_should_stop) return false;
 
-    // wget runs detached so the file size can be sampled while it works, and
-    // records its exit status: a file of plausible size proves nothing on its own
+    // curl runs detached so the file size can be sampled while it works. Stalls
+    // are caught by the speed floor rather than a total time limit, which would
+    // punish a slow but healthy connection. --fail keeps an HTTP error body from
+    // being mistaken for the file, and the exit status is published atomically:
+    // a file of plausible size proves nothing on its own.
     snprintf(cmd, sizeof(cmd),
-        "(%s -T 120 -t 3 -q -U \"%s\" -O \"%s\" \"%s\"; echo $? > \"%s\") &",
-        wget_bin, HTTP_USER_AGENT, dest, url, done_marker);
+        "(curl -sSL --fail %s --connect-timeout 30 --speed-time 60 --speed-limit 1024 --retry 3 "
+        "-A \"%s\" -o \"%s\" \"%s\" & echo $! > \"%s\"; wait $!;"
+        " echo $? > \"%s.part\"; mv \"%s.part\" \"%s\") &",
+        http_tls_flags(), HTTP_USER_AGENT, dest, url, pid_file,
+        done_marker, done_marker, done_marker);
     system(cmd);
 
     const int poll_interval_us = 500000;
@@ -1076,7 +1083,7 @@ static bool fetch_with_progress(const char* url, const char* dest,
 
     while (elapsed_polls < max_polls) {
         if (update_should_stop) {
-            stop_fetch(dest);
+            stop_fetch(pid_file);
             unlink(dest);
             return false;
         }
@@ -1094,7 +1101,7 @@ static bool fetch_with_progress(const char* url, const char* dest,
     // Timing out only ends the wait; without this the transfer keeps running
     // and writing to a file we are about to remove
     if (elapsed_polls >= max_polls) {
-        stop_fetch(dest);
+        stop_fetch(pid_file);
     }
 
     int fetch_exit = -1;
@@ -1104,6 +1111,7 @@ static bool fetch_with_progress(const char* url, const char* dest,
         fclose(marker);
     }
     unlink(done_marker);
+    unlink(pid_file);
 
     struct stat st;
     if (fetch_exit != 0 || stat(dest, &st) != 0 || st.st_size < min_bytes) {
@@ -1285,23 +1293,21 @@ static void* update_thread_func(void* arg) {
 
     char cmd[1024];
     char error_file[600];
-    char wget_bin[600];
-    snprintf(error_file, sizeof(error_file), "%s/wget_error.txt", temp_dir);
-    snprintf(wget_bin, sizeof(wget_bin), "%s/bin/wget", pak_path);
+    snprintf(error_file, sizeof(error_file), "%s/fetch_error.txt", temp_dir);
 
     update_status.progress_percent = 15;
 
-    // Use timeout to prevent indefinite blocking on slow/unstable WiFi
+    // Bounded outright: this is a small JSON body, not a bulk transfer
     snprintf(cmd, sizeof(cmd),
-        "%s -q -T 30 -t 2 -U \"%s\" -O \"%s\" "
+        "curl -sSL --fail %s --connect-timeout 30 --max-time 60 --retry 2 -A \"%s\" -o \"%s\" "
         "\"" YTDLP_RELEASE_API_URL "\" 2>\"%s\"",
-        wget_bin, HTTP_USER_AGENT, latest_file, error_file);
+        http_tls_flags(), HTTP_USER_AGENT, latest_file, error_file);
 
     int fetch_result = system(cmd);
     if (fetch_result != 0 || access(latest_file, F_OK) != 0) {
         // Copy error file to pak for debugging
         char debug_cmd[1024];
-        snprintf(debug_cmd, sizeof(debug_cmd), "cp \"%s\" \"%s/state/wget_error.txt\" 2>/dev/null", error_file, pak_path);
+        snprintf(debug_cmd, sizeof(debug_cmd), "cp \"%s\" \"%s/state/fetch_error.txt\" 2>/dev/null", error_file, pak_path);
         system(debug_cmd);
 
         // Try to read the actual error
@@ -1315,7 +1321,7 @@ static void* update_thread_func(void* arg) {
                 strncpy(update_status.error_message, err_line, sizeof(update_status.error_message) - 1);
             } else {
                 snprintf(update_status.error_message, sizeof(update_status.error_message),
-                    "wget error %d", WEXITSTATUS(fetch_result));
+                    "curl error %d", WEXITSTATUS(fetch_result));
             }
             fclose(ef);
         } else {

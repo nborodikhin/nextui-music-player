@@ -10,8 +10,35 @@
 #include "defines.h"
 #include "api.h"
 
-// Path to bundled wget binary (relative to pak root, which is the working directory)
-#define WGET_BIN "./bin/wget"
+// curl is part of the firmware on every supported device, so no HTTP client is
+// bundled - only the CA bundle it has nowhere else to get. -L follows redirects;
+// a speed floor catches stalls without cutting off a slow but healthy transfer,
+// which a total time limit would. Keep to flags curl 7.54 knows: that is what
+// the devices carry, and it rejects anything newer.
+#define FETCH_BIN "curl -sSL"
+#define FETCH_STALL_GUARD "--speed-time 30 --speed-limit 512"
+
+// Pak root is the working directory
+#define CA_BUNDLE_PATH "./res/cacert.pem"
+
+static char tls_flags[256] = "";
+
+void http_tls_init(void) {
+    if (tls_flags[0] != '\0') return;
+
+    // Always verify. A missing bundle is a broken install, and every transfer
+    // failing loudly beats silently downloading an executable nobody checked.
+    if (access(CA_BUNDLE_PATH, R_OK) != 0) {
+        LOG_error("[Fetch] %s unreadable, HTTPS transfers will fail\n", CA_BUNDLE_PATH);
+    }
+    snprintf(tls_flags, sizeof(tls_flags), "--cacert '%s'", CA_BUNDLE_PATH);
+}
+
+// Resolved at startup on the main thread, so worker threads only ever read it
+const char* http_tls_flags(void) {
+    if (tls_flags[0] == '\0') http_tls_init();
+    return tls_flags;
+}
 
 // Escape a string for use inside single quotes in shell commands.
 // Caller must provide a buffer at least 4x the length of src.
@@ -47,20 +74,16 @@ int wget_fetch(const char* url, uint8_t* buffer, int buffer_size) {
 
     char cmd[8192];
     snprintf(cmd, sizeof(cmd),
-        WGET_BIN " --no-check-certificate -q -T 15 -t 2"
-        " -O '%s' '%s' 2>/dev/null",
-        tmpfile, safe_url);
+        FETCH_BIN " --fail %s --connect-timeout 15 --max-time 30 --retry 2"
+        " -o '%s' '%s' 2>/dev/null",
+        http_tls_flags(), tmpfile, safe_url);
 
     int ret = system(cmd);
 
     if (ret != 0) {
-        // Check if file was created despite non-zero exit (partial download)
-        struct stat st;
-        if (stat(tmpfile, &st) != 0 || st.st_size == 0) {
-            LOG_error("[WgetFetch] Failed to fetch: %s (exit=%d)\n", url, ret);
-            unlink(tmpfile);
-            return -1;
-        }
+        LOG_error("[WgetFetch] Failed to fetch: %s (exit=%d)\n", url, ret);
+        unlink(tmpfile);
+        return -1;
     }
 
     // Read temp file into buffer
@@ -101,33 +124,41 @@ int wget_download_file(const char* url, const char* filepath,
     shell_escape_single(url, safe_url, sizeof(safe_url));
     shell_escape_single(filepath, safe_filepath, sizeof(safe_filepath));
 
-    // Step 1: Start wget download in background with completion marker
+    // Step 1: Start the download in background with a completion marker
     char cmd[8192];
     char done_marker[512];
     snprintf(done_marker, sizeof(done_marker), "%s.done", filepath);
     char headers_file[512];
     snprintf(headers_file, sizeof(headers_file), "%s.headers", filepath);
+
+    char pid_file[512];
+    snprintf(pid_file, sizeof(pid_file), "%s.pid", filepath);
     char safe_done_marker[2048];
+    char safe_pid_file[2048];
     char safe_headers_file[2048];
     shell_escape_single(done_marker, safe_done_marker, sizeof(safe_done_marker));
+    shell_escape_single(pid_file, safe_pid_file, sizeof(safe_pid_file));
     shell_escape_single(headers_file, safe_headers_file, sizeof(safe_headers_file));
 
     // Remove any stale markers
     unlink(done_marker);
     unlink(headers_file);
+    unlink(pid_file);
 
     // Download (proven working: -q with stderr to /dev/null)
     snprintf(cmd, sizeof(cmd),
-        "(" WGET_BIN " --no-check-certificate -q -T 30 -t 2"
-        " -O '%s' '%s' 2>/dev/null; touch '%s') &",
-        safe_filepath, safe_url, safe_done_marker);
+        "(" FETCH_BIN " --fail %s --connect-timeout 30 " FETCH_STALL_GUARD " --retry 2"
+        " -o '%s' '%s' 2>/dev/null & echo $! > '%s'; wait $!;"
+        " echo $? > '%s.part'; mv '%s.part' '%s') &",
+        http_tls_flags(), safe_filepath, safe_url, safe_pid_file,
+        safe_done_marker, safe_done_marker, safe_done_marker);
     system(cmd);
 
     // Best-effort: probe content-length via spider in background
     snprintf(cmd, sizeof(cmd),
-        WGET_BIN " --no-check-certificate --spider -S --max-redirect=10 -T 10 -t 1"
-        " '%s' 2>'%s' &",
-        safe_url, safe_headers_file);
+        FETCH_BIN " %s -I --connect-timeout 10"
+        " '%s' >'%s' 2>/dev/null &",
+        http_tls_flags(), safe_url, safe_headers_file);
     system(cmd);
 
     // Step 2: Poll file size for progress with speed/stall tracking
@@ -210,7 +241,7 @@ int wget_download_file(const char* url, const char* filepath,
             prev_time = now;
         }
 
-        // Stall detection: if file size hasn't changed for 60 seconds, kill wget
+        // Stall detection: if file size hasn't changed for 60 seconds, kill it
         if (curr_size != stall_size) {
             stall_size = curr_size;
             stall_start = now;
@@ -219,10 +250,11 @@ int wget_download_file(const char* url, const char* filepath,
                                    (now.tv_nsec - stall_start.tv_nsec) / 1e9;
             if (stall_elapsed >= 60.0) {
                 LOG_error("[WgetFetch] download stalled for 60s, killing: %s\n", url);
-                snprintf(cmd, sizeof(cmd), "pkill -f 'wget.*%s' 2>/dev/null", safe_filepath);
+                snprintf(cmd, sizeof(cmd), "kill $(cat '%s') 2>/dev/null", safe_pid_file);
                 system(cmd);
                 unlink(done_marker);
                 unlink(headers_file);
+                unlink(pid_file);
                 // Keep partial file for resume
                 if (speed_bps_out) *speed_bps_out = 0;
                 if (eta_sec_out) *eta_sec_out = 0;
@@ -235,25 +267,35 @@ int wget_download_file(const char* url, const char* filepath,
 
     // Step 4: Handle cancellation
     if (should_stop && *should_stop) {
-        // Kill wget and clean up — remove file on cancel
-        snprintf(cmd, sizeof(cmd), "pkill -f 'wget.*%s' 2>/dev/null", safe_filepath);
+        // Kill the transfer and clean up — remove file on cancel
+        snprintf(cmd, sizeof(cmd), "kill $(cat '%s') 2>/dev/null", safe_pid_file);
         system(cmd);
         unlink(done_marker);
         unlink(headers_file);
+        unlink(pid_file);
         unlink(filepath);
         if (speed_bps_out) *speed_bps_out = 0;
         if (eta_sec_out) *eta_sec_out = 0;
         return -1;
     }
 
-    // Step 5: Verify download
+    // Step 5: Verify download. The marker holds curl's exit status: a non-empty
+    // file proves nothing on its own, since a truncated transfer leaves one too.
+    int fetch_exit = -1;
+    FILE* marker = fopen(done_marker, "r");
+    if (marker) {
+        if (fscanf(marker, "%d", &fetch_exit) != 1) fetch_exit = -1;
+        fclose(marker);
+    }
+
     unlink(done_marker);
     unlink(headers_file);
+    unlink(pid_file);
     if (speed_bps_out) *speed_bps_out = 0;
     if (eta_sec_out) *eta_sec_out = 0;
 
     struct stat st;
-    if (stat(filepath, &st) == 0 && st.st_size > 0) {
+    if (fetch_exit == 0 && stat(filepath, &st) == 0 && st.st_size > 0) {
         result = (int)st.st_size;
         if (progress_pct) *progress_pct = 100;
     } else {

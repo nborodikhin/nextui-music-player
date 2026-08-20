@@ -1,4 +1,5 @@
 #include "selfupdate.h"
+#include "wget_fetch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +15,11 @@
 #include "defines.h"
 #include "api.h"
 
+// Identifies the app to GitHub
+#define SELFUPDATE_USER_AGENT "NextUI-Music-Player"
+
 // Paths
 static char pak_path[512] = "";
-static char wget_path[512] = "";
 static char version_file[512] = "";
 static char current_version[32] = "";
 
@@ -203,7 +206,6 @@ int SelfUpdate_init(const char* path) {
     strncpy(pak_path, path, sizeof(pak_path) - 1);
 
     // Set up paths
-    snprintf(wget_path, sizeof(wget_path), "%s/bin/wget", pak_path);
     snprintf(version_file, sizeof(version_file), "%s/state/app_version.txt", pak_path);
 
     // Read version from file (primary source)
@@ -350,8 +352,9 @@ static void* check_thread_func(void* arg) {
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
-        "%s -q -T 15 -t 1 -U \"NextUI-Music-Player\" -O \"%s\" \"https://api.github.com/repos/%s/releases/latest\" 2>/dev/null",
-        wget_path, latest_file, APP_GITHUB_REPO);
+        "curl -sSL --fail %s --connect-timeout 15 --max-time 30 -A \"%s\" -o \"%s\" "
+        "\"https://api.github.com/repos/%s/releases/latest\" 2>/dev/null",
+        http_tls_flags(), SELFUPDATE_USER_AGENT, latest_file, APP_GITHUB_REPO);
 
     if (system(cmd) != 0 || access(latest_file, F_OK) != 0) {
         strcpy(update_status.error_message, "Failed to check GitHub");
@@ -498,11 +501,12 @@ static void* update_thread_func(void* arg) {
         return NULL;
     }
 
-    // Get file size using wget --spider (follows redirects to get actual CDN size)
+    // Ask for the size first; the last Content-Length is the CDN's, after redirects
     char size_cmd[1024];
     snprintf(size_cmd, sizeof(size_cmd),
-        "%s --spider -S -T 10 -t 1 -U \"NextUI-Music-Player\" \"%s\" 2>&1 | grep -i 'Content-Length' | tail -1 | awk '{print $2}'",
-        wget_path, update_status.download_url);
+        "curl -sIL %s --connect-timeout 10 -A \"%s\" \"%s\" | tr -d '\\r' "
+        "| grep -i '^content-length:' | tail -1 | awk '{print $2}'",
+        http_tls_flags(), SELFUPDATE_USER_AGENT, update_status.download_url);
 
     long total_size = 0;
     FILE* size_pipe = popen(size_cmd, "r");
@@ -520,13 +524,20 @@ static void* update_thread_func(void* arg) {
     }
     update_status.download_total = total_size;
 
-    // Start wget in background with a completion marker
+    // Start the download in background, recording curl's pid so a cancel stops
+    // exactly this transfer, and publishing its exit status atomically so a
+    // truncated zip cannot pass for a finished one
     char done_marker[600];
+    char pid_file[600];
     snprintf(done_marker, sizeof(done_marker), "%s/download.done", temp_dir);
+    snprintf(pid_file, sizeof(pid_file), "%s/download.pid", temp_dir);
 
     snprintf(cmd, sizeof(cmd),
-        "(%s -q -U \"NextUI-Music-Player\" -O \"%s\" \"%s\" 2>/dev/null; touch \"%s\") &",
-        wget_path, zip_file, update_status.download_url, done_marker);
+        "(curl -sSL --fail %s --connect-timeout 30 --speed-time 60 --speed-limit 1024 --retry 2 "
+        "-A \"%s\" -o \"%s\" \"%s\" 2>/dev/null & echo $! > \"%s\"; wait $!;"
+        " echo $? > \"%s.part\"; mv \"%s.part\" \"%s\") &",
+        http_tls_flags(), SELFUPDATE_USER_AGENT, zip_file, update_status.download_url,
+        pid_file, done_marker, done_marker, done_marker);
     system(cmd);
 
     // Monitor download progress by checking file size
@@ -559,8 +570,9 @@ static void* update_thread_func(void* arg) {
     }
 
     if (update_cancel) {
-        // Kill any running wget process
-        system("pkill -f 'wget.*NextUI-Music-Player' 2>/dev/null");
+        // Stop only our transfer; a pattern match would also hit the downloader's
+        snprintf(cmd, sizeof(cmd), "kill $(cat \"%s\") 2>/dev/null", pid_file);
+        system(cmd);
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);
         update_status.state = SELFUPDATE_STATE_IDLE;
@@ -568,8 +580,16 @@ static void* update_thread_func(void* arg) {
         return NULL;
     }
 
-    // Verify download completed successfully
-    if (access(zip_file, F_OK) != 0) {
+    // Verify download completed successfully. The marker carries curl's exit
+    // status; a present-but-truncated zip would otherwise look finished.
+    int fetch_exit = -1;
+    FILE* marker = fopen(done_marker, "r");
+    if (marker) {
+        if (fscanf(marker, "%d", &fetch_exit) != 1) fetch_exit = -1;
+        fclose(marker);
+    }
+
+    if (fetch_exit != 0 || access(zip_file, F_OK) != 0) {
         strcpy(update_status.error_message, "Download failed");
         snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
         system(cmd);

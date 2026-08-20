@@ -22,3 +22,4 @@ bin/*.new
 # Runtime state written by the app
 state/yt-dlp_version.txt
 state/youtube_queue.txt
+bin/wget

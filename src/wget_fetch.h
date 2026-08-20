@@ -5,7 +5,8 @@
 #include <stdbool.h>
 
 /**
- * Fetch URL content into memory buffer using wget.
+ * Fetch URL content into memory buffer. Shells out to curl; the wget in the
+ * name is historical, kept so callers did not have to churn.
  * Drop-in replacement for radio_net_fetch() for non-radio callers.
  *
  * @param url         The URL to fetch
@@ -16,8 +17,25 @@
 int wget_fetch(const char* url, uint8_t* buffer, int buffer_size);
 
 /**
+ * Resolve the TLS flags once, before any worker thread can ask for them.
+ * Call from app startup; safe to call more than once.
+ */
+void http_tls_init(void);
+
+/**
+ * curl flags that turn on certificate verification, for callers building their
+ * own command lines. The firmware ships no CA store, so verification works only
+ * against the bundle in res/, which is part of the pak. If it is unreadable the
+ * transfer fails - an unverified download is not an acceptable fallback when
+ * what we fetch gets executed.
+ *
+ * @return  Flag string owned by this module, valid for the process lifetime
+ */
+const char* http_tls_flags(void);
+
+/**
  * Download URL to file with progress reporting and cancellation.
- * Drop-in replacement for http_download_file() using wget.
+ * Drop-in replacement for http_download_file().
  * Supports resume via -c flag. Partial files are kept on failure for resume.
  *
  * @param url           The URL to download
