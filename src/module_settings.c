@@ -40,6 +40,9 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
     int dirty = 1;
     int show_setting = 0;
 
+    // What the About screen last painted, so a change repaints it exactly once
+    UpdateUiState shown_update_ui = UPDATE_UI_UNCHECKED;
+
     while (1) {
         ModuleCommon_frameBegin();
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
@@ -161,32 +164,37 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                 }
                 break;
 
-            case SETTINGS_STATE_ABOUT:
+            case SETTINGS_STATE_ABOUT: {
                 SelfUpdate_update();
-                const SelfUpdateStatus* status = SelfUpdate_getStatus();
+                const SelfUpdateStatus status = SelfUpdate_getSnapshot();
+                const UpdateUiState update_ui = SelfUpdate_uiState(&status);
 
-                // Keep refreshing while checking for updates
-                if (status->state == SELFUPDATE_STATE_CHECKING) {
+                // The check finishes on a worker thread, so the frame that has
+                // to repaint is the one where its state changed under us
+                if (update_ui != shown_update_ui) {
+                    shown_update_ui = update_ui;
                     dirty = 1;
                 }
 
                 if (PAD_justPressed(BTN_A)) {
-                    if (status->update_available) {
+                    if (update_ui == UPDATE_UI_AVAILABLE) {
                         SelfUpdate_startUpdate();
                         state = SETTINGS_STATE_UPDATING;
                         dirty = 1;
-                    } else if (status->state != SELFUPDATE_STATE_CHECKING) {
+                    } else if (update_ui == UPDATE_UI_UNCHECKED || update_ui == UPDATE_UI_FAILED) {
                         if (Wifi_ensureConnected(screen, show_setting)) {
                             SelfUpdate_checkForUpdate();
                         }
                         dirty = 1;
                     }
+                    // Checking and up-to-date offer no A, so nothing to do
                 }
                 else if (PAD_justPressed(BTN_B)) {
                     state = SETTINGS_STATE_MENU;
                     dirty = 1;
                 }
                 break;
+            }
 
             case SETTINGS_STATE_UPDATING:
                 // Disable autosleep during update
