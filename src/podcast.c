@@ -539,7 +539,7 @@ static void download_feed_artwork(PodcastFeed* feed) {
     uint8_t* buf = (uint8_t*)malloc(1024 * 1024);
     if (!buf) return;
 
-    int size = wget_fetch(feed->artwork_url, buf, 1024 * 1024);
+    int size = wget_fetch_bytes(feed->artwork_url, buf, 1024 * 1024);
     if (size > 0 && is_image_data_complete(buf, size)) {
         FILE* f = fopen(art_path, "wb");
         if (f) {
@@ -715,7 +715,7 @@ int Podcast_subscribe(const char* feed_url) {
         return -1;
     }
 
-    int bytes = wget_fetch(feed_url, buffer, 5 * 1024 * 1024);
+    int bytes = wget_fetch_bytes(feed_url, buffer, 5 * 1024 * 1024);
     if (bytes <= 0) {
         LOG_error("[Podcast] Failed to fetch feed: %s\n", feed_url);
         free(buffer);
@@ -928,7 +928,7 @@ int Podcast_refreshFeed(int index) {
     uint8_t* buffer = (uint8_t*)malloc(5 * 1024 * 1024);  // 5MB buffer for large RSS feeds
     if (!buffer) return -1;
 
-    int bytes = wget_fetch(feed->feed_url, buffer, 5 * 1024 * 1024);
+    int bytes = wget_fetch_bytes(feed->feed_url, buffer, 5 * 1024 * 1024);
     if (bytes <= 0) {
         free(buffer);
         return -1;
@@ -1751,6 +1751,30 @@ static int Podcast_startDownloads(void) {
 
 #define PODCAST_MAX_RETRIES 3
 
+// What the download callback needs beyond the byte count: the episode whose row
+// shows the percentage, and the size the server promised
+typedef struct {
+    PodcastDownloadItem* item;
+    long                 total_bytes;
+} EpisodeProgress;
+
+static bool episode_progress(long downloaded, int speed_bps, void* ctx) {
+    EpisodeProgress* progress = (EpisodeProgress*)ctx;
+
+    if (progress->total_bytes > 0) {
+        // Hold at 99 until the transfer is verified; 100 is the caller's to set
+        int pct = (int)((downloaded * 100) / progress->total_bytes);
+        progress->item->progress_percent = pct > 99 ? 99 : pct;
+    }
+
+    download_progress.speed_bps = speed_bps;
+    download_progress.eta_sec = (speed_bps > 0 && progress->total_bytes > downloaded)
+        ? (int)((progress->total_bytes - downloaded) / speed_bps)
+        : 0;
+
+    return !download_should_stop;
+}
+
 static void* download_thread_func(void* arg) {
     (void)arg;
     PWR_pinToCores(CPU_CORE_EFFICIENCY);
@@ -1797,6 +1821,14 @@ static void* download_thread_func(void* arg) {
             }
         }
 
+        long file_size = wget_probe_size(item->url);
+
+        // Ask the server how big the episode is, so progress can be a percentage
+        EpisodeProgress progress = {
+            .item        = item,
+            .total_bytes = file_size,
+        };
+
         // Retry loop with WiFi check and exponential backoff
         int retries = 0;
         int bytes = -1;
@@ -1812,10 +1844,7 @@ static void* download_thread_func(void* arg) {
             }
 
             bytes = wget_download_file(item->url, item->local_path,
-                                       &item->progress_percent,
-                                       &download_should_stop,
-                                       &download_progress.speed_bps,
-                                       &download_progress.eta_sec);
+                                       episode_progress, &progress);
 
             if (bytes > 0 || download_should_stop) break;
 

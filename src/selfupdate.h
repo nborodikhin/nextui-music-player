@@ -26,6 +26,16 @@ typedef enum {
     SELFUPDATE_STATE_ERROR
 } SelfUpdateState;
 
+// What the About screen is showing, and therefore what A does there. Derived
+// from one snapshot so the status text and the button hint cannot disagree.
+typedef enum {
+    UPDATE_UI_UNCHECKED,   // no check has run yet
+    UPDATE_UI_CHECKING,
+    UPDATE_UI_AVAILABLE,   // a newer version exists
+    UPDATE_UI_CURRENT,     // checked, nothing newer
+    UPDATE_UI_FAILED
+} UpdateUiState;
+
 // Update status information
 typedef struct {
     SelfUpdateState state;
@@ -67,6 +77,15 @@ void SelfUpdate_cancelUpdate(void);
 
 // Get current status
 const SelfUpdateStatus* SelfUpdate_getStatus(void);
+
+// A by-value copy of the status. The check runs on a worker thread and can flip
+// fields part-way through a frame, so anything that reads more than one field -
+// a screen drawing text and a button hint from the same state - must take a copy
+// once and use that.
+SelfUpdateStatus SelfUpdate_getSnapshot(void);
+
+// Boil the status down to what a screen needs to show and offer.
+UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status);
 
 // Update function (call from main loop)
 void SelfUpdate_update(void);

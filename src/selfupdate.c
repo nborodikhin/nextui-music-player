@@ -1,5 +1,6 @@
 #include "selfupdate.h"
 #include "wget_fetch.h"
+#include "file_utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,8 +16,15 @@
 #include "defines.h"
 #include "api.h"
 
-// Identifies the app to GitHub
-#define SELFUPDATE_USER_AGENT "NextUI-Music-Player"
+#define RELEASE_JSON_MAX 32768
+
+// How the progress bar is shared out. Download dominates, but unpacking and
+// installing move tens of megabytes on and off the SD card and are slow enough
+// that a bar frozen at one number reads as a hang.
+#define EXTRACT_BASE_PCT 45
+#define EXTRACT_SPAN_PCT 20
+#define APPLY_BASE_PCT   70
+#define APPLY_SPAN_PCT   20
 
 // Paths
 static char pak_path[512] = "";
@@ -29,9 +37,51 @@ static pthread_t update_thread;
 static volatile bool update_running = false;
 static volatile bool update_cancel = false;
 
+// Files the last extract_zip() wrote out, which is what the install then copies
+static int extracted_files = 0;
+
 // Forward declarations
 static void* check_thread_func(void* arg);
 static void* update_thread_func(void* arg);
+
+// Fetch a URL into a freshly allocated, NUL-terminated buffer the caller owns and must free.
+//
+// @param max_size  Largest body to accept, terminator included
+// @return          the body, or NULL if it could not be fetched
+static char* fetch_to_memory(const char* url, size_t max_size) {
+    char* buf = malloc(max_size);
+    if (!buf) return NULL;
+
+    if (wget_fetch_string(url, buf, (int)max_size) < 0) {
+        free(buf);
+        return NULL;
+    }
+
+    return buf;
+}
+
+// Report bytes landed so far against update_status.download_total, scaling the
+// transfer into the first 40% of the update.
+//
+// @return  false once the user has cancelled, which stops the transfer
+static bool report_download_progress(long written, int speed_bps, void* ctx) {
+    (void)speed_bps;
+    (void)ctx;
+
+    update_status.download_bytes = written;
+
+    if (update_status.download_total > 0) {
+        int dl_pct = (int)((written * 100) / update_status.download_total);
+        if (dl_pct > 100) dl_pct = 100;
+        update_status.progress_percent = (dl_pct * 40) / 100;
+    }
+
+    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+        "%.1f MB / %.1f MB", written / (1024.0 * 1024.0),
+        update_status.download_total / (1024.0 * 1024.0));
+
+    return !update_cancel;
+}
 
 // Compare semantic versions: returns positive if v1 > v2, negative if v1 < v2, 0 if equal
 static int compare_versions(const char* v1, const char* v2) {
@@ -91,24 +141,32 @@ static bool is_preserved(const char* rel_path) {
     return false;
 }
 
-// Sync directories: copy all from src to dst, remove orphans in dst
-// This replaces all files and removes files that no longer exist in the update.
+// Drives the install slice of the progress bar from the file count the extract
+// just reported.
+static void note_file_installed(const char* rel_path, void* ctx) {
+    (void)rel_path;
+    (void)ctx;
+
+    int done = ++*(int*)ctx;
+    if (extracted_files > 0) {
+        int pct = (int)((long long)done * 100 / extracted_files);
+        if (pct > 100) pct = 100;
+        update_status.progress_percent = APPLY_BASE_PCT + (APPLY_SPAN_PCT * pct) / 100;
+    }
+
+    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+        "%d / %d files", done, extracted_files);
+}
+
+// Delete anything in dst that the update no longer carries, except the paths
+// written on the device rather than shipped.
 // rel is the path of dst relative to the pak root ("" at the top level).
-static int sync_directories(const char* src, const char* dst, const char* rel) {
-    char cmd[1024];
-    DIR* dir;
+static void remove_orphans(const char* src, const char* dst, const char* rel) {
+    DIR* dir = opendir(dst);
+    if (!dir) return;
+
     struct dirent* entry;
-
-    // First, copy all files from src to dst (overwriting existing)
-    snprintf(cmd, sizeof(cmd), "cp -rf \"%s\"/* \"%s\"/ 2>/dev/null", src, dst);
-    system(cmd);
-
-    // Now remove orphaned files in dst that don't exist in src
-    dir = opendir(dst);
-    if (!dir) return -1;
-
     while ((entry = readdir(dir)) != NULL) {
-        // Skip . and ..
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -118,29 +176,32 @@ static int sync_directories(const char* src, const char* dst, const char* rel) {
         snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
         snprintf(rel_path, sizeof(rel_path), "%s%s%s", rel, rel[0] ? "/" : "", entry->d_name);
 
-        // If file/folder doesn't exist in src, remove it from dst
         if (access(src_path, F_OK) != 0) {
             if (is_preserved(rel_path)) {
                 continue;
             }
-            if (entry->d_type == DT_DIR) {
-                snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", dst_path);
-            } else {
-                snprintf(cmd, sizeof(cmd), "rm -f \"%s\"", dst_path);
-            }
-            system(cmd);
+            rm_rf(dst_path);
         }
-        // If both are directories, recursively sync them
         else if (entry->d_type == DT_DIR) {
-            sync_directories(src_path, dst_path, rel_path);
+            remove_orphans(src_path, dst_path, rel_path);
         }
     }
 
     closedir(dir);
+}
+
+// Install the unpacked update over the pak: copy everything across, then drop
+// whatever the new package no longer has.
+static int sync_directories(const char* src, const char* dst) {
+    int installed = 0;
+    if (!cp_rf(src, dst, note_file_installed, &installed)) return -1;
+
+    remove_orphans(src, dst, "");
     return 0;
 }
 
-// Extract ZIP file using libzip
+// Extract ZIP file using libzip, driving the extract slice of the progress bar
+// from the entry count. Sets extracted_files.
 static int extract_zip(const char* zip_path, const char* dest_dir) {
     int err = 0;
     zip_t* za = zip_open(zip_path, 0, &err);
@@ -148,8 +209,15 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
         return -1;
     }
 
+    extracted_files = 0;
+
     zip_int64_t num_entries = zip_get_num_entries(za, 0);
     for (zip_int64_t i = 0; i < num_entries; i++) {
+        update_status.progress_percent = EXTRACT_BASE_PCT +
+            (int)((long long)EXTRACT_SPAN_PCT * (i + 1) / num_entries);
+        snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+            "%lld / %lld files", (long long)(i + 1), (long long)num_entries);
+
         const char* name = zip_get_name(za, i, 0);
         if (!name) continue;
 
@@ -194,6 +262,8 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
         if (strstr(name, ".elf") || strstr(name, ".sh")) {
             chmod(full_path, 0755);
         }
+
+        extracted_files++;
     }
 
     zip_close(za);
@@ -292,6 +362,23 @@ const SelfUpdateStatus* SelfUpdate_getStatus(void) {
     return &update_status;
 }
 
+SelfUpdateStatus SelfUpdate_getSnapshot(void) {
+    return update_status;
+}
+
+UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status) {
+    if (!status) return UPDATE_UI_UNCHECKED;
+
+    if (status->state == SELFUPDATE_STATE_CHECKING) return UPDATE_UI_CHECKING;
+    if (status->state == SELFUPDATE_STATE_ERROR) return UPDATE_UI_FAILED;
+    if (status->update_available) return UPDATE_UI_AVAILABLE;
+
+    // latest_version is only set once a check has come back
+    if (status->latest_version[0] != '\0') return UPDATE_UI_CURRENT;
+
+    return UPDATE_UI_UNCHECKED;
+}
+
 void SelfUpdate_update(void) {
     // Check if thread has finished
     if (update_running) {
@@ -341,33 +428,21 @@ static void* check_thread_func(void* arg) {
 
     update_status.progress_percent = 20;
 
-    // Create temp directory
-    char temp_dir[512];
-    snprintf(temp_dir, sizeof(temp_dir), "/tmp/app_update_%d", getpid());
-    mkdir(temp_dir, 0755);
-
     // Fetch latest release info from GitHub API
-    char latest_file[600];
-    snprintf(latest_file, sizeof(latest_file), "%s/latest.json", temp_dir);
+    char api_url[256];
+    snprintf(api_url, sizeof(api_url),
+        "https://api.github.com/repos/%s/releases/latest", APP_GITHUB_REPO);
 
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd),
-        "curl -sSL --fail %s --connect-timeout 15 --max-time 30 -A \"%s\" -o \"%s\" "
-        "\"https://api.github.com/repos/%s/releases/latest\" 2>/dev/null",
-        http_tls_flags(), SELFUPDATE_USER_AGENT, latest_file, APP_GITHUB_REPO);
-
-    if (system(cmd) != 0 || access(latest_file, F_OK) != 0) {
+    char* release_json = fetch_to_memory(api_url, RELEASE_JSON_MAX);
+    if (!release_json) {
         strcpy(update_status.error_message, "Failed to check GitHub");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
 
     if (update_cancel) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        free(release_json);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
@@ -375,97 +450,67 @@ static void* check_thread_func(void* arg) {
 
     update_status.progress_percent = 50;
 
-    // Parse version (tag_name) from JSON
-    char version_cmd[1024];
-    snprintf(version_cmd, sizeof(version_cmd),
-        "grep -o '\"tag_name\": *\"[^\"]*' \"%s\" | cut -d'\"' -f4",
-        latest_file);
+    JSON_Value* json_root = json_parse_string(release_json);
+    free(release_json);
 
-    char latest_version[32] = "";
-    FILE* pipe = popen(version_cmd, "r");
-    if (pipe) {
-        if (fgets(latest_version, sizeof(latest_version), pipe)) {
-            char* nl = strchr(latest_version, '\n');
-            if (nl) *nl = '\0';
-        }
-        pclose(pipe);
-    }
+    JSON_Object* release = json_root ? json_value_get_object(json_root) : NULL;
+    const char* latest_version = release ? json_object_get_string(release, "tag_name") : NULL;
 
-    if (strlen(latest_version) == 0) {
+    if (!latest_version || latest_version[0] == '\0') {
+        json_value_free(json_root);
         strcpy(update_status.error_message, "Could not parse version");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
 
-    strncpy(update_status.latest_version, latest_version, sizeof(update_status.latest_version));
+    strncpy(update_status.latest_version, latest_version, sizeof(update_status.latest_version) - 1);
 
     update_status.progress_percent = 70;
 
     // Compare versions using semantic versioning
-    int version_cmp = compare_versions(latest_version, current_version);
-
-    if (version_cmp <= 0) {
+    if (compare_versions(latest_version, current_version) <= 0) {
+        json_value_free(json_root);
         update_status.update_available = false;
         strcpy(update_status.status_message, "Already up to date");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
     }
 
-    // Get download URL for the pak.zip asset
-    char url_cmd[1024];
-    snprintf(url_cmd, sizeof(url_cmd),
-        "grep -o '\"browser_download_url\": *\"[^\"]*%s\"' \"%s\" | cut -d'\"' -f4",
-        APP_RELEASE_ASSET, latest_file);
-
-    char download_url[512] = "";
-    pipe = popen(url_cmd, "r");
-    if (pipe) {
-        if (fgets(download_url, sizeof(download_url), pipe)) {
-            char* nl = strchr(download_url, '\n');
-            if (nl) *nl = '\0';
+    // Locate the pak.zip among the release assets
+    const char* download_url = NULL;
+    JSON_Array* assets = json_object_get_array(release, "assets");
+    for (size_t i = 0; assets && i < json_array_get_count(assets); i++) {
+        JSON_Object* asset = json_array_get_object(assets, i);
+        const char* name = asset ? json_object_get_string(asset, "name") : NULL;
+        if (name && strcmp(name, APP_RELEASE_ASSET) == 0) {
+            download_url = json_object_get_string(asset, "browser_download_url");
+            break;
         }
-        pclose(pipe);
     }
 
-    if (strlen(download_url) == 0) {
+    if (!download_url || download_url[0] == '\0') {
+        json_value_free(json_root);
         strcpy(update_status.error_message, "Release package not found");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
 
-    strncpy(update_status.download_url, download_url, sizeof(update_status.download_url));
+    strncpy(update_status.download_url, download_url, sizeof(update_status.download_url) - 1);
 
-    // Parse release notes (body) from JSON using parson
-    // This properly handles all JSON escape sequences
-    JSON_Value* json_root = json_parse_file(latest_file);
-    if (json_root) {
-        JSON_Object* json_obj = json_value_get_object(json_root);
-        if (json_obj) {
-            const char* body = json_object_get_string(json_obj, "body");
-            if (body) {
-                strncpy(update_status.release_notes, body, sizeof(update_status.release_notes) - 1);
-                update_status.release_notes[sizeof(update_status.release_notes) - 1] = '\0';
-            }
-        }
-        json_value_free(json_root);
+    const char* body = json_object_get_string(release, "body");
+    if (body) {
+        strncpy(update_status.release_notes, body, sizeof(update_status.release_notes) - 1);
+        update_status.release_notes[sizeof(update_status.release_notes) - 1] = '\0';
     }
 
-    // Cleanup temp
-    snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-    system(cmd);
+    json_value_free(json_root);
 
     update_status.update_available = true;
     snprintf(update_status.status_message, sizeof(update_status.status_message),
-        "Update available: %s", latest_version);
+        "Update available: %s", update_status.latest_version);
     update_status.progress_percent = 100;
     update_status.state = SELFUPDATE_STATE_IDLE;
     update_running = false;
@@ -473,14 +518,18 @@ static void* check_thread_func(void* arg) {
     return NULL;
 }
 
+
 // Update thread - downloads and applies update
 static void* update_thread_func(void* arg) {
     (void)arg;
 
-    char cmd[1024];
     char temp_dir[512];
-    snprintf(temp_dir, sizeof(temp_dir), "/tmp/app_update_%d", getpid());
-    mkdir(temp_dir, 0755);
+    if (!mk_tempdir("app_update", temp_dir, sizeof(temp_dir))) {
+        strcpy(update_status.error_message, "No room to stage the update");
+        update_status.state = SELFUPDATE_STATE_ERROR;
+        update_running = false;
+        return NULL;
+    }
 
     // Download the ZIP file
     update_status.state = SELFUPDATE_STATE_DOWNLOADING;
@@ -494,29 +543,13 @@ static void* update_thread_func(void* arg) {
     snprintf(zip_file, sizeof(zip_file), "%s/update.zip", temp_dir);
 
     if (update_cancel) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
     }
 
-    // Ask for the size first; the last Content-Length is the CDN's, after redirects
-    char size_cmd[1024];
-    snprintf(size_cmd, sizeof(size_cmd),
-        "curl -sIL %s --connect-timeout 10 -A \"%s\" \"%s\" | tr -d '\\r' "
-        "| grep -i '^content-length:' | tail -1 | awk '{print $2}'",
-        http_tls_flags(), SELFUPDATE_USER_AGENT, update_status.download_url);
-
-    long total_size = 0;
-    FILE* size_pipe = popen(size_cmd, "r");
-    if (size_pipe) {
-        char size_buf[32];
-        if (fgets(size_buf, sizeof(size_buf), size_pipe)) {
-            total_size = atol(size_buf);
-        }
-        pclose(size_pipe);
-    }
+    long total_size = wget_probe_size(update_status.download_url);
 
     // Fallback to ~5MB if size detection fails
     if (total_size <= 0) {
@@ -524,94 +557,32 @@ static void* update_thread_func(void* arg) {
     }
     update_status.download_total = total_size;
 
-    // Start the download in background, recording curl's pid so a cancel stops
-    // exactly this transfer, and publishing its exit status atomically so a
-    // truncated zip cannot pass for a finished one
-    char done_marker[600];
-    char pid_file[600];
-    snprintf(done_marker, sizeof(done_marker), "%s/download.done", temp_dir);
-    snprintf(pid_file, sizeof(pid_file), "%s/download.pid", temp_dir);
-
-    snprintf(cmd, sizeof(cmd),
-        "(curl -sSL --fail %s --connect-timeout 30 --speed-time 60 --speed-limit 1024 --retry 2 "
-        "-A \"%s\" -o \"%s\" \"%s\" 2>/dev/null & echo $! > \"%s\"; wait $!;"
-        " echo $? > \"%s.part\"; mv \"%s.part\" \"%s\") &",
-        http_tls_flags(), SELFUPDATE_USER_AGENT, zip_file, update_status.download_url,
-        pid_file, done_marker, done_marker, done_marker);
-    system(cmd);
-
-    // Monitor download progress by checking file size
-    while (!update_cancel) {
-        // Check if download is complete
-        if (access(done_marker, F_OK) == 0) {
-            break;
-        }
-
-        // Get current file size
-        struct stat st;
-        if (stat(zip_file, &st) == 0) {
-            update_status.download_bytes = st.st_size;
-
-            // Calculate progress (download is 0-40% of total update)
-            if (update_status.download_total > 0) {
-                int dl_pct = (int)((update_status.download_bytes * 100) / update_status.download_total);
-                if (dl_pct > 100) dl_pct = 100;
-                update_status.progress_percent = (dl_pct * 40) / 100;  // Scale to 0-40%
-            }
-
-            // Format status detail
-            double dl_mb = update_status.download_bytes / (1024.0 * 1024.0);
-            double total_mb = update_status.download_total / (1024.0 * 1024.0);
-            snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-                "%.1f MB / %.1f MB", dl_mb, total_mb);
-        }
-
-        usleep(200000);  // 200ms polling interval
-    }
+    int downloaded = wget_download_file(update_status.download_url, zip_file,
+                                       report_download_progress, NULL);
 
     if (update_cancel) {
-        // Stop only our transfer; a pattern match would also hit the downloader's
-        snprintf(cmd, sizeof(cmd), "kill $(cat \"%s\") 2>/dev/null", pid_file);
-        system(cmd);
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
     }
 
-    // Verify download completed successfully. The marker carries curl's exit
-    // status; a present-but-truncated zip would otherwise look finished.
-    int fetch_exit = -1;
-    FILE* marker = fopen(done_marker, "r");
-    if (marker) {
-        if (fscanf(marker, "%d", &fetch_exit) != 1) fetch_exit = -1;
-        fclose(marker);
-    }
-
-    if (fetch_exit != 0 || access(zip_file, F_OK) != 0) {
+    if (downloaded < 0) {
         strcpy(update_status.error_message, "Download failed");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
 
-    // Update final download stats
-    struct stat final_st;
-    if (stat(zip_file, &final_st) == 0) {
-        update_status.download_bytes = final_st.st_size;
-        double dl_mb = update_status.download_bytes / (1024.0 * 1024.0);
-        snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-            "%.1f MB downloaded", dl_mb);
-    }
+    update_status.download_bytes = downloaded;
+    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+        "%.1f MB downloaded", downloaded / (1024.0 * 1024.0));
 
     update_status.progress_percent = 40;
 
     if (update_cancel) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
@@ -630,8 +601,7 @@ static void* update_thread_func(void* arg) {
     // Extract using libzip
     if (extract_zip(zip_file, extract_dir) != 0) {
         strcpy(update_status.error_message, "Extraction failed");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
@@ -639,43 +609,23 @@ static void* update_thread_func(void* arg) {
 
     update_status.progress_percent = 60;
 
-    // Find the actual extracted directory (might be nested)
-    // Look for launch.sh to find the root (binaries are now in bin/$PLATFORM/)
-    char find_cmd[1024];
-    snprintf(find_cmd, sizeof(find_cmd),
-        "find \"%s\" -name 'launch.sh' -type f 2>/dev/null | head -1",
-        extract_dir);
-
-    char launch_found[600] = "";
-    FILE* pipe = popen(find_cmd, "r");
-    if (pipe) {
-        if (fgets(launch_found, sizeof(launch_found), pipe)) {
-            char* nl = strchr(launch_found, '\n');
-            if (nl) *nl = '\0';
-        }
-        pclose(pipe);
-    }
-
-    if (strlen(launch_found) == 0) {
+    // The package may nest the pak inside a wrapper directory; launch.sh marks the root
+    char update_root[600];
+    if (!find_file(extract_dir, "launch.sh", update_root, sizeof(update_root))) {
         strcpy(update_status.error_message, "Invalid update package");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
     }
 
-    // Get the directory containing launch.sh (the pak root)
-    char* last_slash = strrchr(launch_found, '/');
+    char* last_slash = strrchr(update_root, '/');
     if (last_slash) *last_slash = '\0';
-    char update_root[600];
-    strncpy(update_root, launch_found, sizeof(update_root));
 
     update_status.progress_percent = 65;
 
     if (update_cancel) {
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_IDLE;
         update_running = false;
         return NULL;
@@ -689,10 +639,9 @@ static void* update_thread_func(void* arg) {
     // Sync all files: copy everything from update, remove orphaned files
     // This handles: musicplayer.elf, launch.sh, bin/, fonts/, stations/, state/, etc.
     // Note: Linux allows replacing a running binary - it continues from memory
-    if (sync_directories(update_root, pak_path, "") != 0) {
+    if (sync_directories(update_root, pak_path) != 0) {
         strcpy(update_status.error_message, "Failed to install update");
-        snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-        system(cmd);
+        rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_ERROR;
         update_running = false;
         return NULL;
@@ -723,8 +672,7 @@ static void* update_thread_func(void* arg) {
     sync();
 
     // Cleanup temp directory
-    snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", temp_dir);
-    system(cmd);
+    rm_rf(temp_dir);
 
     update_status.progress_percent = 100;
     strcpy(update_status.status_message, "Update complete!");

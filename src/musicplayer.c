@@ -14,7 +14,6 @@
 #include "config.h"
 #include "player.h"
 #include "selfupdate.h"
-#include "wget_fetch.h"
 
 // UI modules
 #include "ui_fonts.h"
@@ -125,9 +124,6 @@ int main(int argc, char* argv[]) {
 
     // Initialize app-specific settings
     Settings_init();
-
-    // Resolve HTTPS settings while this is still the only thread
-    http_tls_init();
 
     // Startup update check is opt-out; About can still check on demand
     if (Settings_getAutoUpdateEnabled()) {

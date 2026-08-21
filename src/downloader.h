@@ -58,9 +58,26 @@ typedef struct {
     int eta_sec;                 // Current ETA
 } DownloaderDownloadStatus;
 
+// What the helpers screen is showing, and therefore what A does there. Derived
+// from one snapshot so the text and the button hint cannot disagree.
+typedef enum {
+    YTDLP_UI_UNCHECKED,   // no check has run yet
+    YTDLP_UI_CHECKING,
+    YTDLP_UI_AVAILABLE,   // something to install or update
+    YTDLP_UI_CURRENT,     // everything present and current
+    YTDLP_UI_INSTALLING,
+    YTDLP_UI_INSTALLED,
+    YTDLP_UI_FAILED
+} YtdlpUiState;
+
 // Update status info
 typedef struct {
-    bool update_available;
+    bool update_available;      // the check found something to fetch
+    bool fresh_install;         // a helper is absent, so this installs rather than updates
+    bool checking;              // a version check is in flight
+    bool check_complete;        // a check has come back
+    long estimated_bytes;       // what confirming would download
+    char plan_summary[64];      // what it would install, e.g. "yt-dlp, ffmpeg"
     char current_version[32];
     char latest_version[32];
     bool updating;
@@ -148,9 +165,24 @@ bool Downloader_isDownloading(void);
 
 // yt-dlp update functions
 int Downloader_checkForUpdate(void);  // Check if new version available
-int Downloader_startUpdate(void);     // Start updating yt-dlp
+
+// Find out what would be installed, without installing it. Runs in the
+// background; watch DownloaderUpdateStatus.checking for the answer.
+int Downloader_startUpdateCheck(void);
+
+// Install what the last check found. Only meaningful after a check came back
+// reporting update_available.
+int Downloader_startUpdate(void);
 void Downloader_cancelUpdate(void);   // Cancel update
 const DownloaderUpdateStatus* Downloader_getUpdateStatus(void);
+
+// A by-value copy of the update status. The check and the install run on worker
+// threads and can flip fields part-way through a frame, so anything reading more
+// than one field must take a copy once and use that.
+DownloaderUpdateStatus Downloader_getUpdateSnapshot(void);
+
+// Boil the update status down to what a screen needs to show and offer.
+YtdlpUiState Downloader_updateUiState(const DownloaderUpdateStatus* status);
 
 // Get current state
 DownloaderState Downloader_getState(void);

@@ -70,13 +70,13 @@ int podcast_search_itunes(const char* query, PodcastSearchResult* results, int m
 
 
     // Fetch JSON response
-    uint8_t* buffer = (uint8_t*)malloc(128 * 1024);  // 128KB buffer
+    char* buffer = (char*)malloc(128 * 1024);  // 128KB buffer
     if (!buffer) {
         LOG_error("[PodcastSearch] Failed to allocate buffer\n");
         return -1;
     }
 
-    int bytes = wget_fetch(url, buffer, 128 * 1024);
+    int bytes = wget_fetch_string(url, buffer, 128 * 1024);
 
     if (bytes <= 0) {
         LOG_error("[PodcastSearch] Failed to fetch search results\n");
@@ -84,11 +84,9 @@ int podcast_search_itunes(const char* query, PodcastSearchResult* results, int m
         return -1;
     }
 
-    // Null-terminate for JSON parsing
-    buffer[bytes] = '\0';
 
     // Parse JSON response
-    JSON_Value* root = json_parse_string((const char*)buffer);
+    JSON_Value* root = json_parse_string(buffer);
 
     if (!root) {
         // Log first bytes for diagnostics (truncate to 200 chars)
@@ -195,21 +193,20 @@ int podcast_search_lookup_full(const char* itunes_id, char* feed_url, int feed_u
 
 
     // Fetch JSON response
-    uint8_t* buffer = (uint8_t*)malloc(32 * 1024);  // 32KB buffer
+    char* buffer = (char*)malloc(32 * 1024);  // 32KB buffer
     if (!buffer) {
         return -1;
     }
 
-    int bytes = wget_fetch(url, buffer, 32 * 1024);
+    int bytes = wget_fetch_string(url, buffer, 32 * 1024);
     if (bytes <= 0) {
         free(buffer);
         return -1;
     }
 
-    buffer[bytes] = '\0';
 
     // Parse JSON
-    JSON_Value* root = json_parse_string((const char*)buffer);
+    JSON_Value* root = json_parse_string(buffer);
     free(buffer);
 
     if (!root) {
@@ -290,19 +287,18 @@ int podcast_charts_fetch(const char* country_code, PodcastChartItem* top, int* t
              country_code, fetch_limit);
 
 
-    uint8_t* buffer = (uint8_t*)malloc(256 * 1024);  // 256KB buffer
+    char* buffer = (char*)malloc(256 * 1024);  // 256KB buffer
     if (!buffer) {
         LOG_error("[PodcastCharts] Failed to allocate buffer for top shows\n");
         return -1;
     }
 
-    int bytes = wget_fetch(url, buffer, 256 * 1024);
+    int bytes = wget_fetch_string(url, buffer, 256 * 1024);
     if (bytes <= 0) {
         LOG_error("[PodcastCharts] Network fetch failed for top shows (bytes=%d)\n", bytes);
     } else {
-        buffer[bytes] = '\0';
 
-        JSON_Value* root = json_parse_string((const char*)buffer);
+        JSON_Value* root = json_parse_string(buffer);
         if (root) {
             JSON_Object* obj = json_value_get_object(root);
             JSON_Object* feed = json_object_get_object(obj, "feed");
@@ -386,23 +382,22 @@ int podcast_charts_filter_premium(PodcastChartItem* items, int count, int max_it
     snprintf(url, sizeof(url), "https://itunes.apple.com/lookup?id=%s", ids_param);
 
 
-    uint8_t* buffer = (uint8_t*)malloc(256 * 1024);  // 256KB buffer
+    char* buffer = (char*)malloc(256 * 1024);  // 256KB buffer
     if (!buffer) {
         LOG_error("[PodcastCharts] Failed to allocate buffer for batch lookup\n");
         return count;  // Return original count on error
     }
 
-    int bytes = wget_fetch(url, buffer, 256 * 1024);
+    int bytes = wget_fetch_string(url, buffer, 256 * 1024);
     if (bytes <= 0) {
         LOG_error("[PodcastCharts] Batch lookup failed\n");
         free(buffer);
         return count;
     }
 
-    buffer[bytes] = '\0';
 
     // Parse response and build a map of valid (non-premium) podcast IDs with their feed URLs
-    JSON_Value* root = json_parse_string((const char*)buffer);
+    JSON_Value* root = json_parse_string(buffer);
     free(buffer);
 
     if (!root) {
