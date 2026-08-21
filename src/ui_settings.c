@@ -76,8 +76,8 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
                                                 : "Install Youtube download helpers";
                 break;
             case SETTINGS_ITEM_ABOUT: {
-                const SelfUpdateStatus* status = SelfUpdate_getStatus();
-                if (status->update_available) {
+                const SelfUpdateStatus status = SelfUpdate_getStatus();
+                if (status.update_available) {
                     label = "About (Update available)";
                 } else {
                     label = "About";

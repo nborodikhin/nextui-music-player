@@ -166,7 +166,7 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
 
             case SETTINGS_STATE_ABOUT: {
                 SelfUpdate_update();
-                const SelfUpdateStatus status = SelfUpdate_getSnapshot();
+                const SelfUpdateStatus status = SelfUpdate_getStatus();
                 const UpdateUiState update_ui = SelfUpdate_uiState(&status);
 
                 // The check finishes on a worker thread, so the frame that has
@@ -201,8 +201,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                 ModuleCommon_setAutosleepDisabled(true);
 
                 SelfUpdate_update();
-                const SelfUpdateStatus* update_status = SelfUpdate_getStatus();
-                SelfUpdateState update_state = update_status->state;
+                const SelfUpdateStatus update_status = SelfUpdate_getStatus();
+                SelfUpdateState update_state = update_status.state;
 
                 if (update_state == SELFUPDATE_STATE_COMPLETED) {
                     if (PAD_justPressed(BTN_A)) {

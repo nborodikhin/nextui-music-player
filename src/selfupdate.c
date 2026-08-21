@@ -403,11 +403,7 @@ void SelfUpdate_cancelUpdate(void) {
     }
 }
 
-const SelfUpdateStatus* SelfUpdate_getStatus(void) {
-    return &update_status;
-}
-
-SelfUpdateStatus SelfUpdate_getSnapshot(void) {
+SelfUpdateStatus SelfUpdate_getStatus(void) {
     return update_status;
 }
 

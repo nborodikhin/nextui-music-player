@@ -59,8 +59,8 @@ static const char* main_menu_get_label(int index, const char* default_label,
             break;
         }
         case MENU_SETTINGS: {
-            const SelfUpdateStatus* status = SelfUpdate_getStatus();
-            if (status->update_available) {
+            const SelfUpdateStatus status = SelfUpdate_getStatus();
+            if (status.update_available) {
                 snprintf(buffer, buffer_size, "Settings (Update available)");
                 return buffer;
             }

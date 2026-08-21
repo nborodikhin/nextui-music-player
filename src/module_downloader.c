@@ -85,7 +85,7 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         }
 
         Downloader_update();
-        const DownloaderUpdateStatus status = Downloader_getUpdateSnapshot();
+        const DownloaderUpdateStatus status = Downloader_getUpdateStatus();
         const YtdlpUiState ui = Downloader_updateUiState(&status);
 
         // The workers finish on their own threads, so the frame that has to
@@ -248,17 +248,17 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         // =========================================
         else if (state == DOWNLOADER_INTERNAL_SEARCHING) {
             Downloader_update();
-            const DownloaderSearchStatus* search_status = Downloader_getSearchStatus();
-            if (search_status->completed) {
-                if (search_status->result_count > 0) {
+            const DownloaderSearchStatus search_status = Downloader_getSearchStatus();
+            if (search_status.completed) {
+                if (search_status.result_count > 0) {
                     results = Downloader_getSearchResults();
-                    result_count = search_status->result_count;
+                    result_count = search_status.result_count;
                     ListNav_reconcile(&results_nav, result_count);
                     ListNav_scrollToTop(&results_nav);
                     state = DOWNLOADER_INTERNAL_RESULTS;
                 } else {
-                    Toast_show(search_status->error_message[0]
-                                   ? search_status->error_message : "No results found",
+                    Toast_show(search_status.error_message[0]
+                                   ? search_status.error_message : "No results found",
                                TOAST_DURATION);
                     state = DOWNLOADER_INTERNAL_MENU;
                 }

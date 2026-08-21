@@ -20,6 +20,16 @@
 #include "file_utils.h"
 #include "include/parson/parson.h"
 
+// Module states. Nothing outside this file needs them - the screens read the
+// individual status structs instead.
+typedef enum {
+    DOWNLOADER_STATE_IDLE = 0,
+    DOWNLOADER_STATE_SEARCHING,
+    DOWNLOADER_STATE_DOWNLOADING,
+    DOWNLOADER_STATE_UPDATING,
+    DOWNLOADER_STATE_ERROR
+} DownloaderState;
+
 // Paths
 static char ytdlp_path[512] = "";
 static char qjs_path[512] = "";
@@ -527,8 +537,8 @@ int Downloader_startSearch(const char* query) {
 }
 
 // Get search status
-const DownloaderSearchStatus* Downloader_getSearchStatus(void) {
-    return &search_status;
+DownloaderSearchStatus Downloader_getSearchStatus(void) {
+    return search_status;
 }
 
 // Get search results
@@ -960,7 +970,6 @@ int Downloader_downloadStart(void) {
 
     // Reset download status
     memset(&download_status, 0, sizeof(download_status));
-    download_status.state = DOWNLOADER_STATE_DOWNLOADING;
     download_status.total_items = pending;
 
     download_running = true;
@@ -988,9 +997,8 @@ bool Downloader_isDownloading(void) {
     return download_running;
 }
 
-const DownloaderDownloadStatus* Downloader_getDownloadStatus(void) {
-    download_status.state = youtube_state;
-    return &download_status;
+DownloaderDownloadStatus Downloader_getDownloadStatus(void) {
+    return download_status;
 }
 
 // Roughly what each transfer costs today, used only to weight the progress bar
@@ -1466,16 +1474,6 @@ static void* update_thread_func(void* arg) {
     return NULL;
 }
 
-int Downloader_checkForUpdate(void) {
-    if (update_running) return 0;
-
-    // Just check version without downloading
-    memset(&update_status, 0, sizeof(update_status));
-    strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
-
-    return 0;
-}
-
 int Downloader_startUpdateCheck(void) {
     if (update_running) return 0;
 
@@ -1542,7 +1540,7 @@ void Downloader_cancelUpdate(void) {
     }
 }
 
-DownloaderUpdateStatus Downloader_getUpdateSnapshot(void) {
+DownloaderUpdateStatus Downloader_getUpdateStatus(void) {
     return update_status;
 }
 
@@ -1561,14 +1559,6 @@ YtdlpUiState Downloader_updateUiState(const DownloaderUpdateStatus* status) {
     }
 
     return YTDLP_UI_UNCHECKED;
-}
-
-const DownloaderUpdateStatus* Downloader_getUpdateStatus(void) {
-    return &update_status;
-}
-
-DownloaderState Downloader_getState(void) {
-    return youtube_state;
 }
 
 const char* Downloader_getError(void) {

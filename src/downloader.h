@@ -36,18 +36,8 @@ typedef struct {
     int eta_sec;           // Estimated time remaining in seconds
 } DownloaderQueueItem;
 
-// Module states
-typedef enum {
-    DOWNLOADER_STATE_IDLE = 0,
-    DOWNLOADER_STATE_SEARCHING,
-    DOWNLOADER_STATE_DOWNLOADING,
-    DOWNLOADER_STATE_UPDATING,
-    DOWNLOADER_STATE_ERROR
-} DownloaderState;
-
 // Download status info
 typedef struct {
-    DownloaderState state;
     int current_index;           // Currently downloading item index
     int total_items;             // Total items in queue
     int completed_count;         // Number completed
@@ -130,7 +120,7 @@ const char* Downloader_getVersion(void);
 int Downloader_startSearch(const char* query);
 
 // Get search status (call in main loop to check progress)
-const DownloaderSearchStatus* Downloader_getSearchStatus(void);
+DownloaderSearchStatus Downloader_getSearchStatus(void);
 
 // Get search results after search completes
 // Returns pointer to internal results array, count is set via status->result_count
@@ -158,34 +148,30 @@ int Downloader_downloadStart(void);
 void Downloader_downloadStop(void);
 
 // Get download status
-const DownloaderDownloadStatus* Downloader_getDownloadStatus(void);
+DownloaderDownloadStatus Downloader_getDownloadStatus(void);
 
 // Check if download thread is running
 bool Downloader_isDownloading(void);
 
-// yt-dlp update functions
-int Downloader_checkForUpdate(void);  // Check if new version available
-
-// Find out what would be installed, without installing it. Runs in the
-// background; watch DownloaderUpdateStatus.checking for the answer.
+// Start the update check (without installing) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
 int Downloader_startUpdateCheck(void);
 
-// Install what the last check found. Only meaningful after a check came back
-// reporting update_available.
+// Start the update (download+install) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
 int Downloader_startUpdate(void);
-void Downloader_cancelUpdate(void);   // Cancel update
-const DownloaderUpdateStatus* Downloader_getUpdateStatus(void);
+
+// Cancel background processes (check or update)
+void Downloader_cancelUpdate(void);
 
 // A by-value copy of the update status. The check and the install run on worker
 // threads and can flip fields part-way through a frame, so anything reading more
 // than one field must take a copy once and use that.
-DownloaderUpdateStatus Downloader_getUpdateSnapshot(void);
+DownloaderUpdateStatus Downloader_getUpdateStatus(void);
 
 // Boil the update status down to what a screen needs to show and offer.
 YtdlpUiState Downloader_updateUiState(const DownloaderUpdateStatus* status);
 
-// Get current state
-DownloaderState Downloader_getState(void);
 
 // Get last error message
 const char* Downloader_getError(void);

@@ -223,13 +223,13 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
 
     int qcount = 0;
     DownloaderQueueItem* queue = Downloader_queueGet(&qcount);
-    const DownloaderDownloadStatus* dl_status = Downloader_getDownloadStatus();
+    const DownloaderDownloadStatus dl_status = Downloader_getDownloadStatus();
 
     // Title with completion count
     char title[64];
-    if (dl_status->total_items > 0) {
+    if (dl_status.total_items > 0) {
         snprintf(title, sizeof(title), "Downloads (%d/%d)",
-                 dl_status->completed_count, dl_status->total_items);
+                 dl_status.completed_count, dl_status.total_items);
     } else {
         snprintf(title, sizeof(title), "Download Queue");
     }
@@ -415,7 +415,7 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
 
     // One snapshot for the whole frame: the worker threads flip these fields as
     // they go, and the text and the button hints have to agree with each other
-    const DownloaderUpdateStatus status = Downloader_getUpdateSnapshot();
+    const DownloaderUpdateStatus status = Downloader_getUpdateStatus();
     const YtdlpUiState ui = Downloader_updateUiState(&status);
     // Any missing helper makes this an install: the set is what the user has,
     // not the yt-dlp binary on its own
