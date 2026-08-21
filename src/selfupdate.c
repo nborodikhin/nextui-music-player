@@ -37,7 +37,7 @@ static pthread_t update_thread;
 static volatile bool update_running = false;
 static volatile bool update_cancel = false;
 
-// Files the last extract_zip() wrote out, which is what the install then copies
+// Files the last extraction wrote out, which is what the install then copies
 static int extracted_files = 0;
 
 // Forward declarations
@@ -100,25 +100,6 @@ static int compare_versions(const char* v1, const char* v2) {
     return patch1 - patch2;
 }
 
-// Helper function to create directory path recursively
-static int mkpath(const char* path, mode_t mode) {
-    char tmp[512];
-    char* p = NULL;
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (tmp[len - 1] == '/') tmp[len - 1] = 0;
-
-    for (p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, mode);
-            *p = '/';
-        }
-    }
-    return mkdir(tmp, mode);
-}
 
 // Written on the device rather than shipped, keyed by their path relative to the
 // pak root. They are absent from the package on purpose, so orphan removal must
@@ -139,6 +120,19 @@ static bool is_preserved(const char* rel_path) {
         if (strcmp(preserved_paths[i], rel_path) == 0) return true;
     }
     return false;
+}
+
+// Drives the extract slice of the progress bar from the archive's entry count.
+static void note_entry_extracted(long done, long total, void* ctx) {
+    (void)ctx;
+
+    if (total > 0) {
+        update_status.progress_percent = EXTRACT_BASE_PCT +
+            (int)((long long)EXTRACT_SPAN_PCT * done / total);
+    }
+
+    snprintf(update_status.status_detail, sizeof(update_status.status_detail),
+        "%ld / %ld files", done, total);
 }
 
 // Drives the install slice of the progress bar from the file count the extract
@@ -200,120 +194,6 @@ static int sync_directories(const char* src, const char* dst) {
     return 0;
 }
 
-// Reject an archive entry that would land outside the directory being extracted
-// into: an absolute path, or one that walks up out of it. A package we build
-// contains neither, so anything that does is not a package we should unpack.
-static bool zip_entry_is_contained(const char* name) {
-    if (name[0] == '/') return false;
-
-    for (const char* part = name; *part; ) {
-        const char* slash = strchr(part, '/');
-        size_t len = slash ? (size_t)(slash - part) : strlen(part);
-
-        if (len == 2 && part[0] == '.' && part[1] == '.') return false;
-        if (!slash) break;
-        part = slash + 1;
-    }
-
-    return true;
-}
-
-// Extract ZIP file using libzip, driving the extract slice of the progress bar
-// from the entry count. Sets extracted_files.
-//
-// Any failure fails the whole extraction: a partial tree looks like a valid
-// package to the install that follows, which would then copy it over the pak and
-// delete everything the truncated archive did not mention.
-//
-// @return 0 on success, -1 if the archive could not be unpacked in full
-static int extract_zip(const char* zip_path, const char* dest_dir) {
-    int err = 0;
-    zip_t* za = zip_open(zip_path, 0, &err);
-    if (!za) {
-        return -1;
-    }
-
-    extracted_files = 0;
-    bool ok = true;
-
-    zip_int64_t num_entries = zip_get_num_entries(za, 0);
-    for (zip_int64_t i = 0; ok && i < num_entries; i++) {
-        update_status.progress_percent = EXTRACT_BASE_PCT +
-            (int)((long long)EXTRACT_SPAN_PCT * (i + 1) / num_entries);
-        snprintf(update_status.status_detail, sizeof(update_status.status_detail),
-            "%lld / %lld files", (long long)(i + 1), (long long)num_entries);
-
-        const char* name = zip_get_name(za, i, 0);
-        if (!name || !zip_entry_is_contained(name)) {
-            LOG_error("[SelfUpdate] Refusing archive entry: %s\n", name ? name : "(unnamed)");
-            ok = false;
-            break;
-        }
-
-        char full_path[600];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dest_dir, name);
-
-        // Check if it's a directory
-        size_t name_len = strlen(name);
-        if (name_len > 0 && name[name_len - 1] == '/') {
-            mkpath(full_path, 0755);
-            continue;
-        }
-
-        // Create parent directory if needed
-        char* last_slash = strrchr(full_path, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            mkpath(full_path, 0755);
-            *last_slash = '/';
-        }
-
-        // Extract file
-        zip_file_t* zf = zip_fopen_index(za, i, 0);
-        if (!zf) {
-            LOG_error("[SelfUpdate] Could not read %s from the archive\n", name);
-            ok = false;
-            break;
-        }
-
-        FILE* out = fopen(full_path, "wb");
-        if (!out) {
-            LOG_error("[SelfUpdate] Could not write %s\n", full_path);
-            zip_fclose(zf);
-            ok = false;
-            break;
-        }
-
-        char buf[8192];
-        zip_int64_t bytes_read;
-        while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
-            if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
-                LOG_error("[SelfUpdate] Short write extracting %s\n", name);
-                ok = false;
-                break;
-            }
-        }
-        if (bytes_read < 0) {
-            LOG_error("[SelfUpdate] Corrupt archive entry: %s\n", name);
-            ok = false;
-        }
-
-        if (fclose(out) != 0) ok = false;
-        zip_fclose(zf);
-
-        if (!ok) break;
-
-        // Preserve executable permission for .elf and .sh files
-        if (strstr(name, ".elf") || strstr(name, ".sh")) {
-            chmod(full_path, 0755);
-        }
-
-        extracted_files++;
-    }
-
-    zip_close(za);
-    return ok ? 0 : -1;
-}
 
 int SelfUpdate_init(const char* path) {
     if (!path) return -1;
@@ -640,7 +520,8 @@ static void* update_thread_func(void* arg) {
     mkdir(extract_dir, 0755);
 
     // Extract using libzip
-    if (extract_zip(zip_file, extract_dir) != 0) {
+    extracted_files = extract_zip(zip_file, extract_dir, note_entry_extracted, NULL);
+    if (extracted_files < 0) {
         strcpy(update_status.error_message, "Extraction failed");
         rm_rf(temp_dir);
         update_status.state = SELFUPDATE_STATE_ERROR;
@@ -687,18 +568,6 @@ static void* update_thread_func(void* arg) {
         update_running = false;
         return NULL;
     }
-
-    update_status.progress_percent = 90;
-
-    // Ensure executables have correct permissions
-    // Binaries are now in bin/$PLATFORM/ subdirectories
-    char binary_path[600], launch_path[600];
-    snprintf(binary_path, sizeof(binary_path), "%s/bin/tg5040/musicplayer.elf", pak_path);
-    chmod(binary_path, 0755);
-    snprintf(binary_path, sizeof(binary_path), "%s/bin/tg5050/musicplayer.elf", pak_path);
-    chmod(binary_path, 0755);
-    snprintf(launch_path, sizeof(launch_path), "%s/launch.sh", pak_path);
-    chmod(launch_path, 0755);
 
     update_status.progress_percent = 95;
 

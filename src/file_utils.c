@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <zip.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <time.h>
@@ -168,4 +169,135 @@ bool find_file(const char* root, const char* name, char* out, size_t out_size) {
 
     closedir(dir);
     return found;
+}
+
+// Helper function to create directory path recursively
+static int mkpath(const char* path, mode_t mode) {
+    char tmp[512];
+    char* p = NULL;
+    size_t len;
+
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    len = strlen(tmp);
+    if (tmp[len - 1] == '/') tmp[len - 1] = 0;
+
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, mode);
+            *p = '/';
+        }
+    }
+    return mkdir(tmp, mode);
+}
+
+// Reject an archive entry that would land outside the directory being extracted
+// into: an absolute path, or one that walks up out of it. A package we build
+// contains neither, so anything that does is not a package we should unpack.
+static bool zip_entry_is_contained(const char* name) {
+    if (name[0] == '/') return false;
+
+    for (const char* part = name; *part; ) {
+        const char* slash = strchr(part, '/');
+        size_t len = slash ? (size_t)(slash - part) : strlen(part);
+
+        if (len == 2 && part[0] == '.' && part[1] == '.') return false;
+        if (!slash) break;
+        part = slash + 1;
+    }
+
+    return true;
+}
+
+// The permission bits a zip entry asks for, or 0 when the archive does not say.
+// Only the low nine survive: setuid, setgid and sticky are not something a
+// downloaded archive gets to request.
+static mode_t zip_entry_mode(zip_t* za, zip_uint64_t index) {
+    zip_uint8_t opsys = 0;
+    zip_uint32_t attributes = 0;
+
+    if (zip_file_get_external_attributes(za, index, 0, &opsys, &attributes) != 0) return 0;
+    if (opsys != ZIP_OPSYS_UNIX) return 0;
+
+    return (mode_t)((attributes >> 16) & 0777);
+}
+
+int extract_zip(const char* zip_path, const char* dest_dir,
+                ExtractProgressFn on_entry, void* ctx) {
+    int err = 0;
+    zip_t* za = zip_open(zip_path, 0, &err);
+    if (!za) {
+        return -1;
+    }
+
+    int written = 0;
+    bool ok = true;
+
+    zip_int64_t num_entries = zip_get_num_entries(za, 0);
+    for (zip_int64_t i = 0; ok && i < num_entries; i++) {
+        if (on_entry) on_entry((long)(i + 1), (long)num_entries, ctx);
+
+        const char* name = zip_get_name(za, i, 0);
+        if (!name || !zip_entry_is_contained(name)) {
+            ok = false;
+            break;
+        }
+
+        char full_path[600];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dest_dir, name);
+
+        // Check if it's a directory
+        size_t name_len = strlen(name);
+        if (name_len > 0 && name[name_len - 1] == '/') {
+            mkpath(full_path, 0755);
+            continue;
+        }
+
+        // Create parent directory if needed
+        char* last_slash = strrchr(full_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            mkpath(full_path, 0755);
+            *last_slash = '/';
+        }
+
+        // Extract file
+        zip_file_t* zf = zip_fopen_index(za, i, 0);
+        if (!zf) {
+            ok = false;
+            break;
+        }
+
+        FILE* out = fopen(full_path, "wb");
+        if (!out) {
+            zip_fclose(zf);
+            ok = false;
+            break;
+        }
+
+        char buf[8192];
+        zip_int64_t bytes_read;
+        while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
+            if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
+                ok = false;
+                break;
+            }
+        }
+        if (bytes_read < 0) {
+            ok = false;
+        }
+
+        if (fclose(out) != 0) ok = false;
+        zip_fclose(zf);
+
+        if (!ok) break;
+
+        mode_t mode = zip_entry_mode(za, (zip_uint64_t)i);
+        if (mode != 0) chmod(full_path, mode);
+
+        written++;
+    }
+
+    zip_close(za);
+    return ok ? written : -1;
 }

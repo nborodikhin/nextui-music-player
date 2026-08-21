@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 /**
  * Escape a string for use inside double quotes in a shell command line.
@@ -42,6 +43,26 @@ typedef void (*CopyProgressFn)(const char* rel_path, void* ctx);
  * @return        true if everything copied
  */
 bool cp_rf(const char* src, const char* dst, CopyProgressFn on_file, void* ctx);
+
+/**
+ * Called for each archive entry as extract_zip() works through it.
+ */
+typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
+
+/**
+ * Unpack a zip into dest_dir. Entries naming a path outside it are refused, and
+ * any failure fails the whole extraction: a half-unpacked tree looks like a whole
+ * one to whatever reads it next.
+ *
+ * Permission bits recorded by the archive are restored. setuid, setgid and
+ * sticky are not: a downloaded archive does not get to ask for those. An archive
+ * that records no mode leaves files however the umask made them.
+ *
+ * @param on_entry Called per entry, may be NULL
+ * @return         Files written, or -1 if the archive could not be unpacked
+ */
+int extract_zip(const char* zip_path, const char* dest_dir,
+                ExtractProgressFn on_entry, void* ctx);
 
 /**
  * Recursively look for a file called name under root.
