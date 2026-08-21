@@ -60,10 +60,9 @@ static DownloaderResult* results = NULL;
 static int result_count = 0;
 
 YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* show_setting) {
-    Downloader_startUpdate();
-
     int dirty = 1;
     bool finished = false;
+    bool started = false;
     while (1) {
         ModuleCommon_frameBegin();
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
@@ -82,14 +81,24 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
 
         Downloader_update();
         const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
-        if (!status->updating && !finished) {
+        if (started && !status->updating && !finished) {
             finished = true;
             dirty = 1;
         }
 
+        // Nothing has been fetched until A is pressed here
+        if (!started) {
+            if (PAD_justPressed(BTN_A)) {
+                Downloader_startUpdate();
+                started = true;
+                dirty = 1;
+            } else if (PAD_justPressed(BTN_B)) {
+                return YTDLP_INSTALL_DONE;
+            }
+        }
         // While running, B cancels. Once finished, the screen holds the result
         // until dismissed so a failure reason stays readable.
-        if (PAD_justPressed(BTN_B) || (finished && PAD_justPressed(BTN_A))) {
+        else if (PAD_justPressed(BTN_B) || (finished && PAD_justPressed(BTN_A))) {
             if (status->updating) {
                 Downloader_cancelUpdate();
             }
@@ -99,8 +108,8 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         ModuleCommon_PWR_update(&dirty, show_setting);
 
         // Progress advances on its own, so redraw every frame until it settles
-        if (dirty || !finished) {
-            render_ytdlp_updating(screen, *show_setting);
+        if (dirty || (started && !finished)) {
+            render_ytdlp_updating(screen, *show_setting, !started);
             if (*show_setting) {
                 GFX_blitHardwareHints(screen, *show_setting);
             }
@@ -117,45 +126,6 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
 
 // Ask before spending the user's bandwidth on the yt-dlp download.
 // Returns true when the user accepts; sets should_quit when they exit the app.
-static bool confirm_ytdlp_install(DisplayContext* display, int* show_setting, bool* should_quit) {
-    int dirty = 1;
-    while (1) {
-        ModuleCommon_frameBegin();
-        SDL_Surface* const screen = DisplayHelper_getSurface(display);
-
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, show_setting,
-                                                                  DOWNLOADER_YTDLP_HELP_STATE);
-        if (global.should_quit) {
-            *should_quit = true;
-            return false;
-        }
-        if (global.input_consumed) {
-            if (global.dirty) dirty = 1;
-            GFX_sync();
-            continue;
-        }
-
-        if (PAD_justPressed(BTN_A)) return true;
-        if (PAD_justPressed(BTN_B)) return false;
-
-        ModuleCommon_PWR_update(&dirty, show_setting);
-
-        if (dirty) {
-            render_downloader_menu(screen, *show_setting, menu_nav.selected, menu_nav.scroll);
-            // Long names go in the title slot at the caller's risk - only the
-            // content line is truncated to the dialog box
-            render_confirmation_dialog(screen, "Install now? About 40 MB",
-                                       "Youtube download helpers");
-            if (*show_setting) {
-                GFX_blitHardwareHints(screen, *show_setting);
-            }
-            GFX_flip(screen);
-            dirty = 0;
-        } else {
-            GFX_sync();
-        }
-    }
-}
 
 ModuleExitReason DownloaderModule_run(DisplayContext* display) {
     Downloader_init();
@@ -170,21 +140,14 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
 
     // yt-dlp ships separately from the app - offer to fetch it on first use
     if (!Downloader_isAvailable()) {
-        // Rides above the dialog and explains why it is being asked
-        Toast_show("Downloader needs Youtube download helpers", TOAST_DURATION);
-
-        bool should_quit = false;
-        if (!confirm_ytdlp_install(display, &show_setting, &should_quit)) {
-            Downloader_cleanup();
-            return should_quit ? MODULE_EXIT_QUIT : MODULE_EXIT_TO_MENU;
-        }
+        // The install screen says what it is doing and why, so no toast rides
+        // over it, and declining is the user's own decision to be told about.
         if (DownloaderModule_runInstall(display, &show_setting) == YTDLP_INSTALL_QUIT) {
             Downloader_cleanup();
             return MODULE_EXIT_QUIT;
         }
         if (Downloader_init() != 0) {
             Downloader_cleanup();
-            Toast_show(Downloader_getError(), TOAST_DURATION);
             return MODULE_EXIT_TO_MENU;
         }
     }

@@ -407,14 +407,20 @@ void downloader_results_clear_scroll(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
 }
 
-void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
+void render_ytdlp_updating(SDL_Surface* screen, int show_setting, bool awaiting_confirm) {
     GFX_clear(screen);
 
     int hw = screen->w;
     int hh = screen->h;
 
     const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
-    bool installing = strcmp(status->current_version, DOWNLOADER_VERSION_NOT_INSTALLED) == 0;
+
+    // The status carries the version only once an install has started, and this
+    // screen is now drawn before that - ask the module directly until then
+    const char* current = status->current_version[0] != '\0'
+        ? status->current_version
+        : Downloader_getVersion();
+    bool installing = strcmp(current, DOWNLOADER_VERSION_NOT_INSTALLED) == 0;
 
     render_screen_header(screen,
                          installing ? "Installing Youtube helpers" : "Updating Youtube helpers",
@@ -422,7 +428,7 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
 
     // Current version
     char ver_str[128];
-    snprintf(ver_str, sizeof(ver_str), "Current: %s", status->current_version);
+    snprintf(ver_str, sizeof(ver_str), "Current: %s", current);
     SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
     if (ver_text) {
         SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
@@ -435,7 +441,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     // terminal states after the last one finishes.
     char status_buf[96];
     const char* status_msg = "Checking connection...";
-    if (!status->updating && strlen(status->error_message) > 0) {
+    if (awaiting_confirm) {
+        // Asked here rather than in a dialog over the top, so the header and the
+        // installed version stay readable while the user decides
+        status_msg = "Install now? About 40 MB";
+    } else if (!status->updating && strlen(status->error_message) > 0) {
         status_msg = status->error_message;
     } else if (!status->updating && !status->update_available && status->progress_percent >= 100) {
         status_msg = "Already up to date!";
@@ -508,15 +518,15 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
         }
     }
 
-    // Button hints
+    // Button hints. This screen is also where the user agrees to the download,
+    // so A appears on it rather than in a dialog over it.
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    if (status->updating) {
+    if (awaiting_confirm) {
+        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", installing ? "INSTALL" : "UPDATE", NULL},
+                            1, screen, 1);
+    } else if (status->updating) {
         GFX_blitButtonGroup((char*[]){"B", "CANCEL", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
-    }
-
-    if (!status->updating) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 0, screen, 1);
     }
 }
