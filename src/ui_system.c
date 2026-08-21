@@ -253,38 +253,43 @@ void render_about(SDL_Surface* screen, int show_setting) {
         SDL_FreeSurface(tagline_text2);
     }
 
-    // Show update status
-    const SelfUpdateStatus* status = SelfUpdate_getStatus();
-    SelfUpdateState state = status->state;
+    // One snapshot for the whole frame: the check thread can flip these fields
+    // between the status text below and the button hints at the bottom, which
+    // is how the screen ended up offering UPDATE while still saying "Checking".
+    const SelfUpdateStatus status = SelfUpdate_getSnapshot();
+    const UpdateUiState update_ui = SelfUpdate_uiState(&status);
     int status_y = info_y + SCALE1(40);
 
-    if (status->update_available) {
-        char update_msg[128];
-        snprintf(update_msg, sizeof(update_msg), "Update available: %s", status->latest_version);
-        SDL_Surface* update_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), update_msg, (SDL_Color){100, 255, 100, 255});
-        if (update_text) {
-            SDL_BlitSurface(update_text, NULL, screen, &(SDL_Rect){(hw - update_text->w) / 2, status_y});
-            SDL_FreeSurface(update_text);
-        }
-    } else if (state == SELFUPDATE_STATE_CHECKING) {
-        SDL_Surface* check_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Checking for updates...", (SDL_Color){200, 200, 200, 255});
-        if (check_text) {
-            SDL_BlitSurface(check_text, NULL, screen, &(SDL_Rect){(hw - check_text->w) / 2, status_y});
-            SDL_FreeSurface(check_text);
-        }
-    } else if (state == SELFUPDATE_STATE_ERROR) {
-        const char* err = strlen(status->error_message) > 0 ? status->error_message : "Update check failed";
-        SDL_Surface* err_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), err, (SDL_Color){255, 100, 100, 255});
-        if (err_text) {
-            SDL_BlitSurface(err_text, NULL, screen, &(SDL_Rect){(hw - err_text->w) / 2, status_y});
-            SDL_FreeSurface(err_text);
-        }
-    } else if (state == SELFUPDATE_STATE_IDLE && !status->update_available && strlen(status->latest_version) > 0) {
-        // Check completed, no update (latest_version is set when check completes)
-        SDL_Surface* uptodate_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "You're up to date", (SDL_Color){150, 150, 150, 255});
-        if (uptodate_text) {
-            SDL_BlitSurface(uptodate_text, NULL, screen, &(SDL_Rect){(hw - uptodate_text->w) / 2, status_y});
-            SDL_FreeSurface(uptodate_text);
+    char status_msg[128] = "";
+    SDL_Color status_color = COLOR_WHITE;
+
+    switch (update_ui) {
+        case UPDATE_UI_UNCHECKED:
+            break;
+        case UPDATE_UI_CHECKING:
+            snprintf(status_msg, sizeof(status_msg), "Checking for updates...");
+            status_color = (SDL_Color){200, 200, 200, 255};
+            break;
+        case UPDATE_UI_AVAILABLE:
+            snprintf(status_msg, sizeof(status_msg), "Update available: %s", status.latest_version);
+            status_color = (SDL_Color){100, 255, 100, 255};
+            break;
+        case UPDATE_UI_CURRENT:
+            snprintf(status_msg, sizeof(status_msg), "You're up to date");
+            status_color = (SDL_Color){150, 150, 150, 255};
+            break;
+        case UPDATE_UI_FAILED:
+            snprintf(status_msg, sizeof(status_msg), "%s",
+                status.error_message[0] ? status.error_message : "Update check failed");
+            status_color = (SDL_Color){255, 100, 100, 255};
+            break;
+    }
+
+    if (status_msg[0]) {
+        SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status_msg, status_color);
+        if (status_text) {
+            SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, status_y});
+            SDL_FreeSurface(status_text);
         }
     }
 
@@ -302,13 +307,20 @@ void render_about(SDL_Surface* screen, int show_setting) {
         }
     }
 
-    // Button hints - show UPDATE button if update available, CHECK if not checking
+    // Button hints, from the same snapshot as the status text above. Nothing to
+    // press when a check is running, or when it already said we are current.
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    if (status->update_available) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UPDATE", NULL}, 1, screen, 1);
-    } else if (status->state == SELFUPDATE_STATE_CHECKING) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
-    } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CHECK UPDATE", NULL}, 1, screen, 1);
+    switch (update_ui) {
+        case UPDATE_UI_AVAILABLE:
+            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UPDATE", NULL}, 1, screen, 1);
+            break;
+        case UPDATE_UI_UNCHECKED:
+        case UPDATE_UI_FAILED:
+            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CHECK UPDATE", NULL}, 1, screen, 1);
+            break;
+        case UPDATE_UI_CHECKING:
+        case UPDATE_UI_CURRENT:
+            GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+            break;
     }
 }

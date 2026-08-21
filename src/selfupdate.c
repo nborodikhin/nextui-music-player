@@ -290,6 +290,23 @@ const SelfUpdateStatus* SelfUpdate_getStatus(void) {
     return &update_status;
 }
 
+SelfUpdateStatus SelfUpdate_getSnapshot(void) {
+    return update_status;
+}
+
+UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status) {
+    if (!status) return UPDATE_UI_UNCHECKED;
+
+    if (status->state == SELFUPDATE_STATE_CHECKING) return UPDATE_UI_CHECKING;
+    if (status->state == SELFUPDATE_STATE_ERROR) return UPDATE_UI_FAILED;
+    if (status->update_available) return UPDATE_UI_AVAILABLE;
+
+    // latest_version is only set once a check has come back
+    if (status->latest_version[0] != '\0') return UPDATE_UI_CURRENT;
+
+    return UPDATE_UI_UNCHECKED;
+}
+
 void SelfUpdate_update(void) {
     // Check if thread has finished
     if (update_running) {
