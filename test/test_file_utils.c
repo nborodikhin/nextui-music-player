@@ -248,7 +248,14 @@ TEST(cp_rf_replaces_a_running_binary) {
         execl(victim, victim, "--sleep", (char*)NULL);
         _exit(127);
     }
-    CHECK(running > 0);
+    // Bail out rather than carry on: a failed fork leaves -1 here, and -1 is
+    // every process this user may signal
+    if (running < 0) {
+        CHECK(running > 0);
+        rm_rf(src);
+        rm_rf(dst);
+        return;
+    }
     usleep(300000);  // let it get as far as exec
 
     CHECK(cp_rf(src, dst, NULL, NULL));
