@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -27,10 +28,15 @@ void shell_escape(const char* src, char* dst, int dst_size) {
 static volatile int tempdir_seq = 0;
 
 bool mk_tempdir(const char* prefix, char* out, size_t out_size) {
-    snprintf(out, out_size, "/tmp/%s_%d_%d", prefix, getpid(),
-             __sync_fetch_and_add(&tempdir_seq, 1));
+    // pid and counter alone repeat: the counter restarts at zero every launch
+    // and the kernel reuses pids, so a directory left behind by a crashed run
+    // can carry the same name. The clock breaks that tie.
+    snprintf(out, out_size, "/tmp/%s_%d_%ld_%d", prefix, getpid(),
+             (long)time(NULL), __sync_fetch_and_add(&tempdir_seq, 1));
 
-    if (mkdir(out, 0755) != 0 && errno != EEXIST) {
+    // An existing directory is not ours to use - staging into someone else's
+    // leftovers would mix their files into whatever we are about to install
+    if (mkdir(out, 0755) != 0) {
         out[0] = '\0';
         return false;
     }

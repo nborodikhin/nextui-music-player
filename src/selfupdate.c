@@ -200,8 +200,32 @@ static int sync_directories(const char* src, const char* dst) {
     return 0;
 }
 
+// Reject an archive entry that would land outside the directory being extracted
+// into: an absolute path, or one that walks up out of it. A package we build
+// contains neither, so anything that does is not a package we should unpack.
+static bool zip_entry_is_contained(const char* name) {
+    if (name[0] == '/') return false;
+
+    for (const char* part = name; *part; ) {
+        const char* slash = strchr(part, '/');
+        size_t len = slash ? (size_t)(slash - part) : strlen(part);
+
+        if (len == 2 && part[0] == '.' && part[1] == '.') return false;
+        if (!slash) break;
+        part = slash + 1;
+    }
+
+    return true;
+}
+
 // Extract ZIP file using libzip, driving the extract slice of the progress bar
 // from the entry count. Sets extracted_files.
+//
+// Any failure fails the whole extraction: a partial tree looks like a valid
+// package to the install that follows, which would then copy it over the pak and
+// delete everything the truncated archive did not mention.
+//
+// @return 0 on success, -1 if the archive could not be unpacked in full
 static int extract_zip(const char* zip_path, const char* dest_dir) {
     int err = 0;
     zip_t* za = zip_open(zip_path, 0, &err);
@@ -210,16 +234,21 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
     }
 
     extracted_files = 0;
+    bool ok = true;
 
     zip_int64_t num_entries = zip_get_num_entries(za, 0);
-    for (zip_int64_t i = 0; i < num_entries; i++) {
+    for (zip_int64_t i = 0; ok && i < num_entries; i++) {
         update_status.progress_percent = EXTRACT_BASE_PCT +
             (int)((long long)EXTRACT_SPAN_PCT * (i + 1) / num_entries);
         snprintf(update_status.status_detail, sizeof(update_status.status_detail),
             "%lld / %lld files", (long long)(i + 1), (long long)num_entries);
 
         const char* name = zip_get_name(za, i, 0);
-        if (!name) continue;
+        if (!name || !zip_entry_is_contained(name)) {
+            LOG_error("[SelfUpdate] Refusing archive entry: %s\n", name ? name : "(unnamed)");
+            ok = false;
+            break;
+        }
 
         char full_path[600];
         snprintf(full_path, sizeof(full_path), "%s/%s", dest_dir, name);
@@ -241,22 +270,38 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
 
         // Extract file
         zip_file_t* zf = zip_fopen_index(za, i, 0);
-        if (!zf) continue;
+        if (!zf) {
+            LOG_error("[SelfUpdate] Could not read %s from the archive\n", name);
+            ok = false;
+            break;
+        }
 
         FILE* out = fopen(full_path, "wb");
         if (!out) {
+            LOG_error("[SelfUpdate] Could not write %s\n", full_path);
             zip_fclose(zf);
-            continue;
+            ok = false;
+            break;
         }
 
         char buf[8192];
         zip_int64_t bytes_read;
         while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
-            fwrite(buf, 1, bytes_read, out);
+            if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
+                LOG_error("[SelfUpdate] Short write extracting %s\n", name);
+                ok = false;
+                break;
+            }
+        }
+        if (bytes_read < 0) {
+            LOG_error("[SelfUpdate] Corrupt archive entry: %s\n", name);
+            ok = false;
         }
 
-        fclose(out);
+        if (fclose(out) != 0) ok = false;
         zip_fclose(zf);
+
+        if (!ok) break;
 
         // Preserve executable permission for .elf and .sh files
         if (strstr(name, ".elf") || strstr(name, ".sh")) {
@@ -267,7 +312,7 @@ static int extract_zip(const char* zip_path, const char* dest_dir) {
     }
 
     zip_close(za);
-    return 0;
+    return ok ? 0 : -1;
 }
 
 int SelfUpdate_init(const char* path) {

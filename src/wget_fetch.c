@@ -172,9 +172,25 @@ long wget_probe_size(const char* url) {
             if (val > 0) size = val;
         }
     }
-    pclose(pipe);
+
+    // A chain that ended badly still carries a Content-Length - of the error
+    // page. Better to report nothing and let the caller fall back.
+    if (pclose(pipe) != 0) return 0;
 
     return size;
+}
+
+// Wait for a signalled child, but not forever.
+// @return true once it is reaped, false if it outlived the deadline
+static bool reap_within(pid_t pid, int timeout_ms) {
+    for (int waited = 0; waited < timeout_ms; waited += 50) {
+        int status = 0;
+        pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) return true;
+        if (done < 0 && errno != EINTR) return true;  // nothing left to reap
+        usleep(50000);
+    }
+    return false;
 }
 
 // Start curl writing url to filepath, and hand back its pid. Spawned directly
@@ -290,8 +306,15 @@ int wget_download_file(const char* url, const char* filepath,
     }
 
     if (running) {
+        // A curl that ignores SIGTERM must not take the thread down with it:
+        // waiting on it unbounded would hang the very cancel that asked it to
+        // stop, and would strand the stall timeout that fired to get here
         kill(pid, SIGTERM);
-        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+        if (!reap_within(pid, 2000)) {
+            LOG_error("[WgetFetch] curl ignored SIGTERM, killing: %s\n", url);
+            kill(pid, SIGKILL);
+            reap_within(pid, 2000);
+        }
     }
 
     if (cancelled) {
