@@ -4,8 +4,8 @@ pak.json
 # Shared runtime payload
 launch.sh
 bin/keyboard
-bin/wget
 res/font.ttf
+res/cacert.pem
 res/icon-*
 state/app_version.txt
 stations/*.json

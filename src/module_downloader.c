@@ -60,9 +60,14 @@ static DownloaderResult* results = NULL;
 static int result_count = 0;
 
 YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* show_setting) {
+    Downloader_startUpdateCheck();
+
     int dirty = 1;
-    bool finished = false;
-    bool started = false;
+    YtdlpUiState shown = YTDLP_UI_UNCHECKED;
+
+    // One screen for the whole thing: it checks, then asks, then installs, and
+    // the layout only gains a progress bar on the way. A dialog on top would
+    // have covered the versions the user is being asked to decide about.
     while (1) {
         ModuleCommon_frameBegin();
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
@@ -80,26 +85,27 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         }
 
         Downloader_update();
-        const DownloaderUpdateStatus* status = Downloader_getUpdateStatus();
-        if (started && !status->updating && !finished) {
-            finished = true;
+        const DownloaderUpdateStatus status = Downloader_getUpdateStatus();
+        const YtdlpUiState ui = Downloader_updateUiState(&status);
+
+        // The workers finish on their own threads, so the frame that has to
+        // repaint is the one where the state changed under us
+        if (ui != shown) {
+            shown = ui;
             dirty = 1;
         }
 
-        // Nothing has been fetched until A is pressed here
-        if (!started) {
-            if (PAD_justPressed(BTN_A)) {
+        if (PAD_justPressed(BTN_A)) {
+            if (ui == YTDLP_UI_AVAILABLE) {
+                // Nothing has been transferred until here
                 Downloader_startUpdate();
-                started = true;
                 dirty = 1;
-            } else if (PAD_justPressed(BTN_B)) {
-                return YTDLP_INSTALL_DONE;
+            } else if (ui != YTDLP_UI_CHECKING && ui != YTDLP_UI_INSTALLING) {
+                break;  // a settled result; A dismisses it like B does
             }
         }
-        // While running, B cancels. Once finished, the screen holds the result
-        // until dismissed so a failure reason stays readable.
-        else if (PAD_justPressed(BTN_B) || (finished && PAD_justPressed(BTN_A))) {
-            if (status->updating) {
+        else if (PAD_justPressed(BTN_B)) {
+            if (ui == YTDLP_UI_CHECKING || ui == YTDLP_UI_INSTALLING) {
                 Downloader_cancelUpdate();
             }
             break;
@@ -107,9 +113,9 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
 
         ModuleCommon_PWR_update(&dirty, show_setting);
 
-        // Progress advances on its own, so redraw every frame until it settles
-        if (dirty || (started && !finished)) {
-            render_ytdlp_updating(screen, *show_setting, !started);
+        // Progress advances on its own, so redraw every frame while it runs
+        if (dirty || ui == YTDLP_UI_INSTALLING) {
+            render_ytdlp_updating(screen, *show_setting);
             if (*show_setting) {
                 GFX_blitHardwareHints(screen, *show_setting);
             }
@@ -138,10 +144,10 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         return MODULE_EXIT_TO_MENU;
     }
 
-    // yt-dlp ships separately from the app - offer to fetch it on first use
+    // The helpers ship separately from the app - offer to fetch them on first
+    // use. The install screen says what it is doing and why, so no toast rides
+    // over it, and declining is the user's own decision to be told about.
     if (!Downloader_isAvailable()) {
-        // The install screen says what it is doing and why, so no toast rides
-        // over it, and declining is the user's own decision to be told about.
         if (DownloaderModule_runInstall(display, &show_setting) == YTDLP_INSTALL_QUIT) {
             Downloader_cleanup();
             return MODULE_EXIT_QUIT;
@@ -242,17 +248,17 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         // =========================================
         else if (state == DOWNLOADER_INTERNAL_SEARCHING) {
             Downloader_update();
-            const DownloaderSearchStatus* search_status = Downloader_getSearchStatus();
-            if (search_status->completed) {
-                if (search_status->result_count > 0) {
+            const DownloaderSearchStatus search_status = Downloader_getSearchStatus();
+            if (search_status.completed) {
+                if (search_status.result_count > 0) {
                     results = Downloader_getSearchResults();
-                    result_count = search_status->result_count;
+                    result_count = search_status.result_count;
                     ListNav_reconcile(&results_nav, result_count);
                     ListNav_scrollToTop(&results_nav);
                     state = DOWNLOADER_INTERNAL_RESULTS;
                 } else {
-                    Toast_show(search_status->error_message[0]
-                                   ? search_status->error_message : "No results found",
+                    Toast_show(search_status.error_message[0]
+                                   ? search_status.error_message : "No results found",
                                TOAST_DURATION);
                     state = DOWNLOADER_INTERNAL_MENU;
                 }

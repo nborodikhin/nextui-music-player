@@ -68,21 +68,17 @@ const char* SelfUpdate_getVersion(void);
 // Returns 0 if check started, -1 if already running
 int SelfUpdate_checkForUpdate(void);
 
-// Start the update process (download + extract + apply)
+// Start the update process in the background(download + extract + apply).
+// A snapshot of the status is available via SelfUpdate_getStatus().
+//
 // Returns 0 if update started, -1 if already running or no update available
 int SelfUpdate_startUpdate(void);
 
 // Cancel ongoing update
 void SelfUpdate_cancelUpdate(void);
 
-// Get current status
-const SelfUpdateStatus* SelfUpdate_getStatus(void);
-
-// A by-value copy of the status. The check runs on a worker thread and can flip
-// fields part-way through a frame, so anything that reads more than one field -
-// a screen drawing text and a button hint from the same state - must take a copy
-// once and use that.
-SelfUpdateStatus SelfUpdate_getSnapshot(void);
+// Get the snapshot of the current status.
+SelfUpdateStatus SelfUpdate_getStatus(void);
 
 // Boil the status down to what a screen needs to show and offer.
 UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status);

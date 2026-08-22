@@ -9,6 +9,10 @@
 # list_nav.c is the model: pure integer cursor logic, with the pad read split
 # out into list_nav_pad.c so api.h never reaches the tested TU. toast_state.c
 # follows it, with the drawing left in toast.c and the clock passed in.
+#
+# file_utils.c qualifies for a different reason: it talks to the filesystem, but
+# only through libc, so it needs no stubs either. Its test does create files -
+# under its own mk_tempdir(), and removes them again.
 
 CC      ?= cc
 CFLAGS  ?= -std=gnu99 -O0 -g -Wall -Wextra
@@ -17,7 +21,8 @@ INC      = -I../src
 SRC      = ../src
 BIN      = bin
 
-TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state
+TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
+           $(BIN)/test_file_utils
 
 .PHONY: all run clean
 all: run
@@ -33,6 +38,9 @@ $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h te
 
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
+
+$(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
 run: $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \

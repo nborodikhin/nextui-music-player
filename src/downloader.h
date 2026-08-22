@@ -36,18 +36,8 @@ typedef struct {
     int eta_sec;           // Estimated time remaining in seconds
 } DownloaderQueueItem;
 
-// Module states
-typedef enum {
-    DOWNLOADER_STATE_IDLE = 0,
-    DOWNLOADER_STATE_SEARCHING,
-    DOWNLOADER_STATE_DOWNLOADING,
-    DOWNLOADER_STATE_UPDATING,
-    DOWNLOADER_STATE_ERROR
-} DownloaderState;
-
 // Download status info
 typedef struct {
-    DownloaderState state;
     int current_index;           // Currently downloading item index
     int total_items;             // Total items in queue
     int completed_count;         // Number completed
@@ -58,9 +48,26 @@ typedef struct {
     int eta_sec;                 // Current ETA
 } DownloaderDownloadStatus;
 
+// What the helpers screen is showing, and therefore what A does there. Derived
+// from one snapshot so the text and the button hint cannot disagree.
+typedef enum {
+    YTDLP_UI_UNCHECKED,   // no check has run yet
+    YTDLP_UI_CHECKING,
+    YTDLP_UI_AVAILABLE,   // something to install or update
+    YTDLP_UI_CURRENT,     // everything present and current
+    YTDLP_UI_INSTALLING,
+    YTDLP_UI_INSTALLED,
+    YTDLP_UI_FAILED
+} YtdlpUiState;
+
 // Update status info
 typedef struct {
-    bool update_available;
+    bool update_available;      // the check found something to fetch
+    bool fresh_install;         // a helper is absent, so this installs rather than updates
+    bool checking;              // a version check is in flight
+    bool check_complete;        // a check has come back
+    long estimated_bytes;       // what confirming would download
+    char plan_summary[64];      // what it would install, e.g. "yt-dlp, ffmpeg"
     char current_version[32];
     char latest_version[32];
     bool updating;
@@ -113,7 +120,7 @@ const char* Downloader_getVersion(void);
 int Downloader_startSearch(const char* query);
 
 // Get search status (call in main loop to check progress)
-const DownloaderSearchStatus* Downloader_getSearchStatus(void);
+DownloaderSearchStatus Downloader_getSearchStatus(void);
 
 // Get search results after search completes
 // Returns pointer to internal results array, count is set via status->result_count
@@ -141,19 +148,30 @@ int Downloader_downloadStart(void);
 void Downloader_downloadStop(void);
 
 // Get download status
-const DownloaderDownloadStatus* Downloader_getDownloadStatus(void);
+DownloaderDownloadStatus Downloader_getDownloadStatus(void);
 
 // Check if download thread is running
 bool Downloader_isDownloading(void);
 
-// yt-dlp update functions
-int Downloader_checkForUpdate(void);  // Check if new version available
-int Downloader_startUpdate(void);     // Start updating yt-dlp
-void Downloader_cancelUpdate(void);   // Cancel update
-const DownloaderUpdateStatus* Downloader_getUpdateStatus(void);
+// Start the update check (without installing) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
+int Downloader_startUpdateCheck(void);
 
-// Get current state
-DownloaderState Downloader_getState(void);
+// Start the update (download+install) in background.
+// Use Downloader_getUpdateStatus() to monitor the results.
+int Downloader_startUpdate(void);
+
+// Cancel background processes (check or update)
+void Downloader_cancelUpdate(void);
+
+// A by-value copy of the update status. The check and the install run on worker
+// threads and can flip fields part-way through a frame, so anything reading more
+// than one field must take a copy once and use that.
+DownloaderUpdateStatus Downloader_getUpdateStatus(void);
+
+// Boil the update status down to what a screen needs to show and offer.
+YtdlpUiState Downloader_updateUiState(const DownloaderUpdateStatus* status);
+
 
 // Get last error message
 const char* Downloader_getError(void);

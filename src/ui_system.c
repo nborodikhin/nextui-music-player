@@ -23,15 +23,15 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
     render_screen_header(screen, "App Update", show_setting);
 
-    const SelfUpdateStatus* status = SelfUpdate_getStatus();
-    SelfUpdateState state = status->state;
+    const SelfUpdateStatus status = SelfUpdate_getStatus();
+    SelfUpdateState state = status.state;
 
     // Version info: "v0.1.0 → v0.2.0"
     char ver_str[128];
-    if (strlen(status->latest_version) > 0) {
-        snprintf(ver_str, sizeof(ver_str), "%s  ->  %s", status->current_version, status->latest_version);
+    if (strlen(status.latest_version) > 0) {
+        snprintf(ver_str, sizeof(ver_str), "%s  ->  %s", status.current_version, status.latest_version);
     } else {
-        snprintf(ver_str, sizeof(ver_str), "%s", status->current_version);
+        snprintf(ver_str, sizeof(ver_str), "%s", status.current_version);
     }
     int ver_y = SCALE1(PADDING * 3 + 35);
     SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
@@ -61,10 +61,10 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
     if (notes_max_lines > MAX_NOTE_LINES) notes_max_lines = MAX_NOTE_LINES;
     if (notes_max_lines < 1) notes_max_lines = 1;
 
-    if (strlen(status->release_notes) > 0 && state != SELFUPDATE_STATE_CHECKING) {
+    if (strlen(status.release_notes) > 0 && state != SELFUPDATE_STATE_CHECKING) {
         // Word-wrap release notes
         char notes_copy[1024];
-        strncpy(notes_copy, status->release_notes, sizeof(notes_copy) - 1);
+        strncpy(notes_copy, status.release_notes, sizeof(notes_copy) - 1);
         notes_copy[sizeof(notes_copy) - 1] = '\0';
 
         // Carriage returns are noise; newlines are the author's structure
@@ -158,7 +158,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 64, 64, 64));
 
         // Progress fill
-        int prog_w = (bar_w * status->progress_percent) / 100;
+        int prog_w = (bar_w * status.progress_percent) / 100;
         if (prog_w > 0) {
             SDL_Rect prog_rect = {bar_x, bar_y, prog_w, bar_h};
             SDL_FillRect(screen, &prog_rect, SDL_MapRGB(screen->format, 100, 200, 100));
@@ -166,7 +166,7 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
         // Percentage text inside bar
         char pct_str[16];
-        snprintf(pct_str, sizeof(pct_str), "%d%%", status->progress_percent);
+        snprintf(pct_str, sizeof(pct_str), "%d%%", status.progress_percent);
         SDL_Surface* pct_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), pct_str, COLOR_WHITE);
         if (pct_text) {
             int pct_x = bar_x + (bar_w - pct_text->w) / 2;
@@ -176,8 +176,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         }
 
         // Download size detail (e.g., "2.5 MB / 5.0 MB") - below progress bar
-        if (strlen(status->status_detail) > 0) {
-            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status->status_detail, COLOR_GRAY);
+        if (strlen(status.status_detail) > 0) {
+            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status.status_detail, COLOR_GRAY);
             if (detail_text) {
                 SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
                 SDL_FreeSurface(detail_text);
@@ -189,9 +189,9 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
     if (state == SELFUPDATE_STATE_EXTRACTING || state == SELFUPDATE_STATE_APPLYING ||
         state == SELFUPDATE_STATE_COMPLETED || state == SELFUPDATE_STATE_ERROR) {
 
-        const char* status_msg = status->status_message;
-        if (state == SELFUPDATE_STATE_ERROR && strlen(status->error_message) > 0) {
-            status_msg = status->error_message;
+        const char* status_msg = status.status_message;
+        if (state == SELFUPDATE_STATE_ERROR && strlen(status.error_message) > 0) {
+            status_msg = status.error_message;
         }
 
         SDL_Color status_color = COLOR_WHITE;
@@ -256,7 +256,7 @@ void render_about(SDL_Surface* screen, int show_setting) {
     // One snapshot for the whole frame: the check thread can flip these fields
     // between the status text below and the button hints at the bottom, which
     // is how the screen ended up offering UPDATE while still saying "Checking".
-    const SelfUpdateStatus status = SelfUpdate_getSnapshot();
+    const SelfUpdateStatus status = SelfUpdate_getStatus();
     const UpdateUiState update_ui = SelfUpdate_uiState(&status);
     int status_y = info_y + SCALE1(40);
 

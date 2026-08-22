@@ -128,7 +128,7 @@ LOCAL_SRC = \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
     downloader.c selfupdate.c display_helper.c \
     podcast.c podcast_rss.c podcast_search.c \
-    http_download.c wget_fetch.c wifi.c keyboard.c settings.c resume.c \
+    http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
     module_common.c module_menu.c module_library.c module_player.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
