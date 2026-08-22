@@ -45,12 +45,13 @@ typedef void (*CopyProgressFn)(const char* rel_path, void* ctx);
 bool cp_rf(const char* src, const char* dst, CopyProgressFn on_file, void* ctx);
 
 /**
- * Called by extract_zip() once with 0 before it starts, then after each entry is
- * processed - so the last call of a complete extraction reports total.
+ * Called as extract_zip() works through the archive.
+ *
+ * Note: done and total count all zip entries including directories, so the total
+ *       may be larger than the number of files.
  *
  * @param done  Entries processed so far
- * @param total Entries in the archive. Directory entries are included, so this
- *              can exceed the file count extract_zip() returns
+ * @param total Entries in the archive
  * @param ctx   Caller's context pointer, passed through untouched
  */
 typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
@@ -59,10 +60,11 @@ typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
  * Unpack a zip into dest_dir, creating directories as needed.
  * Any failure fails the whole extraction.
  *
- * Permission bits for files are restored from archive (default 0644), directories are always 0755.
+ * Unix permission bits for files are restored from archive (default 0644),
+ * directories are always 0755.
  *
- * @param on_progress Progress callback, may be NULL
- * @return         Files written, or -1 if the archive could not be unpacked
+ * @param on_progress Called per entry, may be NULL
+ * @return            Files written, or -1 if the archive could not be unpacked
  */
 int extract_zip(const char* zip_path, const char* dest_dir,
                 ExtractProgressFn on_progress, void* ctx);
