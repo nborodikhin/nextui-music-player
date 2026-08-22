@@ -4,6 +4,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "toast.h"
 #include "module_downloader.h"
@@ -20,9 +21,6 @@
 
 // Menu count
 #define DOWNLOADER_MENU_COUNT 2
-
-// Controls-help state for the yt-dlp install/update screen
-#define DOWNLOADER_YTDLP_HELP_STATE 42
 
 // Internal states
 typedef enum {
@@ -73,7 +71,7 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, show_setting,
-                                                                  DOWNLOADER_YTDLP_HELP_STATE);
+                                                                  HELP_DOWNLOADER_YTDLP);
         if (global.should_quit) {
             Downloader_cancelUpdate();
             return YTDLP_INSTALL_QUIT;
@@ -179,15 +177,16 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input
-        int app_state_for_help;
+        HelpId help_id;
         switch (state) {
-            case DOWNLOADER_INTERNAL_MENU: app_state_for_help = 28; break;
-            case DOWNLOADER_INTERNAL_SEARCHING: app_state_for_help = 29; break;
-            case DOWNLOADER_INTERNAL_RESULTS: app_state_for_help = 30; break;
-            case DOWNLOADER_INTERNAL_QUEUE: app_state_for_help = 31; break;
+            case DOWNLOADER_INTERNAL_SEARCHING: help_id = HELP_DOWNLOADER_SEARCHING; break;
+            case DOWNLOADER_INTERNAL_RESULTS:   help_id = HELP_DOWNLOADER_RESULTS;   break;
+            case DOWNLOADER_INTERNAL_QUEUE:     help_id = HELP_DOWNLOADER_QUEUE;     break;
+            case DOWNLOADER_INTERNAL_MENU:
+            default:                            help_id = HELP_DOWNLOADER_MENU;      break;
         }
 
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
         if (global.should_quit) {
             Downloader_cleanup();
             return MODULE_EXIT_QUIT;

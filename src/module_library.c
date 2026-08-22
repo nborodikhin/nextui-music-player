@@ -3,6 +3,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "toast.h"
 #include "module_library.h"
@@ -22,8 +23,6 @@
 #define LIBRARY_ITEM_COUNT  3
 
 // Help state for controls dialog
-#define LIBRARY_MENU_HELP_STATE 55
-
 static const char* library_items[] = {"Files", "Playlists", "Downloader"};
 
 static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_selected,
@@ -55,7 +54,7 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, LIBRARY_MENU_HELP_STATE);
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_LIBRARY_MENU);
         if (global.should_quit) {
             return MODULE_EXIT_QUIT;
         }

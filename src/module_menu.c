@@ -3,6 +3,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "module_menu.h"
 #include "display_helper.h"
@@ -88,7 +89,7 @@ MenuSelection MenuModule_run(DisplayContext* display) {
         last_selection = MenuRows_selectionAt(&rows, nav.selected);
 
         // Handle global input first (volume, START dialogs, power)
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 0);
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_MAIN_MENU);
         if (global.should_quit) {
             return MENU_QUIT;
         }

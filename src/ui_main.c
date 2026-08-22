@@ -159,12 +159,27 @@ typedef struct {
     const char* action;
 } ControlHelp;
 
+// Blocks follow HelpId order.
+// Fallback bindings (HELP_DEFAULT)
+static const ControlHelp default_controls[] = {
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Main menu controls (A/B shown in footer)
 static const ControlHelp main_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
     {"X", "Clear History/Playback"},
     {"B (double)", "Exit App"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Library menu controls (A/B shown in footer)
+static const ControlHelp library_menu_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -194,6 +209,25 @@ static const ControlHelp player_controls[] = {
     {NULL, NULL}
 };
 
+// Playlist list controls (A/B shown in footer)
+static const ControlHelp playlist_list_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"Y", "New Playlist"},
+    {"X", "Delete Playlist"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Playlist detail controls (A/B shown in footer)
+static const ControlHelp playlist_detail_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Remove Track"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Radio list controls (A/B shown in footer)
 static const ControlHelp radio_list_controls[] = {
     {"Up/Down", "Navigate"},
@@ -206,6 +240,7 @@ static const ControlHelp radio_list_controls[] = {
 
 // Radio playing controls (B shown in footer)
 static const ControlHelp radio_playing_controls[] = {
+    {"A", "Play/Pause"},
     {"Up/R1", "Next Station"},
     {"Down/L1", "Prev Station"},
     {"Select", "Screen Off"},
@@ -233,6 +268,14 @@ static const ControlHelp radio_browse_controls[] = {
     {NULL, NULL}
 };
 
+// Radio manual help controls (B shown in footer)
+static const ControlHelp radio_help_controls[] = {
+    {"Up/Down", "Scroll"},
+    {"B", "Back"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Podcast menu controls (shows subscribed podcasts)
 static const ControlHelp podcast_menu_controls[] = {
     {"Up/Down", "Navigate"},
@@ -247,15 +290,6 @@ static const ControlHelp podcast_menu_controls[] = {
 static const ControlHelp podcast_manage_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Podcast subscriptions list controls
-static const ControlHelp podcast_subscriptions_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"X", "Unsubscribe"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -289,10 +323,20 @@ static const ControlHelp podcast_episodes_controls[] = {
     {NULL, NULL}
 };
 
+// Podcast downloads queue controls (X/B shown in footer)
+static const ControlHelp podcast_downloads_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Cancel Download"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Podcast playing controls
 static const ControlHelp podcast_playing_controls[] = {
     {"Left", "Rewind 10s"},
     {"Right", "Forward 30s"},
+    {"Up/Down", "Playback Speed"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
     {"Start (hold)", "Exit App"},
@@ -303,6 +347,13 @@ static const ControlHelp podcast_playing_controls[] = {
 static const ControlHelp youtube_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Downloader search-in-progress controls (B shown in footer)
+static const ControlHelp downloader_searching_controls[] = {
+    {"B", "Cancel search"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -324,26 +375,10 @@ static const ControlHelp youtube_queue_controls[] = {
     {NULL, NULL}
 };
 
-// Playlist list controls (A/B shown in footer)
-static const ControlHelp playlist_list_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"X", "Delete Playlist"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Playlist detail controls (A/B shown in footer)
-static const ControlHelp playlist_detail_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"X", "Remove Track"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// About page controls (A/B shown in footer)
-static const ControlHelp about_controls[] = {
+// yt-dlp install/update controls (A/B shown in footer)
+static const ControlHelp ytdlp_controls[] = {
+    {"A", "Install/Dismiss"},
+    {"B", "Cancel/Back"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -356,143 +391,129 @@ static const ControlHelp settings_controls[] = {
     {NULL, NULL}
 };
 
-static const ControlHelp library_menu_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Generic/default controls
-static const ControlHelp default_controls[] = {
+// About page controls (A/B shown in footer)
+static const ControlHelp about_controls[] = {
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
 
 // Render controls help dialog overlay
-void render_controls_help(SDL_Surface* screen, int app_state) {
+void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     int hw = screen->w;
     int hh = screen->h;
 
-    // Select controls based on state
-    const ControlHelp* controls;
-    const char* page_title;
+    // Keep the frame sane if the switch below ever stops covering every HelpId.
+    const ControlHelp* controls = default_controls;
+    const char* page_title = "Controls";
 
-    // AppState enum values:
-    // STATE_MENU=0, STATE_BROWSER=1, STATE_PLAYING=2, STATE_RADIO_LIST=3,
-    // STATE_RADIO_PLAYING=4, STATE_RADIO_ADD=5, STATE_RADIO_ADD_STATIONS=6,
-    // STATE_RADIO_HELP=7, STATE_PODCAST_MENU=8, STATE_PODCAST_MANAGE=9,
-    // STATE_PODCAST_SUBSCRIPTIONS=10, STATE_PODCAST_TOP_SHOWS=11,
-    // STATE_PODCAST_SEARCH_RESULTS=12, STATE_PODCAST_EPISODES=13,
-    // STATE_PODCAST_PLAYING=14, STATE_PODCAST_DOWNLOADS=15,
-    // STATE_DOWNLOADER_MENU=16, STATE_DOWNLOADER_SEARCHING=17, STATE_DOWNLOADER_RESULTS=18,
-    // STATE_DOWNLOADER_QUEUE=19, STATE_DOWNLOADER_DOWNLOADING=20, STATE_DOWNLOADER_UPDATING=21,
-    // STATE_APP_UPDATING=22, STATE_ABOUT=23
-    switch (app_state) {
-        case 0:  // STATE_MENU
+    switch (help_id) {
+        // HELP_NONE never gets here - handleGlobalInput() does not open the
+        // dialog for it - but the switch has to cover every HelpId.
+        case HELP_NONE:
+        case HELP_DEFAULT:
+            break;
+        case HELP_MAIN_MENU:
             controls = main_menu_controls;
             page_title = "Main Menu";
             break;
-        case 1:  // STATE_BROWSER
-            controls = browser_controls;
-            page_title = "File Browser";
-            break;
-        case 2:  // STATE_PLAYING
-            controls = player_controls;
-            page_title = "Music Player";
-            break;
-        case 3:  // STATE_RADIO_LIST
-            controls = radio_list_controls;
-            page_title = "Radio Stations";
-            break;
-        case 4:  // STATE_RADIO_PLAYING
-            controls = radio_playing_controls;
-            page_title = "Radio Player";
-            break;
-        case 5:  // STATE_RADIO_ADD
-            controls = radio_manage_controls;
-            page_title = "Manage Stations";
-            break;
-        case 6:  // STATE_RADIO_ADD_STATIONS
-            controls = radio_browse_controls;
-            page_title = "Browse Stations";
-            break;
-        case 30: // PODCAST_INTERNAL_MENU
-            controls = podcast_menu_controls;
-            page_title = "Podcasts";
-            break;
-        case 31: // PODCAST_INTERNAL_MANAGE
-            controls = podcast_manage_controls;
-            page_title = "Manage Podcasts";
-            break;
-        case 32: // PODCAST_INTERNAL_SUBSCRIPTIONS
-            controls = podcast_subscriptions_controls;
-            page_title = "Subscriptions";
-            break;
-        case 33: // PODCAST_INTERNAL_TOP_SHOWS
-            controls = podcast_top_shows_controls;
-            page_title = "Top Shows";
-            break;
-        case 34: // PODCAST_INTERNAL_SEARCH_RESULTS
-            controls = podcast_search_controls;
-            page_title = "Search Results";
-            break;
-        case 35: // PODCAST_INTERNAL_EPISODES
-            controls = podcast_episodes_controls;
-            page_title = "Episodes";
-            break;
-        case 36: // PODCAST_INTERNAL_BUFFERING
-            controls = default_controls;
-            page_title = "Buffering";
-            break;
-        case 37: // PODCAST_INTERNAL_PLAYING
-            controls = podcast_playing_controls;
-            page_title = "Podcast Player";
-            break;
-        case 16: // STATE_DOWNLOADER_MENU
-            controls = youtube_menu_controls;
-            page_title = "Downloader";
-            break;
-        case 18: // STATE_DOWNLOADER_RESULTS
-            controls = youtube_results_controls;
-            page_title = "Search Results";
-            break;
-        case 19: // STATE_DOWNLOADER_QUEUE
-            controls = youtube_queue_controls;
-            page_title = "Download Queue";
-            break;
-        case 23: // STATE_ABOUT
-            controls = about_controls;
-            page_title = "About";
-            break;
-        case 40: // SETTINGS_INTERNAL_MENU
-            controls = settings_controls;
-            page_title = "Settings";
-            break;
-        case 50: // PLAYLIST_LIST_HELP_STATE
-            controls = playlist_list_controls;
-            page_title = "Playlists";
-            break;
-        case 51: // PLAYLIST_DETAIL_HELP_STATE
-            controls = playlist_detail_controls;
-            page_title = "Playlist Tracks";
-            break;
-        case 55: // LIBRARY_MENU_HELP_STATE
+        case HELP_LIBRARY_MENU:
             controls = library_menu_controls;
             page_title = "Library";
             break;
-        case 41: // SETTINGS_INTERNAL_ABOUT
+        case HELP_BROWSER:
+            controls = browser_controls;
+            page_title = "File Browser";
+            break;
+        case HELP_PLAYER:
+            controls = player_controls;
+            page_title = "Music Player";
+            break;
+        case HELP_PLAYLIST_LIST:
+            controls = playlist_list_controls;
+            page_title = "Playlists";
+            break;
+        case HELP_PLAYLIST_DETAIL:
+            controls = playlist_detail_controls;
+            page_title = "Playlist Tracks";
+            break;
+        case HELP_RADIO_LIST:
+            controls = radio_list_controls;
+            page_title = "Radio Stations";
+            break;
+        case HELP_RADIO_PLAYING:
+            controls = radio_playing_controls;
+            page_title = "Radio Player";
+            break;
+        case HELP_RADIO_MANAGE:
+            controls = radio_manage_controls;
+            page_title = "Manage Stations";
+            break;
+        case HELP_RADIO_BROWSE:
+            controls = radio_browse_controls;
+            page_title = "Browse Stations";
+            break;
+        case HELP_RADIO_HELP:
+            controls = radio_help_controls;
+            page_title = "Radio Help";
+            break;
+        case HELP_PODCAST_MENU:
+            controls = podcast_menu_controls;
+            page_title = "Podcasts";
+            break;
+        case HELP_PODCAST_MANAGE:
+            controls = podcast_manage_controls;
+            page_title = "Manage Podcasts";
+            break;
+        case HELP_PODCAST_TOP_SHOWS:
+            controls = podcast_top_shows_controls;
+            page_title = "Top Shows";
+            break;
+        case HELP_PODCAST_SEARCH_RESULTS:
+            controls = podcast_search_controls;
+            page_title = "Search Results";
+            break;
+        case HELP_PODCAST_EPISODES:
+            controls = podcast_episodes_controls;
+            page_title = "Episodes";
+            break;
+        case HELP_PODCAST_DOWNLOADS:
+            controls = podcast_downloads_controls;
+            page_title = "Downloads";
+            break;
+        case HELP_PODCAST_PLAYING:
+            controls = podcast_playing_controls;
+            page_title = "Podcast Player";
+            break;
+        case HELP_DOWNLOADER_MENU:
+            controls = youtube_menu_controls;
+            page_title = "Downloader";
+            break;
+        case HELP_DOWNLOADER_SEARCHING:
+            controls = downloader_searching_controls;
+            page_title = "Searching";
+            break;
+        case HELP_DOWNLOADER_RESULTS:
+            controls = youtube_results_controls;
+            page_title = "Search Results";
+            break;
+        case HELP_DOWNLOADER_QUEUE:
+            controls = youtube_queue_controls;
+            page_title = "Download Queue";
+            break;
+        case HELP_DOWNLOADER_YTDLP:
+            controls = ytdlp_controls;
+            page_title = "Youtube download helpers";
+            break;
+        case HELP_SETTINGS:
+            controls = settings_controls;
+            page_title = "Settings";
+            break;
+        case HELP_ABOUT:
             controls = about_controls;
             page_title = "About";
             break;
-        case 42: // DOWNLOADER_YTDLP_HELP_STATE
-            controls = default_controls;
-            page_title = "Youtube download helpers";
-            break;
-        default:
-            controls = default_controls;
-            page_title = "Controls";
-            break;
+        // No default arm on purpose: compiler with -Werror=switch
+        // forces to have all enum cases to be explicitly handled.
     }
 
     // Count controls

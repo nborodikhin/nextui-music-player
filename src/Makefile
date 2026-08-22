@@ -175,6 +175,7 @@ MY_CFLAGS += -DOPUS_BUILD -DHAVE_LRINTF -DOP_DISABLE_HTTP -DOP_DISABLE_FLOAT_API
 MY_CFLAGS += $(INCDIR) -DPLATFORM=\"$(PLATFORM)\" -std=gnu99
 MY_CFLAGS += -DUSE_SDL2 -DGL_GLEXT_PROTOTYPES
 MY_CFLAGS += -MMD -MP
+MY_CFLAGS += -Werror=switch
 
 # Desktop uses full OpenGL; devices use GLES. Neither macro is read by this
 # repo's sources today (the GL context profile is picked at runtime via

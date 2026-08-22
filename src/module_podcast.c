@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "config.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "toast.h"
 #include "module_podcast.h"
@@ -212,20 +213,20 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
 
         // Handle global input (skip if screen off or hint active)
         if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-            int app_state_for_help;
+            HelpId help_id;
             switch (state) {
-                case PODCAST_INTERNAL_MENU: app_state_for_help = 30; break;
-                case PODCAST_INTERNAL_MANAGE: app_state_for_help = 31; break;
-                case PODCAST_INTERNAL_TOP_SHOWS: app_state_for_help = 33; break;
-                case PODCAST_INTERNAL_SEARCH_RESULTS: app_state_for_help = 34; break;
-                case PODCAST_INTERNAL_EPISODES: app_state_for_help = 35; break;
-                case PODCAST_INTERNAL_SEEKING: app_state_for_help = 37; break;
-                case PODCAST_INTERNAL_PLAYING: app_state_for_help = 37; break;
-                case PODCAST_INTERNAL_DOWNLOAD_QUEUE: app_state_for_help = 35; break;
-                default: app_state_for_help = 30; break;
+                case PODCAST_INTERNAL_MENU:           help_id = HELP_PODCAST_MENU;           break;
+                case PODCAST_INTERNAL_MANAGE:         help_id = HELP_PODCAST_MANAGE;         break;
+                case PODCAST_INTERNAL_TOP_SHOWS:      help_id = HELP_PODCAST_TOP_SHOWS;      break;
+                case PODCAST_INTERNAL_SEARCH_RESULTS: help_id = HELP_PODCAST_SEARCH_RESULTS; break;
+                case PODCAST_INTERNAL_EPISODES:       help_id = HELP_PODCAST_EPISODES;       break;
+                case PODCAST_INTERNAL_SEEKING:        help_id = HELP_PODCAST_PLAYING;        break;
+                case PODCAST_INTERNAL_PLAYING:        help_id = HELP_PODCAST_PLAYING;        break;
+                case PODCAST_INTERNAL_DOWNLOAD_QUEUE: help_id = HELP_PODCAST_DOWNLOADS;      break;
+                default:                              help_id = HELP_PODCAST_MENU;           break;
             }
 
-            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
+            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
                 Podcast_cleanup();
                 return MODULE_EXIT_QUIT;

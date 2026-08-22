@@ -49,7 +49,7 @@ void ModuleCommon_init(void) {
     overlay_release_time = 0;
 }
 
-GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, int app_state) {
+GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
     // Poll USB HID events (earphone buttons)
@@ -167,7 +167,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             return result;
         }
         // Dialog is shown, consume input and render (covers entire screen)
-        render_controls_help(screen, app_state);
+        render_controls_help(screen, help_id);
         GFX_flip(screen);
         result.input_consumed = true;
         return result;
@@ -191,9 +191,14 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
                 show_dialog = true;
             }
         } else if (PAD_justReleased(BTN_START)) {
-            // Short press - show controls help
-            show_controls_help = true;
-            show_dialog = true;
+            // Short press - show controls help, unless the caller already has a
+            // dialog up and does not want a second box stacked on it
+            if (help_id != HELP_NONE) {
+                show_controls_help = true;
+                show_dialog = true;
+            } else {
+                start_was_pressed = false;
+            }
         }
 
         if (show_dialog) {

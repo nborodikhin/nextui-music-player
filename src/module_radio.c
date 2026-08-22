@@ -6,6 +6,7 @@
 #include "defines.h"
 #include "api.h"
 #include "config.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "toast.h"
 #include "module_radio.h"
@@ -188,18 +189,17 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
 
         // Handle global input (skip if screen off or hint active)
         if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-            // Map internal state to app state for controls help context
-            int app_state_for_help;
+            HelpId help_id;
             switch (state) {
-                case RADIO_INTERNAL_LIST: app_state_for_help = 3; break;  // STATE_RADIO_LIST
-                case RADIO_INTERNAL_PLAYING: app_state_for_help = 4; break;  // STATE_RADIO_PLAYING
-                case RADIO_INTERNAL_ADD_COUNTRY: app_state_for_help = 5; break;  // STATE_RADIO_ADD
-                case RADIO_INTERNAL_ADD_STATIONS: app_state_for_help = 6; break;  // STATE_RADIO_ADD_STATIONS
-                case RADIO_INTERNAL_HELP: app_state_for_help = 7; break;  // STATE_RADIO_HELP
-                default: app_state_for_help = 3; break;
+                case RADIO_INTERNAL_LIST:         help_id = HELP_RADIO_LIST;    break;
+                case RADIO_INTERNAL_PLAYING:      help_id = HELP_RADIO_PLAYING; break;
+                case RADIO_INTERNAL_ADD_COUNTRY:  help_id = HELP_RADIO_MANAGE;  break;
+                case RADIO_INTERNAL_ADD_STATIONS: help_id = HELP_RADIO_BROWSE;  break;
+                case RADIO_INTERNAL_HELP:         help_id = HELP_RADIO_HELP;    break;
+                default:                          help_id = HELP_RADIO_LIST;    break;
             }
 
-            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
+            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
                 Radio_quit();
                 return MODULE_EXIT_QUIT;

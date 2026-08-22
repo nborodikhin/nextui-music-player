@@ -7,6 +7,7 @@
 #include "defines.h"
 #include "api.h"
 #include "config.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "module_player.h"
 #include "player.h"
@@ -647,8 +648,8 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
 
         // Handle global input (skip if screen off or hint active)
         if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-            int app_state_for_help = (state == PLAYER_INTERNAL_BROWSER) ? 1 : 2;  // STATE_BROWSER=1, STATE_PLAYING=2
-            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
+            HelpId help_id = (state == PLAYER_INTERNAL_BROWSER) ? HELP_BROWSER : HELP_PLAYER;
+            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
                 cleanup_playback(true);
                 Browser_freeEntries(&browser);
@@ -805,7 +806,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
 
         // Handle global input (skip if screen off or hint active)
         if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 2);  // STATE_PLAYING=2
+            GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_PLAYER);
             if (global.should_quit) {
                 Player_stop();
                 cleanup_album_art_background();
@@ -1059,7 +1060,7 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
 
             // Handle global input
             if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-                GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, 2);
+                GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_PLAYER);
                 if (global.should_quit) {
                     Player_stop();
                     cleanup_album_art_background();
