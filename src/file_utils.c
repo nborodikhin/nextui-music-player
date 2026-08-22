@@ -234,9 +234,11 @@ int extract_zip(const char* zip_path, const char* dest_dir,
     bool ok = true;
 
     zip_int64_t num_entries = zip_get_num_entries(za, 0);
-    for (zip_int64_t i = 0; ok && i < num_entries; i++) {
-        if (on_entry) on_entry((long)(i + 1), (long)num_entries, ctx);
 
+    // Nothing is processed yet, and the caller may want to say so
+    if (on_entry) on_entry(0, (long)num_entries, ctx);
+
+    for (zip_int64_t i = 0; ok && i < num_entries; i++) {
         const char* name = zip_get_name(za, i, 0);
         if (!name || !zip_entry_is_contained(name)) {
             ok = false;
@@ -250,52 +252,55 @@ int extract_zip(const char* zip_path, const char* dest_dir,
         size_t name_len = strlen(name);
         if (name_len > 0 && name[name_len - 1] == '/') {
             mkpath(full_path, 0755);
-            continue;
-        }
+        } else {
+            // Create parent directory if needed
+            char* last_slash = strrchr(full_path, '/');
+            if (last_slash) {
+                *last_slash = '\0';
+                mkpath(full_path, 0755);
+                *last_slash = '/';
+            }
 
-        // Create parent directory if needed
-        char* last_slash = strrchr(full_path, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            mkpath(full_path, 0755);
-            *last_slash = '/';
-        }
-
-        // Extract file
-        zip_file_t* zf = zip_fopen_index(za, i, 0);
-        if (!zf) {
-            ok = false;
-            break;
-        }
-
-        FILE* out = fopen(full_path, "wb");
-        if (!out) {
-            zip_fclose(zf);
-            ok = false;
-            break;
-        }
-
-        char buf[8192];
-        zip_int64_t bytes_read;
-        while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
-            if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
+            // Extract file
+            zip_file_t* zf = zip_fopen_index(za, i, 0);
+            if (!zf) {
                 ok = false;
                 break;
             }
+
+            FILE* out = fopen(full_path, "wb");
+            if (!out) {
+                zip_fclose(zf);
+                ok = false;
+                break;
+            }
+
+            char buf[8192];
+            zip_int64_t bytes_read;
+            while ((bytes_read = zip_fread(zf, buf, sizeof(buf))) > 0) {
+                if (fwrite(buf, 1, (size_t)bytes_read, out) != (size_t)bytes_read) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (bytes_read < 0) {
+                ok = false;
+            }
+
+            if (fclose(out) != 0) ok = false;
+            zip_fclose(zf);
+
+            if (!ok) break;
+
+            mode_t mode = zip_entry_mode(za, (zip_uint64_t)i);
+            if (mode != 0) chmod(full_path, mode);
+
+            written++;
         }
-        if (bytes_read < 0) {
-            ok = false;
-        }
 
-        if (fclose(out) != 0) ok = false;
-        zip_fclose(zf);
-
-        if (!ok) break;
-
-        mode_t mode = zip_entry_mode(za, (zip_uint64_t)i);
-        if (mode != 0) chmod(full_path, mode);
-
-        written++;
+        // Reported once the entry is actually dealt with, so a failed one is
+        // never counted
+        if (on_entry) on_entry((long)(i + 1), (long)num_entries, ctx);
     }
 
     zip_close(za);

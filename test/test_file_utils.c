@@ -299,10 +299,13 @@ static bool make_zip(const char* path, const char* const names[], const char* co
     return zip_close(z) == 0;
 }
 
-static long seen_done = 0, seen_total = 0;
+static long first_done = -1, seen_done = 0, seen_total = 0;
 static int progress_calls = 0;
+static bool progress_monotonic = true;
 static void note_entry(long done, long total, void* ctx) {
     (void)ctx;
+    if (progress_calls == 0) first_done = done;
+    else if (done != seen_done + 1) progress_monotonic = false;
     seen_done = done;
     seen_total = total;
     progress_calls++;
@@ -322,9 +325,16 @@ TEST(extract_zip_unpacks_and_reports_progress) {
     char dest[512];
     snprintf(dest, sizeof(dest), "%s/out", dir);
 
+    first_done = -1;
     seen_done = seen_total = progress_calls = 0;
+    progress_monotonic = true;
+
     CHECK_EQ_INT(extract_zip(zip_path, dest, note_entry, NULL), 2);
-    CHECK_EQ_INT(progress_calls, 2);
+
+    // 0 before any work, then one report per entry, ending on the total
+    CHECK_EQ_INT(first_done, 0);
+    CHECK(progress_monotonic);
+    CHECK_EQ_INT(progress_calls, 3);
     CHECK_EQ_INT(seen_done, 2);
     CHECK_EQ_INT(seen_total, 2);
 
@@ -388,8 +398,15 @@ TEST(extract_zip_refuses_an_escaping_entry) {
     const char* const bodies[] = {"fine", "pwned", NULL};
     CHECK(make_zip(zip_path, names, bodies, NULL));
 
-    CHECK_EQ_INT(extract_zip(zip_path, dest, NULL, NULL), -1);
+    first_done = -1;
+    seen_done = seen_total = progress_calls = 0;
+
+    CHECK_EQ_INT(extract_zip(zip_path, dest, note_entry, NULL), -1);
     CHECK(access(escaped, F_OK) != 0);
+
+    // The refused entry is never counted: 0, then the one good entry, and stop
+    CHECK_EQ_INT(seen_done, 1);
+    CHECK_EQ_INT(progress_calls, 2);
 
     rm_rf(dir);
 }
