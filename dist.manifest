@@ -12,4 +12,4 @@ stations/*.json
 
 # Platform payload
 bin/{platform}/musicplayer.elf
-[tg5050] bin/tg5050/libfdk-aac.so*
+[tg5050] bin/tg5050/libfdk-aac.so.1
