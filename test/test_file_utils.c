@@ -284,6 +284,16 @@ static bool make_zip(const char* path, const char* const names[], const char* co
     if (!z) return false;
 
     for (int i = 0; names[i]; i++) {
+        // A trailing slash makes it a directory entry, as a real archive has
+        size_t len = strlen(names[i]);
+        if (len > 0 && names[i][len - 1] == '/') {
+            if (zip_dir_add(z, names[i], 0) < 0) {
+                zip_discard(z);
+                return false;
+            }
+            continue;
+        }
+
         zip_source_t* src = zip_source_buffer(z, bodies[i], strlen(bodies[i]), 0);
         zip_int64_t idx = src ? zip_file_add(z, names[i], src, ZIP_FL_OVERWRITE) : -1;
         if (idx < 0) {
@@ -317,9 +327,10 @@ TEST(extract_zip_unpacks_and_reports_progress) {
 
     char zip_path[512];
     snprintf(zip_path, sizeof(zip_path), "%s/good.zip", dir);
-    const char* const names[]  = {"pak/launch.sh", "pak/res/font.ttf", NULL};
-    const char* const bodies[] = {"#!/bin/sh\n", "fontdata", NULL};
-    const mode_t modes[]       = {0755, 0644, 0};
+    // The directory entry is here to be ignored: progress counts files
+    const char* const names[]  = {"pak/launch.sh", "pak/res/", "pak/res/font.ttf", NULL};
+    const char* const bodies[] = {"#!/bin/sh\n", "", "fontdata", NULL};
+    const mode_t modes[]       = {0755, 0, 0644, 0};
     CHECK(make_zip(zip_path, names, bodies, modes));
 
     char dest[512];
@@ -331,7 +342,8 @@ TEST(extract_zip_unpacks_and_reports_progress) {
 
     CHECK_EQ_INT(extract_zip(zip_path, dest, note_entry, NULL), 2);
 
-    // 0 before any work, then one report per entry, ending on the total
+    // 0 before any work, then one report per file, ending on the file count -
+    // the directory entry contributes nothing
     CHECK_EQ_INT(first_done, 0);
     CHECK(progress_monotonic);
     CHECK_EQ_INT(progress_calls, 3);

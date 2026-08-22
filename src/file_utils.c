@@ -223,7 +223,7 @@ static mode_t zip_entry_mode(zip_t* za, zip_uint64_t index) {
 }
 
 int extract_zip(const char* zip_path, const char* dest_dir,
-                ExtractProgressFn on_entry, void* ctx) {
+                ExtractProgressFn on_progress, void* ctx) {
     int err = 0;
     zip_t* za = zip_open(zip_path, 0, &err);
     if (!za) {
@@ -235,8 +235,23 @@ int extract_zip(const char* zip_path, const char* dest_dir,
 
     zip_int64_t num_entries = zip_get_num_entries(za, 0);
 
+    // zip_open() has already read the central directory, so walking the names
+    // costs no I/O. Counting files up front lets progress be reported against
+    // them rather than against entries, which would count directories the
+    // caller never sees.
+    long total_files = 0;
+    for (zip_int64_t i = 0; i < num_entries; i++) {
+        const char* name = zip_get_name(za, i, 0);
+        if (!name) continue;
+
+        size_t len = strlen(name);
+        if (len > 0 && name[len - 1] == '/') continue;
+
+        total_files++;
+    }
+
     // Nothing is processed yet, and the caller may want to say so
-    if (on_entry) on_entry(0, (long)num_entries, ctx);
+    if (on_progress) on_progress(0, total_files, ctx);
 
     for (zip_int64_t i = 0; ok && i < num_entries; i++) {
         const char* name = zip_get_name(za, i, 0);
@@ -296,11 +311,11 @@ int extract_zip(const char* zip_path, const char* dest_dir,
             if (mode != 0) chmod(full_path, mode);
 
             written++;
-        }
 
-        // Reported once the entry is actually dealt with, so a failed one is
-        // never counted
-        if (on_entry) on_entry((long)(i + 1), (long)num_entries, ctx);
+            // Reported once the file is actually on disk, so one that failed is
+            // never counted
+            if (on_progress) on_progress(written, total_files, ctx);
+        }
     }
 
     zip_close(za);
