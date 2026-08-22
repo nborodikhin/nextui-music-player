@@ -1,7 +1,3 @@
-// Reports through return values only, never LOG_*: those live in api.h, which
-// pulls in the platform headers this module does without. Staying libc-only is
-// what lets test/test_file_utils.c build it with the host compiler.
-
 #include "file_utils.h"
 
 #include <stdio.h>
