@@ -213,6 +213,7 @@ static const ControlHelp player_controls[] = {
 static const ControlHelp playlist_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
+    {"Y", "New Playlist"},
     {"X", "Delete Playlist"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
@@ -239,6 +240,7 @@ static const ControlHelp radio_list_controls[] = {
 
 // Radio playing controls (B shown in footer)
 static const ControlHelp radio_playing_controls[] = {
+    {"A", "Play/Pause"},
     {"Up/R1", "Next Station"},
     {"Down/L1", "Prev Station"},
     {"Select", "Screen Off"},
@@ -321,10 +323,20 @@ static const ControlHelp podcast_episodes_controls[] = {
     {NULL, NULL}
 };
 
+// Podcast downloads queue controls (X/B shown in footer)
+static const ControlHelp podcast_downloads_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Cancel Download"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Podcast playing controls
 static const ControlHelp podcast_playing_controls[] = {
     {"Left", "Rewind 10s"},
     {"Right", "Forward 30s"},
+    {"Up/Down", "Playback Speed"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
     {"Start (hold)", "Exit App"},
@@ -395,6 +407,9 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     const char* page_title = "Controls";
 
     switch (help_id) {
+        // HELP_NONE never gets here - handleGlobalInput() does not open the
+        // dialog for it - but the switch has to cover every HelpId.
+        case HELP_NONE:
         case HELP_DEFAULT:
             break;
         case HELP_MAIN_MENU:
@@ -462,7 +477,7 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             page_title = "Episodes";
             break;
         case HELP_PODCAST_DOWNLOADS:
-            controls = podcast_episodes_controls;
+            controls = podcast_downloads_controls;
             page_title = "Downloads";
             break;
         case HELP_PODCAST_PLAYING:

@@ -44,7 +44,12 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input first
-        HelpId help_id = (state == SETTINGS_STATE_MENU) ? HELP_SETTINGS : HELP_ABOUT;
+        HelpId help_id;
+        switch (state) {
+            case SETTINGS_STATE_MENU:                help_id = HELP_SETTINGS; break;
+            case SETTINGS_STATE_CLEAR_CACHE_CONFIRM: help_id = HELP_NONE;     break;
+            default:                                 help_id = HELP_ABOUT;    break;
+        }
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
         if (global.should_quit) {
             return MODULE_EXIT_QUIT;

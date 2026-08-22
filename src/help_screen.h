@@ -13,6 +13,10 @@ typedef enum {
     // HelpId lands on, and what render_controls_help() falls back to.
     HELP_DEFAULT,
 
+    // No help for this screen. Modules pass it while a modal dialog is up, so
+    // START does not stack a controls box on top of the dialog.
+    HELP_NONE,
+
     HELP_MAIN_MENU,
 
     HELP_LIBRARY_MENU,

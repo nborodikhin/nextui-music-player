@@ -191,9 +191,14 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
                 show_dialog = true;
             }
         } else if (PAD_justReleased(BTN_START)) {
-            // Short press - show controls help
-            show_controls_help = true;
-            show_dialog = true;
+            // Short press - show controls help, unless the caller already has a
+            // dialog up and does not want a second box stacked on it
+            if (help_id != HELP_NONE) {
+                show_controls_help = true;
+                show_dialog = true;
+            } else {
+                start_was_pressed = false;
+            }
         }
 
         if (show_dialog) {
