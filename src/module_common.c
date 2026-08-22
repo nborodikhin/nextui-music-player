@@ -49,7 +49,7 @@ void ModuleCommon_init(void) {
     overlay_release_time = 0;
 }
 
-GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, int app_state) {
+GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
     // Poll USB HID events (earphone buttons)
@@ -167,7 +167,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             return result;
         }
         // Dialog is shown, consume input and render (covers entire screen)
-        render_controls_help(screen, app_state);
+        render_controls_help(screen, help_id);
         GFX_flip(screen);
         result.input_consumed = true;
         return result;

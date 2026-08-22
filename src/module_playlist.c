@@ -4,6 +4,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "toast.h"
 #include "module_playlist.h"
@@ -50,10 +51,6 @@ static bool show_confirm = false;
 static char confirm_name[256] = "";
 static int confirm_action = 0;  // 0 = delete playlist, 1 = remove track
 static int confirm_target = -1;
-
-// Controls help state IDs (for render_controls_help)
-#define PLAYLIST_LIST_HELP_STATE   50
-#define PLAYLIST_DETAIL_HELP_STATE 51
 
 static void refresh_playlists(void) {
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
@@ -119,8 +116,8 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
         }
 
         // Handle global input
-        int app_state_for_help = (state == PLAYLIST_INTERNAL_LIST) ? PLAYLIST_LIST_HELP_STATE : PLAYLIST_DETAIL_HELP_STATE;
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state_for_help);
+        HelpId help_id = (state == PLAYLIST_INTERNAL_LIST) ? HELP_PLAYLIST_LIST : HELP_PLAYLIST_DETAIL;
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
         if (global.should_quit) {
             return MODULE_EXIT_QUIT;
         }

@@ -3,6 +3,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+#include "help_screen.h"
 #include "player.h"
 
 // Screen off hint duration (time hint is shown before screen turns off)
@@ -29,8 +30,8 @@ void ModuleCommon_init(void);
 // Parameters:
 //   screen - SDL surface for rendering dialogs
 //   show_setting - pointer to show_setting flag (for power hints)
-//   app_state - current app state (for controls help context)
-GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, int app_state);
+//   help_id - which screen is asking (selects the controls help text)
+GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id);
 
 // Disable/enable autosleep (for modules with active playback)
 void ModuleCommon_setAutosleepDisabled(bool disabled);

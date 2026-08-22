@@ -1,5 +1,6 @@
 #include "defines.h"
 #include "api.h"
+#include "help_screen.h"
 #include "module_common.h"
 #include "module_settings.h"
 #include "display_helper.h"
@@ -24,11 +25,6 @@ typedef enum {
     SETTINGS_STATE_UPDATING
 } SettingsState;
 
-// Internal app state constants for controls help
-// These match the pattern used in ui_main.c
-#define SETTINGS_INTERNAL_MENU      40
-#define SETTINGS_INTERNAL_ABOUT     41
-
 ModuleExitReason SettingsModule_run(DisplayContext* display) {
     SettingsState state = SETTINGS_STATE_MENU;
     ListNav nav = {
@@ -48,8 +44,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input first
-        int app_state = (state == SETTINGS_STATE_MENU) ? SETTINGS_INTERNAL_MENU : SETTINGS_INTERNAL_ABOUT;
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, app_state);
+        HelpId help_id = (state == SETTINGS_STATE_MENU) ? HELP_SETTINGS : HELP_ABOUT;
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
         if (global.should_quit) {
             return MODULE_EXIT_QUIT;
         }
