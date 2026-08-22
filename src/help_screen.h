@@ -9,6 +9,10 @@
 //
 // Pure integer logic, no platform includes.
 typedef enum {
+    // Fallback bindings. Nothing sends this; it is the value a zero-initialized
+    // HelpId lands on, and what render_controls_help() falls back to.
+    HELP_DEFAULT,
+
     HELP_MAIN_MENU,
 
     HELP_LIBRARY_MENU,

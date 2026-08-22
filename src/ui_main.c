@@ -159,12 +159,27 @@ typedef struct {
     const char* action;
 } ControlHelp;
 
+// Blocks follow HelpId order.
+// Fallback bindings (HELP_DEFAULT)
+static const ControlHelp default_controls[] = {
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // Main menu controls (A/B shown in footer)
 static const ControlHelp main_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
     {"X", "Clear History/Playback"},
     {"B (double)", "Exit App"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Library menu controls (A/B shown in footer)
+static const ControlHelp library_menu_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -190,6 +205,24 @@ static const ControlHelp player_controls[] = {
     {"R2/R3", "Toggle Lyrics"},
     {"Select", "Screen Off"},
     {"Select + A", "Wake Screen"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Playlist list controls (A/B shown in footer)
+static const ControlHelp playlist_list_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Delete Playlist"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Playlist detail controls (A/B shown in footer)
+static const ControlHelp playlist_detail_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Remove Track"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -229,6 +262,14 @@ static const ControlHelp radio_browse_controls[] = {
     {"Left/Right", "Navigate"},
     {"A", "Add/Remove Station"},
     {"Y", "Manual Setup Help"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Radio manual help controls (B shown in footer)
+static const ControlHelp radio_help_controls[] = {
+    {"Up/Down", "Scroll"},
+    {"B", "Back"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -298,6 +339,13 @@ static const ControlHelp youtube_menu_controls[] = {
     {NULL, NULL}
 };
 
+// Downloader search-in-progress controls (B shown in footer)
+static const ControlHelp downloader_searching_controls[] = {
+    {"B", "Cancel search"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // YouTube results controls (A/B shown in footer)
 static const ControlHelp youtube_results_controls[] = {
     {"Up/Down", "Navigate"},
@@ -315,26 +363,10 @@ static const ControlHelp youtube_queue_controls[] = {
     {NULL, NULL}
 };
 
-// Playlist list controls (A/B shown in footer)
-static const ControlHelp playlist_list_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"X", "Delete Playlist"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Playlist detail controls (A/B shown in footer)
-static const ControlHelp playlist_detail_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"X", "Remove Track"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// About page controls (A/B shown in footer)
-static const ControlHelp about_controls[] = {
+// yt-dlp install/update controls (A/B shown in footer)
+static const ControlHelp ytdlp_controls[] = {
+    {"A", "Install/Dismiss"},
+    {"B", "Cancel/Back"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -347,15 +379,8 @@ static const ControlHelp settings_controls[] = {
     {NULL, NULL}
 };
 
-static const ControlHelp library_menu_controls[] = {
-    {"Up/Down", "Navigate"},
-    {"Left/Right", "Navigate"},
-    {"Start (hold)", "Exit App"},
-    {NULL, NULL}
-};
-
-// Generic/default controls
-static const ControlHelp default_controls[] = {
+// About page controls (A/B shown in footer)
+static const ControlHelp about_controls[] = {
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -365,11 +390,13 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     int hw = screen->w;
     int hh = screen->h;
 
-    // Select controls based on state
-    const ControlHelp* controls;
-    const char* page_title;
+    // Keep the frame sane if the switch below ever stops covering every HelpId.
+    const ControlHelp* controls = default_controls;
+    const char* page_title = "Controls";
 
     switch (help_id) {
+        case HELP_DEFAULT:
+            break;
         case HELP_MAIN_MENU:
             controls = main_menu_controls;
             page_title = "Main Menu";
@@ -411,7 +438,7 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             page_title = "Browse Stations";
             break;
         case HELP_RADIO_HELP:
-            controls = default_controls;
+            controls = radio_help_controls;
             page_title = "Radio Help";
             break;
         case HELP_PODCAST_MENU:
@@ -447,7 +474,7 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             page_title = "Downloader";
             break;
         case HELP_DOWNLOADER_SEARCHING:
-            controls = default_controls;
+            controls = downloader_searching_controls;
             page_title = "Searching";
             break;
         case HELP_DOWNLOADER_RESULTS:
@@ -459,7 +486,7 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             page_title = "Download Queue";
             break;
         case HELP_DOWNLOADER_YTDLP:
-            controls = default_controls;
+            controls = ytdlp_controls;
             page_title = "Youtube download helpers";
             break;
         case HELP_SETTINGS:
@@ -470,10 +497,8 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             controls = about_controls;
             page_title = "About";
             break;
-        default:
-            controls = default_controls;
-            page_title = "Controls";
-            break;
+        // No default arm on purpose: compiler with -Werror=switch
+        // forces to have all enum cases to be explicitly handled.
     }
 
     // Count controls
