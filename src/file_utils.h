@@ -47,6 +47,14 @@ bool cp_rf(const char* src, const char* dst, CopyProgressFn on_file, void* ctx);
 /**
  * Called for each archive entry as extract_zip() works through it.
  */
+/**
+ * Called as extract_zip() works through the archive, before each entry.
+ *
+ * @param done  Entries reached so far, counting from 1
+ * @param total Entries in the archive. Directory entries are included, so this
+ *              can exceed the file count extract_zip() returns
+ * @param ctx   Caller's context pointer, passed through untouched
+ */
 typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
 
 /**
@@ -54,9 +62,10 @@ typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
  * any failure fails the whole extraction: a half-unpacked tree looks like a whole
  * one to whatever reads it next.
  *
- * Permission bits recorded by the archive are restored. setuid, setgid and
- * sticky are not: a downloaded archive does not get to ask for those. An archive
- * that records no mode leaves files however the umask made them.
+ * Permission bits recorded by the archive are restored for files; setuid, setgid
+ * and sticky are dropped. A file whose entry records no mode keeps whatever it
+ * was created with - 0644 under the usual umask. Directories are created 0755,
+ * also subject to the umask, and are never taken from the archive.
  *
  * @param on_entry Called per entry, may be NULL
  * @return         Files written, or -1 if the archive could not be unpacked
