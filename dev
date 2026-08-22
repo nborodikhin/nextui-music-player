@@ -299,11 +299,20 @@ def build_device(platform, runtime):
     build_dir = ROOT / "src" / "build" / platform
     build_dir.mkdir(parents=True, exist_ok=True)
     if platform == "tg5050":
-        libraries = sorted((ROOT / "bin" / platform).glob("libfdk-aac.so*"))
-        if not libraries:
-            raise DevError("Missing bin/tg5050/libfdk-aac.so")
-        for library in libraries:
-            shutil.copy2(library, build_dir / library.name)
+        aac_library = ROOT / "bin" / platform / "libfdk-aac.so.1"
+        if not aac_library.exists():
+            raise DevError("Missing {}".format(aac_library.relative_to(ROOT)))
+
+        staged = build_dir / aac_library.name
+        if not staged.exists():
+            print("Copying {}".format(aac_library.relative_to(ROOT)))
+            shutil.copy2(aac_library, staged)
+
+        link = build_dir / "libfdk-aac.so"
+        if not link.exists() or not link.is_symlink:
+            print("Symlinking {}".format(link.relative_to(ROOT)))
+            link.unlink(missing_ok=True)
+            link.symlink_to(aac_library.name)
 
     run_container(
         runtime,
