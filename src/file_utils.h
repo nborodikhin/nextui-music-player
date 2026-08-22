@@ -45,12 +45,12 @@ typedef void (*CopyProgressFn)(const char* rel_path, void* ctx);
 bool cp_rf(const char* src, const char* dst, CopyProgressFn on_file, void* ctx);
 
 /**
- * Called by extract_zip() once with 0 before it starts, then after each file is
- * written.
+ * Called by extract_zip() once with 0 before it starts, then after each entry is
+ * processed - so the last call of a complete extraction reports total.
  *
- * @param done  Files written so far
- * @param total Files in the archive, directory entries excluded - so a complete
- *              extraction ends on the count extract_zip() returns
+ * @param done  Entries processed so far
+ * @param total Entries in the archive. Directory entries are included, so this
+ *              can exceed the file count extract_zip() returns
  * @param ctx   Caller's context pointer, passed through untouched
  */
 typedef void (*ExtractProgressFn)(long done, long total, void* ctx);
