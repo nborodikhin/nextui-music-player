@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    {
+      "name": "nextui",
+      "path": "NextUI",
+      "git_url": "https://github.com/LoveRetro/NextUI.git",
+      "ref": "v6.14.0"
+    }
+  ]
+}

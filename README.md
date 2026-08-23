@@ -129,8 +129,46 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Building from Source
 
 ### Prerequisites
-- Cross-compilation toolchain for ARM64
-- NextUI workspace with platform dependencies
+- Docker or Podman (device builds run in the NextUI toolchain image)
+- `git` (the build dependencies are checked out by the `dev` script)
+
+### Build Dependencies
+
+The player compiles against the dependencies specified in `deps.json`.
+
+```bash
+./dev deps fetch   # fetch any missing dependencies (no-op for already fetched ones)
+./dev deps update  # updates dependencies to versions specified by deps file
+```
+
+`fetch` is a step of `build`, so the first build on a fresh clone will pull
+all dependencies automatically.
+
+Dependency file can be updated, the call to `./dev deps update` will try to update
+checkouts to match the new version.
+
+You can freely switch dependency to your own revision, and make changes to a dependency,
+version tracking will detect that and won't force the pinned version.
+
+### VS Code
+
+Run `./dev deps fetch` to fetch dependencies (mainly NextUI) first, then open
+**C/C++: Edit Configurations (UI)** from the VS Code command palette and fill in:
+
+Include path:
+
+```
+NextUI/workspace/all/common
+NextUI/workspace/desktop/platform
+NextUI/workspace/desktop/libmsettings
+```
+
+Defines:
+
+```
+USE_SDL2=1
+PLATFORM=desktop
+```
 
 ### Build Commands and Tools
 
@@ -154,6 +192,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 
 # Remove generated local build and distribution output
 ./dev clean
+./dev clean --deps                     # also remove the dependency checkouts
 
 # Inspect or update release versions and changelog notes
 ./dev version latest
@@ -179,33 +218,28 @@ installs that archive as a full pak (`--delete` still applies).
 ### Project Structure
 
 ```
-workspace/
-├── nextui-music-player/     # This project
-│   ├── src/                 # Source code
-│   ├── bin/                 # Platform binaries and runtime tools
-│   │   ├── tg5040/          # TrimUI Brick binary (musicplayer.elf)
-│   │   ├── tg5050/          # TrimUI Smart Pro S binary (musicplayer.elf)
-│   │   ├── yt-dlp           # YouTube downloader (installed on demand, not shipped)
-│   │   ├── qjs              # QuickJS, required by yt-dlp (installed on demand)
-│   │   ├── ffmpeg           # Fallback only; the firmware normally provides it
-│   │   └── keyboard         # On-screen keyboard
-│   ├── res/                 # Resources (fonts, images, CA bundle)
-│   ├── stations/            # Curated radio stations
-│   └── state/               # Runtime state files
-├── all/                     # Shared code
-│   ├── common/              # Common utilities, API
-│   └── minarch/             # Emulator framework
-├── tg5040/                  # TrimUI Brick platform
-│   ├── platform/            # Platform-specific code
-│   └── libmsettings/        # Settings library
-└── tg5050/                  # TrimUI Smart Pro platform
-    ├── platform/            # Platform-specific code
-    └── libmsettings/        # Settings library
+nextui-music-player/         # This project
+├── NextUI/                  # NextUI checkout (managed through ./dev deps)
+│   └── workspace/
+│       ├── all/             # Shared code (common utilities, minarch)
+│       ├── tg5040/          # TrimUI Brick platform
+│       └── tg5050/          # TrimUI Smart Pro S platform
+├── src/                     # Source code
+├── bin/                     # Platform binaries and runtime tools
+│   ├── tg5040/              # TrimUI Brick binary (musicplayer.elf)
+│   ├── tg5050/              # TrimUI Smart Pro S binary (musicplayer.elf)
+│   ├── yt-dlp               # YouTube downloader (installed on demand)
+│   ├── qjs                  # QuickJS, required by yt-dlp (installed on demand)
+│   ├── ffmpeg               # media convertor, required by yt-dlp (installed on demand)
+│   └── keyboard             # On-screen keyboard
+├── res/                     # Resources (fonts, images, CA bundle)
+├── stations/                # Curated radio stations
+└── state/                   # Runtime state files
 ```
 
 ### Dependencies
 
 The music player uses:
-- **Shared code**: `workspace/all/common/` (utils, api, config, scaler)
-- **Platform code**: `workspace/<PLATFORM>/platform/`
+- **Shared code**: `NextUI/workspace/all/common/` (utils, api, config, scaler)
+- **Platform code**: `NextUI/workspace/<PLATFORM>/platform/`
 - **Libraries**: SDL2, SDL2_image, SDL2_ttf, GLESv2, EGL, libsamplerate, libzip, mbedTLS, ALSA

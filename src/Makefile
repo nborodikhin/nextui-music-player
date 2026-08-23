@@ -53,16 +53,30 @@ AR = $(CROSS_COMPILE)ar
 endif
 
 ###########################################################
+# NextUI source tree. `./dev deps fetch` checks it out into <project>/NextUI; the
+# container build mounts it at the same relative path. Override to build
+# against a tree that lives somewhere else.
+
+NEXTUI_ROOT ?= ../NextUI/workspace
+
+# `clean` is exempt so a tree can always be scrubbed without its dependencies.
+ifeq (,$(filter clean,$(MAKECMDGOALS)))
+ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
+$(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
+endif
+endif
+
+###########################################################
 # Include paths
 
 INCDIR  = -I. -I./audio
-INCDIR += -I../../all/common/ -I../../$(PLATFORM)/platform/
-INCDIR += -I../../all/minarch/libretro-common/include
+INCDIR += -I$(NEXTUI_ROOT)/all/common/ -I$(NEXTUI_ROOT)/$(PLATFORM)/platform/
+INCDIR += -I$(NEXTUI_ROOT)/all/minarch/libretro-common/include
 INCDIR += -I./include -I./include/mbedtls_lib -I./include/yxml
 INCDIR += -I./include/libogg/include -I./include/libopus/include
 INCDIR += -I./include/opusfile/include
 INCDIR += -I$(PREFIX)/include -I$(PREFIX_LOCAL)/include
-INCDIR += -I../../$(PLATFORM)/libmsettings
+INCDIR += -I$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
 
 ###########################################################
 # Opus / OGG / Opusfile — built as libopus.a
@@ -150,20 +164,20 @@ endif
 
 # Sources that live outside src/ (shared NextUI code + per-platform code).
 # These need their own rule below: a plain $(OBJ_DIR)/%.o: %.c pattern would
-# reuse the same object/dep file across platforms, since the ../../ in the
+# reuse the same object/dep file across platforms, since the leading ../ in the
 # source path collapses right back out of $(OBJ_DIR) (e.g. both
-# build/tg5040/obj/../../all/common/api.o and build/tg5050/obj/../../all/common/api.o
-# resolve to build/all/common/api.o). That caused stale objects compiled for
-# one platform's headers to get linked into the other platform's binary.
+# build/tg5040/obj/../NextUI/workspace/all/common/api.o and its tg5050 twin
+# resolve to the same path). That caused stale objects compiled for one
+# platform's headers to get linked into the other platform's binary.
 EXT_SRC = \
-    ../../all/common/utils.c ../../all/common/api.c \
-    ../../all/common/config.c ../../all/common/scaler.c \
-    ../../$(PLATFORM)/platform/platform.c
+    $(NEXTUI_ROOT)/all/common/utils.c $(NEXTUI_ROOT)/all/common/api.c \
+    $(NEXTUI_ROOT)/all/common/config.c $(NEXTUI_ROOT)/all/common/scaler.c \
+    $(NEXTUI_ROOT)/$(PLATFORM)/platform/platform.c
 
 APP_SRC = $(LOCAL_SRC) $(EXT_SRC)
 
 LOCAL_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LOCAL_SRC))
-EXT_OBJS   = $(patsubst ../../%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
+EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
 APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
 
 ###########################################################
@@ -189,8 +203,8 @@ endif
 MY_LDFLAGS  = -L$(BUILD_DIR)
 MY_LDFLAGS += -L$(PREFIX)/lib -L$(PREFIX_LOCAL)/lib
 MY_LDFLAGS += -L$(PREFIX)/lib/$(CROSS_TRIPLE)
-MY_LDFLAGS += -L../../$(PLATFORM)/libmsettings
-MY_LDFLAGS += -L../../all/minarch/build/$(PLATFORM)
+MY_LDFLAGS += -L$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
+MY_LDFLAGS += -L$(NEXTUI_ROOT)/all/minarch/build/$(PLATFORM)
 
 LDLIBS  = -lopus -lmbedtls
 LDLIBS += -lSDL2_image -lSDL2_ttf
@@ -239,7 +253,7 @@ $(OBJ_DIR)/%.o: %.c
 # Compile sources that live outside src/ (see EXT_SRC above) into their own
 # per-platform subdirectory instead of $(OBJ_DIR)/%.o, so they can't collapse
 # to a path shared with another platform's build.
-$(OBJ_DIR)/ext/%.o: ../../%.c
+$(OBJ_DIR)/ext/%.o: $(NEXTUI_ROOT)/%.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
 
