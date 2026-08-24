@@ -13,21 +13,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout NextUI (build dependencies)
-        uses: actions/checkout@v4
-        with:
-          repository: LoveRetro/NextUI
-          path: NextUI
-
       - name: Checkout Music Player
         uses: actions/checkout@v4
-        with:
-          path: NextUI/workspace/nextui-music-player
 
       - name: Build and package release
-        run: |
-          cd ${{ github.workspace }}/NextUI/workspace/nextui-music-player
-          ./dev dist all --strict
+        run: ./dev dist all --strict
 
       - name: Create GitHub Release
         env:
@@ -38,4 +28,4 @@ jobs:
             --repo ${{ github.repository }} \
             --title "$VERSION" \
             --generate-notes \
-            "${{ github.workspace }}/NextUI/workspace/nextui-music-player/dist/Music.Player.pak.zip"
+            "${{ github.workspace }}/dist/Music.Player.pak.zip"

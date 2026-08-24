@@ -8,6 +8,9 @@ state/NextUI.code-workspace
 BUILD.md
 src/opus_obj/
 src/build/
+# Dependency checkouts created by ./dev prepare
+/NextUI/
+# Build artifacts
 bin/tg5040/musicplayer.elf
 bin/tg5050/musicplayer.elf
 bin/desktop/musicplayer.elf
