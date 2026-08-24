@@ -2,9 +2,11 @@
 #include "player.h"
 #include "radio.h"
 #include "podcast.h"
+#include "audiobook.h"
 #include "resume.h"
 #include "module_player.h"
 #include "module_podcast.h"
+#include "module_audiobook.h"
 #include "module_common.h"
 
 static BackgroundPlayerType active_bg = BG_NONE;
@@ -34,6 +36,11 @@ void Background_stopAll(void) {
             Podcast_stop();
             Podcast_flushProgress();
             break;
+        case BG_AUDIOBOOK:
+            // Saves the position of the current chapter, then flushes to disk
+            AudiobookModule_stop();
+            Audiobook_flushProgress();
+            break;
         case BG_NONE:
             break;
     }
@@ -51,6 +58,8 @@ bool Background_isPlaying(void) {
             return Radio_isActive();
         case BG_PODCAST:
             return Podcast_isActive();
+        case BG_AUDIOBOOK:
+            return AudiobookModule_isActive();
         case BG_NONE:
             break;
     }
@@ -71,6 +80,9 @@ void Background_tick(void) {
             break;
         case BG_PODCAST:
             PodcastModule_backgroundTick();
+            break;
+        case BG_AUDIOBOOK:
+            AudiobookModule_backgroundTick();
             break;
         case BG_NONE:
             break;

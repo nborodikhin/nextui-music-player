@@ -17,6 +17,7 @@
 #define ICON_OGG       ICON_PATH "/icon-ogg.png"
 #define ICON_WAV       ICON_PATH "/icon-wav.png"
 #define ICON_M4A       ICON_PATH "/icon-m4a.png"
+#define ICON_M4B       ICON_PATH "/icon-m4b.png"
 #define ICON_AAC       ICON_PATH "/icon-aac.png"
 #define ICON_OPUS      ICON_PATH "/icon-ops.png"
 // Podcast badge icons
@@ -42,6 +43,8 @@ typedef struct {
     SDL_Surface* wav_inv;
     SDL_Surface* m4a;
     SDL_Surface* m4a_inv;
+    SDL_Surface* m4b;
+    SDL_Surface* m4b_inv;
     SDL_Surface* aac;
     SDL_Surface* aac_inv;
     SDL_Surface* opus;
@@ -123,6 +126,7 @@ void Icons_init(void) {
     load_icon_pair(ICON_OGG, &icons.ogg, &icons.ogg_inv);
     load_icon_pair(ICON_WAV, &icons.wav, &icons.wav_inv);
     load_icon_pair(ICON_M4A, &icons.m4a, &icons.m4a_inv);
+    load_icon_pair(ICON_M4B, &icons.m4b, &icons.m4b_inv);
     load_icon_pair(ICON_AAC, &icons.aac, &icons.aac_inv);
     load_icon_pair(ICON_OPUS, &icons.opus, &icons.opus_inv);
     // Podcast badge icons
@@ -155,6 +159,8 @@ void Icons_quit(void) {
     if (icons.wav_inv) { SDL_FreeSurface(icons.wav_inv); icons.wav_inv = NULL; }
     if (icons.m4a) { SDL_FreeSurface(icons.m4a); icons.m4a = NULL; }
     if (icons.m4a_inv) { SDL_FreeSurface(icons.m4a_inv); icons.m4a_inv = NULL; }
+    if (icons.m4b) { SDL_FreeSurface(icons.m4b); icons.m4b = NULL; }
+    if (icons.m4b_inv) { SDL_FreeSurface(icons.m4b_inv); icons.m4b_inv = NULL; }
     if (icons.aac) { SDL_FreeSurface(icons.aac); icons.aac = NULL; }
     if (icons.aac_inv) { SDL_FreeSurface(icons.aac_inv); icons.aac_inv = NULL; }
     if (icons.opus) { SDL_FreeSurface(icons.opus); icons.opus = NULL; }
@@ -220,6 +226,10 @@ SDL_Surface* Icons_getForFormat(AudioFormat format, bool selected) {
         case AUDIO_FORMAT_M4A:
             icon = icons.m4a;
             icon_inv = icons.m4a_inv;
+            break;
+        case AUDIO_FORMAT_M4B:
+            icon = icons.m4b;
+            icon_inv = icons.m4b_inv;
             break;
         case AUDIO_FORMAT_AAC:
             icon = icons.aac;

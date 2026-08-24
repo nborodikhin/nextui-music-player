@@ -1,7 +1,7 @@
 #include "menu_rows.h"
 
 bool MenuRows_isPlayItem(MenuSelection selection) {
-    return selection == MENU_RESUME || selection == MENU_NOW_PLAYING;
+    return selection == MENU_NOW_PLAYING;
 }
 
 MenuRows MenuRows_build(MenuSelection playing_item) {
@@ -13,6 +13,7 @@ MenuRows MenuRows_build(MenuSelection playing_item) {
         rows.selection[rows.count++] = rows.playing_item;
     }
     rows.selection[rows.count++] = MENU_LIBRARY;
+    rows.selection[rows.count++] = MENU_AUDIOBOOK;
     rows.selection[rows.count++] = MENU_RADIO;
     rows.selection[rows.count++] = MENU_PODCAST;
     rows.selection[rows.count++] = MENU_SETTINGS;

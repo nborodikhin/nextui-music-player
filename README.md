@@ -41,7 +41,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Support Bluetooth/USB-C devices for output and media controls.
 - Automatic screen off (Follow system screen timeout).
 
-### Library
+### Music
 - Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `AAC` and `OPUS` formats
 - File browser for navigating music libraries (Audio files must be placed in `./Music` folder)
 - Shuffle and repeat modes
@@ -50,6 +50,28 @@ A comprehensive music playback application for NextUI featuring local file playb
 - Automated lyric download and display during playback
 - Search and download YouTube Music for music (Downloaded tracks will be placed in `./Music/Download`)
 - Playlist management
+- A pinned `Continue` row at the top of the Music menu resumes the last track played
+
+### Audiobook
+- Books live in `./Audiobook`: either a subfolder (its audio files, sorted by name, are the chapters) or a single file
+- `M4B` files with internal chapters (Nero `chpl` or QuickTime chapter tracks)
+- One saved position **per book**, so several books can be in progress at once
+- A pinned `Continue` row at the top of the library jumps straight back into the last book
+- Chapter list with direct jump, skip back 10s / forward 30s
+- Sleep timer (15/30/45/60 minutes, or end of chapter)
+- Playback continues in the background; "Now Playing" on the main menu returns to it
+
+Two ways to organize a book under `./Audiobook`:
+
+```
+Audiobook/
+├── Project Hail Mary/              # one folder per book = one chapter per file,
+│   ├── 01 - Chapter 1.mp3          # sorted by file name
+│   ├── 02 - Chapter 2.mp3
+│   └── 03 - Chapter 3.mp3
+└── Dune.m4b                        # or a single standalone .m4b with its
+                                     # chapters read from embedded metadata
+```
 
 ### Online Radio
 - Preset station management (add, remove, save)
@@ -72,7 +94,18 @@ A comprehensive music playback application for NextUI featuring local file playb
 - **D-Pad**: Navigate menus and file browser
 - **A Button**: Select/Confirm
 - **B Button**: Back/Cancel/Exit
-- **X Button**: Clear Resume History/Background Playback
+- **X Button**: Stop Background Playback (on the `Now Playing` row)
+- **Start (short press)**: Show Controls Help
+- **Start (long press)**: Exit Application
+
+The first row only appears while audio is playing, and returns to whichever
+player owns it. Resuming a stopped track is done from the `Continue` row inside
+the `Music` and `Audiobook` menus.
+
+### Music Menu
+- **A Button**: Select (on `Continue`, resumes the last track)
+- **B Button**: Back
+- **X Button**: Forget the `Continue` entry
 - **Start (short press)**: Show Controls Help
 - **Start (long press)**: Exit Application
 
@@ -92,6 +125,19 @@ A comprehensive music playback application for NextUI featuring local file playb
 - **L2/L3 Shoulders**: Toggle Visualizer
 - **R2/R3 Shoulders**: Toggle Lyrics
 
+### Audiobook Player
+- **A Button**: Play/Pause
+- **B Button**: Back (audio keeps playing in the background)
+- **X Button**: Chapter list
+- **Y Button**: Sleep timer (Off -> 15 -> 30 -> 45 -> 60 min -> end of chapter)
+- **D-Pad Left**: Back 10 seconds
+- **D-Pad Right**: Forward 30 seconds
+- **D-Pad Up/Down**: Prev/Next Chapter
+- **Select**: Turn Off Screen
+- **Start (short press)**: Show Controls Help
+- **Start (long press)**: Exit Application
+- **L1/R1 Shoulders**: Prev/Next Chapter
+
 ### Radio Player
 - **B Button**: Back/Stop
 - **D-Pad Up**: Next Station
@@ -110,8 +156,16 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Usage
 
 ### Playing Local Music
-- Navigate to your music folder using the `Library` menu
+- Navigate to your music folder using the `Music` menu
 - Select a file to start playback
+- The `Continue` row at the top of the `Music` menu picks the last track back up
+
+### Audiobooks
+- Copy books into `./Audiobook` on the SD card, one folder per book (or a single `.m4b`)
+- Open the `Audiobook` menu; the `Continue` row at the top resumes the last book you were listening to
+- Books already in progress are listed first, showing their chapter and position
+- Select a book to resume exactly where you left off
+- Press `X` in the book list to mark a book finished or unfinished
 
 ### Online Radio
 - Navigate to the stations list using the `Online Radio` menu

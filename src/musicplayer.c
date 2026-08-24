@@ -27,11 +27,13 @@
 #include "module_player.h"
 #include "module_radio.h"
 #include "module_podcast.h"
+#include "module_audiobook.h"
 #include "downloader.h"
 #include "module_settings.h"
 #include "settings.h"
 #include "resume.h"
 #include "background.h"
+#include "audiobook.h"
 #include "display_helper.h"
 
 // Global quit flag
@@ -152,6 +154,7 @@ int main(int argc, char* argv[]) {
 
         switch (selection) {
             case MENU_NOW_PLAYING:
+                // The slot only exists while audio plays — route to its module
                 switch (Background_getActive()) {
                     case BG_MUSIC:
                         reason = PlayerModule_run(display, true);  // Now Playing entry
@@ -162,20 +165,19 @@ int main(int argc, char* argv[]) {
                     case BG_PODCAST:
                         reason = PodcastModule_run(display);
                         break;
+                    case BG_AUDIOBOOK:
+                        reason = AudiobookModule_run(display);
+                        break;
                     default:
                         break;
                 }
                 break;
 
-            case MENU_RESUME: {
-                const ResumeState* rs = Resume_getState();
-                if (rs) {
-                    reason = PlayerModule_runResume(display, rs);
-                }
-                break;
-            }
             case MENU_LIBRARY:
                 reason = LibraryModule_run(display);
+                break;
+            case MENU_AUDIOBOOK:
+                reason = AudiobookModule_run(display);
                 break;
             case MENU_RADIO:
                 reason = RadioModule_run(display);
@@ -199,6 +201,7 @@ int main(int argc, char* argv[]) {
 
 cleanup:
     Background_stopAll();
+    Audiobook_cleanup();
     Downloader_cleanup();
     Settings_quit();
     ModuleCommon_quit();

@@ -9,7 +9,6 @@
 #include "display_helper.h"
 #include "ui_main.h"
 #include "ui_utils.h"
-#include "resume.h"
 #include "background.h"
 #include "list_nav.h"
 #include "list_nav_pad.h"
@@ -32,10 +31,11 @@ static ToastToken exit_prompt = TOAST_TOKEN_NONE;
 // The item the cursor was on when the menu was last left.
 static MenuSelection last_selection = MENU_LIBRARY;
 
-// State of the playback row. Now Playing wins over Resume when both apply.
+// The first slot only ever reflects live background playback. Resuming a
+// stopped track is a per-domain concern, handled by the Continue row inside
+// the Music and Audiobook menus.
 static MenuSelection menu_playing_item(void) {
     if (Background_isPlaying()) return MENU_NOW_PLAYING;
-    if (Resume_isAvailable())   return MENU_RESUME;
     return MENU_NONE;
 }
 
@@ -116,12 +116,8 @@ MenuSelection MenuModule_run(DisplayContext* display) {
         }
         else if (PAD_justPressed(BTN_X)) {
             MenuSelection sel = MenuRows_selectionAt(&rows, nav.selected);
-            if (MenuRows_isPlayItem(sel)) {
-                if (sel == MENU_NOW_PLAYING) {
-                    Background_stopAll();
-                } else {
-                    Resume_clear();
-                }
+            if (sel == MENU_NOW_PLAYING) {
+                Background_stopAll();
                 GFX_clearLayers(LAYER_SCROLLTEXT);
                 nav.selected = 0;
                 last_selection = MenuRows_selectionAt(&rows, 0);

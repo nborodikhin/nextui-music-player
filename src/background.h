@@ -8,7 +8,8 @@ typedef enum {
     BG_NONE = 0,
     BG_MUSIC,
     BG_RADIO,
-    BG_PODCAST
+    BG_PODCAST,
+    BG_AUDIOBOOK
 } BackgroundPlayerType;
 
 // Set the active background player

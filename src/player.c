@@ -401,6 +401,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             sd->total_frames = op_pcm_total(of, -1);
             break;
         }
+        case AUDIO_FORMAT_M4B:
         case AUDIO_FORMAT_M4A: {
             M4ADecoder* m4a = malloc(sizeof(M4ADecoder));
             if (!m4a) {
@@ -680,6 +681,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
             frames_read = (ret > 0) ? (size_t)ret : 0;
             break;
         }
+        case AUDIO_FORMAT_M4B:
         case AUDIO_FORMAT_M4A: {
             M4ADecoder* m4a = (M4ADecoder*)sd->decoder;
 
@@ -964,6 +966,7 @@ static int stream_decoder_seek(StreamDecoder* sd, int64_t frame) {
         case AUDIO_FORMAT_OPUS:
             success = (op_pcm_seek((OggOpusFile*)sd->decoder, frame) == 0);
             break;
+        case AUDIO_FORMAT_M4B:
         case AUDIO_FORMAT_M4A: {
             M4ADecoder* m4a = (M4ADecoder*)sd->decoder;
             // Convert PCM frame to AAC sample index
@@ -1033,6 +1036,7 @@ static void stream_decoder_close(StreamDecoder* sd) {
         case AUDIO_FORMAT_OPUS:
             op_free((OggOpusFile*)sd->decoder);
             break;
+        case AUDIO_FORMAT_M4B:
         case AUDIO_FORMAT_M4A: {
             M4ADecoder* m4a = (M4ADecoder*)sd->decoder;
             if (m4a->aac_decoder) {
@@ -1993,7 +1997,8 @@ static void parse_mp3_metadata(const char* filepath) {
 
 // Parse M4A metadata from the already-opened decoder
 static void parse_m4a_metadata(void) {
-    if (player.stream_decoder.format != AUDIO_FORMAT_M4A || !player.stream_decoder.decoder) {
+    if ((player.stream_decoder.format != AUDIO_FORMAT_M4A &&
+         player.stream_decoder.format != AUDIO_FORMAT_M4B) || !player.stream_decoder.decoder) {
         return;
     }
 
@@ -2093,6 +2098,7 @@ AudioFormat Player_detectFormat(const char* filepath) {
     if (strcasecmp(ext, "opus") == 0) return AUDIO_FORMAT_OPUS;
     if (strcasecmp(ext, "flac") == 0) return AUDIO_FORMAT_FLAC;
     if (strcasecmp(ext, "m4a") == 0) return AUDIO_FORMAT_M4A;
+    if (strcasecmp(ext, "m4b") == 0) return AUDIO_FORMAT_M4B;
     if (strcasecmp(ext, "aac") == 0) return AUDIO_FORMAT_AAC;
     if (strcasecmp(ext, "mod") == 0 || strcasecmp(ext, "xm") == 0 ||
         strcasecmp(ext, "s3m") == 0 || strcasecmp(ext, "it") == 0) {
@@ -2100,6 +2106,184 @@ AudioFormat Player_detectFormat(const char* filepath) {
     }
 
     return AUDIO_FORMAT_UNKNOWN;
+}
+
+// ============================================================================
+// Duration probing
+//
+// Audiobook scanning needs the length of every chapter file. These probes read
+// headers only — decoding a multi-hour book end to end just to learn its length
+// would take tens of seconds per file off an SD card.
+// ============================================================================
+
+static const int MP3_BITRATES_V1L3[16] = {0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0};
+static const int MP3_BITRATES_V2L3[16] = {0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0};
+static const int MP3_SAMPLE_RATES[4]   = {44100, 48000, 32000, 0};
+
+// Estimate MP3 length from the first frame header, refined by the Xing/Info VBR
+// tag when the encoder wrote one. Falls back to a CBR size/bitrate estimate.
+static int probe_mp3_duration_ms(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (file_size <= 0) { fclose(f); return 0; }
+
+    // Skip an ID3v2 tag if present (size is a 28-bit syncsafe integer)
+    long offset = 0;
+    unsigned char tag[10];
+    if (fread(tag, 1, 10, f) == 10 && memcmp(tag, "ID3", 3) == 0) {
+        offset = 10 + (((long)(tag[6] & 0x7f) << 21) | ((long)(tag[7] & 0x7f) << 14) |
+                       ((long)(tag[8] & 0x7f) << 7)  |  (long)(tag[9] & 0x7f));
+        if (tag[5] & 0x10) offset += 10;  // footer present
+    }
+    if (offset >= file_size) { fclose(f); return 0; }
+
+    // Scan forward for the first frame sync; tolerate junk between tag and audio
+    #define MP3_SCAN_WINDOW 65536
+    unsigned char* buf = malloc(MP3_SCAN_WINDOW);
+    if (!buf) { fclose(f); return 0; }
+    fseek(f, offset, SEEK_SET);
+    size_t avail = fread(buf, 1, MP3_SCAN_WINDOW, f);
+
+    int duration_ms = 0;
+    for (size_t i = 0; i + 4 <= avail; i++) {
+        if (buf[i] != 0xFF || (buf[i + 1] & 0xE0) != 0xE0) continue;
+
+        int version_id  = (buf[i + 1] >> 3) & 0x03;  // 0=2.5, 2=MPEG2, 3=MPEG1
+        int layer       = (buf[i + 1] >> 1) & 0x03;  // 1 = Layer III
+        int bitrate_idx = (buf[i + 2] >> 4) & 0x0F;
+        int sr_idx      = (buf[i + 2] >> 2) & 0x03;
+        int channel_mode = (buf[i + 3] >> 6) & 0x03;
+
+        if (version_id == 1 || layer != 1) continue;             // reserved version / not Layer III
+        if (bitrate_idx == 0 || bitrate_idx == 15) continue;     // free-form or invalid
+        if (sr_idx == 3) continue;
+
+        bool is_mpeg1 = (version_id == 3);
+        int sample_rate = MP3_SAMPLE_RATES[sr_idx];
+        if (version_id == 2) sample_rate /= 2;        // MPEG2
+        else if (version_id == 0) sample_rate /= 4;   // MPEG2.5
+        if (sample_rate <= 0) continue;
+
+        int bitrate_kbps = is_mpeg1 ? MP3_BITRATES_V1L3[bitrate_idx] : MP3_BITRATES_V2L3[bitrate_idx];
+        if (bitrate_kbps <= 0) continue;
+        int samples_per_frame = is_mpeg1 ? 1152 : 576;
+
+        // Xing/Info sits at a fixed offset inside this first frame
+        size_t xing_off = i + 4 + (is_mpeg1 ? (channel_mode == 3 ? 17 : 32)
+                                            : (channel_mode == 3 ?  9 : 17));
+        if (xing_off + 12 <= avail &&
+            (memcmp(&buf[xing_off], "Xing", 4) == 0 || memcmp(&buf[xing_off], "Info", 4) == 0)) {
+            uint32_t flags = ((uint32_t)buf[xing_off + 4] << 24) | ((uint32_t)buf[xing_off + 5] << 16) |
+                             ((uint32_t)buf[xing_off + 6] << 8)  |  (uint32_t)buf[xing_off + 7];
+            if (flags & 0x1) {
+                uint32_t frames = ((uint32_t)buf[xing_off + 8] << 24) | ((uint32_t)buf[xing_off + 9] << 16) |
+                                  ((uint32_t)buf[xing_off + 10] << 8) |  (uint32_t)buf[xing_off + 11];
+                duration_ms = (int)(((uint64_t)frames * samples_per_frame * 1000ULL) / sample_rate);
+            }
+        }
+
+        if (duration_ms == 0) {
+            // CBR estimate over the audio portion of the file
+            uint64_t audio_bytes = (uint64_t)(file_size - offset - (long)i);
+            duration_ms = (int)((audio_bytes * 8ULL) / (uint64_t)bitrate_kbps);
+        }
+        break;
+    }
+    #undef MP3_SCAN_WINDOW
+
+    free(buf);
+    fclose(f);
+    return duration_ms;
+}
+
+// Read the duration of an MP4 container (m4a/m4b) from its audio track header
+static int probe_mp4_duration_ms(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+
+    fseek(f, 0, SEEK_END);
+    int64_t file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    MP4D_demux_t mp4;
+    memset(&mp4, 0, sizeof(mp4));
+    if (MP4D_open(&mp4, m4a_read_callback, f, file_size) == 0) {
+        fclose(f);
+        return 0;
+    }
+
+    int duration_ms = 0;
+    for (unsigned i = 0; i < mp4.track_count; i++) {
+        if (mp4.track[i].handler_type != MP4D_HANDLER_TYPE_SOUN) continue;
+        uint64_t duration = ((uint64_t)mp4.track[i].duration_hi << 32) | mp4.track[i].duration_lo;
+        if (mp4.track[i].timescale > 0) {
+            duration_ms = (int)((duration * 1000ULL) / mp4.track[i].timescale);
+        }
+        break;
+    }
+
+    MP4D_close(&mp4);
+    fclose(f);
+    return duration_ms;
+}
+
+int Player_probeDuration(const char* filepath) {
+    if (!filepath) return 0;
+
+    switch (Player_detectFormat(filepath)) {
+        case AUDIO_FORMAT_MP3:
+            return probe_mp3_duration_ms(filepath);
+
+        case AUDIO_FORMAT_WAV: {
+            drwav wav;
+            if (!drwav_init_file(&wav, filepath, NULL)) return 0;
+            int ms = (wav.sampleRate > 0)
+                   ? (int)((wav.totalPCMFrameCount * 1000ULL) / wav.sampleRate) : 0;
+            drwav_uninit(&wav);
+            return ms;
+        }
+
+        case AUDIO_FORMAT_FLAC: {
+            drflac* fl = drflac_open_file(filepath, NULL);
+            if (!fl) return 0;
+            int ms = (fl->sampleRate > 0)
+                   ? (int)((fl->totalPCMFrameCount * 1000ULL) / fl->sampleRate) : 0;
+            drflac_close(fl);
+            return ms;
+        }
+
+        case AUDIO_FORMAT_OGG: {
+            int err = 0;
+            stb_vorbis* v = stb_vorbis_open_filename(filepath, &err, NULL);
+            if (!v) return 0;
+            stb_vorbis_info info = stb_vorbis_get_info(v);
+            unsigned int samples = stb_vorbis_stream_length_in_samples(v);
+            int ms = (info.sample_rate > 0)
+                   ? (int)(((uint64_t)samples * 1000ULL) / info.sample_rate) : 0;
+            stb_vorbis_close(v);
+            return ms;
+        }
+
+        case AUDIO_FORMAT_OPUS: {
+            int err = 0;
+            OggOpusFile* of = op_open_file(filepath, &err);
+            if (!of) return 0;
+            ogg_int64_t total = op_pcm_total(of, -1);  // Opus always reports at 48 kHz
+            op_free(of);
+            return (total > 0) ? (int)(total / 48) : 0;
+        }
+
+        case AUDIO_FORMAT_M4A:
+        case AUDIO_FORMAT_M4B:
+            return probe_mp4_duration_ms(filepath);
+
+        default:
+            return 0;  // Raw AAC and MOD carry no reliable header duration
+    }
 }
 
 // Reset audio device to default sample rate (for radio use)
@@ -2203,7 +2387,8 @@ int Player_load(const char* filepath) {
     AudioFormat format = Player_detectFormat(filepath);
     if (format == AUDIO_FORMAT_MP3 || format == AUDIO_FORMAT_WAV ||
         format == AUDIO_FORMAT_FLAC || format == AUDIO_FORMAT_OGG ||
-        format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_AAC ||
+        format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_M4B ||
+        format == AUDIO_FORMAT_AAC ||
         format == AUDIO_FORMAT_OPUS) {
         result = load_streaming(filepath);
 
@@ -2212,7 +2397,7 @@ int Player_load(const char* filepath) {
             parse_mp3_metadata(filepath);
         }
         // Parse metadata for M4A
-        if (result == 0 && format == AUDIO_FORMAT_M4A) {
+        if (result == 0 && (format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_M4B)) {
             parse_m4a_metadata();
         }
         // Parse metadata for Opus (uses Vorbis comment tags)

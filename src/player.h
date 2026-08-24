@@ -15,6 +15,7 @@ typedef enum {
     AUDIO_FORMAT_FLAC,
     AUDIO_FORMAT_MOD,
     AUDIO_FORMAT_M4A,
+    AUDIO_FORMAT_M4B,   // Same MP4/AAC container as M4A; distinct only for audiobooks
     AUDIO_FORMAT_AAC,
     AUDIO_FORMAT_OPUS
 } AudioFormat;
@@ -180,6 +181,11 @@ float Player_getPlaybackSpeed(void);
 
 // Check if a file format is supported
 AudioFormat Player_detectFormat(const char* filepath);
+
+// Read a file's duration in milliseconds from its headers, without decoding it
+// and without touching the currently loaded track. Returns 0 when the duration
+// cannot be determined (raw AAC, MOD, unreadable file).
+int Player_probeDuration(const char* filepath);
 
 // Update player (call this in main loop)
 void Player_update(void);
