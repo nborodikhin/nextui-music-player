@@ -1,12 +1,13 @@
 {
   "name": "Music Player",
-  "version": "v1.13.0",
+  "version": "v1.14.0",
   "type": "TOOL",
   "description": "A comprehensive music playback application for NextUI featuring local file playback, online radio streaming, and music downloading.",
   "author": "nborodikhin",
   "repo_url": "https://github.com/nborodikhin/nextui-music-player",
   "release_filename": "Music.Player.pak.zip",
   "changelog": {
+    "v1.14.0": "More US radio stations, Downloader updates, UI fixes, TG5050 (TSPS) fixes, In-app auto-update setting",
     "v1.13.0": "Add JPN radio stations, don't rewrite NextUI settings",
     "v1.12.0": "Rebuild against NextUI 6.14",
     "v1.11.0": "Rebuild against NextUI 6.13x",
@@ -14,10 +15,7 @@
     "v1.9.0": "Fix regression in scrolling text display",
     "v1.8.0": "Usability updates, new maintainer",
     "v1.7.6": "Added playback speed control for podcasts and fixed the volume stepping issue",
-    "v1.7.5": "Fixed missing library for TG5050",
-    "v1.7.4": "Fixed online radio failed to play redirected stream URL (https)",
-    "v1.7.3": "Fixed black screen issue on TG5050 when exiting the keyboard",
-    "v1.7.2": "Fixed app failed to launch on tg5050 (TSPS)"
+    "v1.7.3": "Fixed black screen issue on TG5050 when exiting the keyboard"
   },
   "screenshots": [
     ".github/resources/screenshots/main.jpg"
