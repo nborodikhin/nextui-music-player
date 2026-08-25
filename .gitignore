@@ -10,9 +10,11 @@ src/opus_obj/
 src/build/
 # Dependency checkouts created by ./dev prepare
 /NextUI/
+/NextUI-my355/
 # Build artifacts
 bin/tg5040/musicplayer.elf
 bin/tg5050/musicplayer.elf
+bin/my355/musicplayer.elf
 bin/desktop/musicplayer.elf
 test/bin/
 dist/
