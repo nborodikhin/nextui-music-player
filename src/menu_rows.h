@@ -13,12 +13,13 @@
 typedef enum {
     MENU_NONE        = -1,  // no such row; never an outcome
 
-    // Resume and Now Playing are the same row in two states: at most one is on
-    // screen, and only the first row is ever either of them.
-    MENU_RESUME      = 0,
-    MENU_NOW_PLAYING = 1,
+    // The mutable first slot: on screen only while background audio plays.
+    // Resuming a stopped track is a per-domain concern (the Continue row
+    // inside the Music and Audiobook menus), not a main-menu row.
+    MENU_NOW_PLAYING = 0,
 
-    MENU_LIBRARY     = 2,
+    MENU_LIBRARY     = 1,
+    MENU_AUDIOBOOK   = 2,
     MENU_RADIO       = 3,
     MENU_PODCAST     = 4,
     MENU_SETTINGS    = 5,
@@ -26,19 +27,19 @@ typedef enum {
     MENU_QUIT        = 100  // exit the application
 } MenuSelection;
 
-// Upper bound on visible rows. 5 today (first item + four fixed); the extra
-// slot is headroom for a conditional row without resizing every caller.
+// Upper bound on visible rows: the optional playing-item row plus all five
+// fixed rows (Library, Audiobook, Radio, Podcast, Settings).
 #define MENU_ROWS_MAX 6
 
 typedef struct {
-    MenuSelection playing_item;             // MENU_RESUME, MENU_NOW_PLAYING or MENU_NONE
+    MenuSelection playing_item;             // MENU_NOW_PLAYING or MENU_NONE
     int           count;                    // number of visible rows
     MenuSelection selection[MENU_ROWS_MAX];
 } MenuRows;
 
 // Build the row map.
-// `playing_item` is the state of the playback row: MENU_RESUME,
-// MENU_NOW_PLAYING, or MENU_NONE to leave it off the menu.
+// `playing_item` is the state of the playback row: MENU_NOW_PLAYING, or
+// MENU_NONE to leave it off the menu.
 MenuRows MenuRows_build(MenuSelection playing_item);
 
 // Row index -> selection. MENU_NONE for an out-of-range row.

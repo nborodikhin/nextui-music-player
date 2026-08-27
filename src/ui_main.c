@@ -10,14 +10,13 @@
 #include "selfupdate.h"
 #include "module_common.h"
 #include "module_menu.h"
-#include "resume.h"
 #include "background.h"
 
 static const char* menu_label(MenuSelection selection) {
     switch (selection) {
-        case MENU_RESUME:      return "Resume";
         case MENU_NOW_PLAYING: return "Now Playing";
-        case MENU_LIBRARY:     return "Library";
+        case MENU_LIBRARY:     return "Music";
+        case MENU_AUDIOBOOK:   return "Audiobook";
         case MENU_RADIO:       return "Online Radio";
         case MENU_PODCAST:     return "Podcasts";
         case MENU_SETTINGS:    return "Settings";
@@ -30,8 +29,8 @@ static const char* menu_label(MenuSelection selection) {
 // file scope.
 static MenuRows current_rows;
 
-// Scroll state for Resume track name
-static ScrollTextState resume_scroll = {0};
+// Scroll state for the Now Playing label
+static ScrollTextState now_playing_scroll = {0};
 
 // Get label for Now Playing based on background player type
 static const char* get_now_playing_label(void) {
@@ -39,6 +38,7 @@ static const char* get_now_playing_label(void) {
         case BG_MUSIC:  return "Music";
         case BG_RADIO:  return "Radio";
         case BG_PODCAST: return "Podcast";
+        case BG_AUDIOBOOK: return "Audiobook";
         default: return "Audio";
     }
 }
@@ -50,14 +50,6 @@ static const char* main_menu_get_label(int index, const char* default_label,
         case MENU_NOW_PLAYING:
             snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
             return buffer;
-        case MENU_RESUME: {
-            const char* label = Resume_getLabel();
-            if (label) {
-                snprintf(buffer, buffer_size, "%s", label);
-                return buffer;
-            }
-            break;
-        }
         case MENU_SETTINGS: {
             const SelfUpdateStatus status = SelfUpdate_getStatus();
             if (status.update_available) {
@@ -76,23 +68,14 @@ static const char* main_menu_get_label(int index, const char* default_label,
 static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
                                    int text_x, int text_y, int max_text_width) {
     MenuSelection sel = MenuRows_selectionAt(&current_rows, index);
-    if (sel != MENU_RESUME && sel != MENU_NOW_PLAYING) return false;
+    if (sel != MENU_NOW_PLAYING) return false;
 
     // Only custom-render when selected (for scrolling); default rendering handles non-selected
     if (!selected) return false;
 
-    const char* track_name;
-    const char* prefix;
+    const char* prefix = "Now Playing: ";
+    const char* track_name = get_now_playing_label();
 
-    if (sel == MENU_NOW_PLAYING) {
-        prefix = "Now Playing: ";
-        track_name = get_now_playing_label();
-    } else {
-        const ResumeState* rs = Resume_getState();
-        if (!rs) return false;
-        track_name = rs->track_name[0] ? rs->track_name : "Unknown";
-        prefix = "Resume: ";
-    }
     SDL_Color text_color = Fonts_getListTextColor(true);
     TTF_Font* font = Fonts_getLarge();
 
@@ -117,7 +100,7 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
         SDL_SetClipRect(screen, &clip);
 
         // Use software scroll (use_gpu=false) to respect SDL clip rect
-        ScrollText_update(&resume_scroll, track_name, font, remaining_width,
+        ScrollText_update(&now_playing_scroll, track_name, font, remaining_width,
                           text_color, screen, track_x, text_y, false);
 
         // Restore clip rect
@@ -170,7 +153,7 @@ static const ControlHelp default_controls[] = {
 static const ControlHelp main_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
-    {"X", "Clear History/Playback"},
+    {"X", "Stop Playback"},
     {"B (double)", "Exit App"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
@@ -180,6 +163,7 @@ static const ControlHelp main_menu_controls[] = {
 static const ControlHelp library_menu_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
+    {"X", "Forget Continue"},
     {"Start (hold)", "Exit App"},
     {NULL, NULL}
 };
@@ -391,6 +375,38 @@ static const ControlHelp settings_controls[] = {
     {NULL, NULL}
 };
 
+// Audiobook library list controls (A/B shown in footer)
+static const ControlHelp audiobook_library_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Mark Finished/Unfinished"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook chapter list controls (A/B shown in footer)
+static const ControlHelp audiobook_chapters_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook player controls (A/B shown in footer)
+static const ControlHelp audiobook_playing_controls[] = {
+    {"A", "Play/Pause"},
+    {"Left", "Back 10s"},
+    {"Right", "Forward 30s"},
+    {"Up/L1", "Prev Chapter"},
+    {"Down/R1", "Next Chapter"},
+    {"X", "Chapter List"},
+    {"Y", "Sleep Timer"},
+    {"Select", "Screen Off"},
+    {"Select + A", "Wake Screen"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // About page controls (A/B shown in footer)
 static const ControlHelp about_controls[] = {
     {"Start (hold)", "Exit App"},
@@ -418,7 +434,19 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
             break;
         case HELP_LIBRARY_MENU:
             controls = library_menu_controls;
-            page_title = "Library";
+            page_title = "Music";
+            break;
+        case HELP_AUDIOBOOK_LIBRARY:
+            controls = audiobook_library_controls;
+            page_title = "Audiobook";
+            break;
+        case HELP_AUDIOBOOK_CHAPTERS:
+            controls = audiobook_chapters_controls;
+            page_title = "Chapters";
+            break;
+        case HELP_AUDIOBOOK_PLAYING:
+            controls = audiobook_playing_controls;
+            page_title = "Audiobook Player";
             break;
         case HELP_BROWSER:
             controls = browser_controls;
@@ -603,10 +631,10 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     }
 }
 
-// Check if Resume scroll needs continuous redraw (software scroll mode)
+// Check if the Now Playing scroll needs continuous redraw (software scroll mode)
 bool menu_needs_scroll_redraw(void) {
     // Needs redraw if scrolling is active OR about to start (delay -> active transition)
-    return ScrollText_isScrolling(&resume_scroll) || ScrollText_needsRender(&resume_scroll);
+    return ScrollText_isScrolling(&now_playing_scroll) || ScrollText_needsRender(&now_playing_scroll);
 }
 
 // Render screen off hint message (shown before screen turns off)
