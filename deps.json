@@ -5,6 +5,12 @@
       "path": "NextUI",
       "git_url": "https://github.com/LoveRetro/NextUI.git",
       "ref": "v6.14.0"
+    },
+    {
+      "name": "nextui-my355",
+      "path": "NextUI-my355",
+      "git_url": "https://github.com/apommel/NextUI.git",
+      "ref": "8f5a96bcdd350a096020d1f68d0d24bb6fd99588"
     }
   ]
 }
