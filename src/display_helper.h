@@ -8,6 +8,10 @@ typedef void (*DisplayRecreatedCallback)(void);
 
 DisplayContext* DisplayHelper_init(struct SDL_Surface* screen);
 
+// The context created by DisplayHelper_init(), for code that runs its own frame
+// loop without being handed one (such as the on-screen keyboard).
+DisplayContext* DisplayHelper_current(void);
+
 // The current screen surface, for drawing code.
 // Could be NULL while the display is released for an external binary (see DisplayHelper_recoverDisplay).
 struct SDL_Surface* DisplayHelper_getSurface(const DisplayContext* display);

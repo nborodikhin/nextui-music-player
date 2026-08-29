@@ -210,6 +210,18 @@ static const ControlHelp player_controls[] = {
 };
 
 // Playlist list controls (A/B shown in footer)
+static const ControlHelp keyboard_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"A", "Type Key"},
+    {"B", "Delete / Exit"},
+    {"X", "Shift"},
+    {"X (hold)", "Caps Lock"},
+    {"Y", "Language"},
+    {"Select", "Confirm"},
+    {NULL, NULL}
+};
+
 static const ControlHelp playlist_list_controls[] = {
     {"Up/Down", "Navigate"},
     {"Left/Right", "Navigate"},
@@ -503,6 +515,10 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         case HELP_DOWNLOADER_YTDLP:
             controls = ytdlp_controls;
             page_title = "Youtube download helpers";
+            break;
+        case HELP_KEYBOARD:
+            controls = keyboard_controls;
+            page_title = "Keyboard";
             break;
         case HELP_SETTINGS:
             controls = settings_controls;

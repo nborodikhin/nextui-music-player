@@ -208,7 +208,7 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
             else if (PAD_justPressed(BTN_A)) {
                 if (menu_nav.selected == 0) {
                     // Search Music
-                    char* query = Keyboard_open("Search:");
+                    char* query = Keyboard_open("Search:", sizeof(search_query) - 1);
                     if (query && strlen(query) > 0) {
                         snprintf(search_query, sizeof(search_query), "%s", query);
                         ListNav_scrollToTop(&results_nav);

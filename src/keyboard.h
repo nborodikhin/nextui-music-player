@@ -1,15 +1,21 @@
 #ifndef __KEYBOARD_H__
 #define __KEYBOARD_H__
 
+#include <stddef.h>
+
 // Initialize keyboard module
 // Call this before using Keyboard_open()
 void Keyboard_init(void);
 
-// Open keyboard for text input - blocking call until keybord returns the text.
+// Open the on-screen keyboard - blocking call until the user is done.
+// Returned strings will contain full UTF-8 characters up to max_bytes long
+// (not including the null terminator).
+// If max_bytes is 0 or less, the default limit is used (512).
+//
 // Returns allocated string that caller must free, or NULL if cancelled.
 //
-// Note: keyboard is an external UI program, which requires ui teardown and setup.
-// The caller is responsible for re-reading SDL_Surface from DisplayContext.
-char* Keyboard_open(const char* prompt);
+// Note: keyboard runs its own frame loop, so the caller's frame is over when it
+// returns. Callers must re-read the SDL_Surface from DisplayContext.
+char* Keyboard_open(const char* prompt, size_t max_bytes);
 
 #endif // __KEYBOARD_H__

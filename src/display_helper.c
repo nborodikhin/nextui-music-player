@@ -37,6 +37,10 @@ DisplayContext* DisplayHelper_init(SDL_Surface* screen) {
 	return &context;
 }
 
+DisplayContext* DisplayHelper_current(void) {
+	return &context;
+}
+
 SDL_Surface* DisplayHelper_getSurface(const DisplayContext* display) {
 	return display ? display->surface : NULL;
 }

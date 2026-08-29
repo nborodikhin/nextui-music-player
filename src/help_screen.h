@@ -46,6 +46,8 @@ typedef enum {
     HELP_DOWNLOADER_QUEUE,
     HELP_DOWNLOADER_YTDLP,
 
+    HELP_KEYBOARD,
+
     HELP_SETTINGS,
     HELP_ABOUT,
 } HelpId;

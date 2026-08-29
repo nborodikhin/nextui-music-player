@@ -151,7 +151,8 @@ LOCAL_SRC = \
     list_nav.c list_nav_pad.c menu_rows.c toast.c toast_state.c \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
     ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
-    ui_playlist.c ui_system.c ui_settings.c \
+    ui_playlist.c ui_system.c ui_settings.c ui_keyboard.c \
+    keyboard_map.c utf8.c \
     spectrum.c \
     audio/kiss_fft.c audio/kiss_fftr.c \
     include/yxml/yxml.c \

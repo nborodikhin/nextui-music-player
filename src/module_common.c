@@ -25,6 +25,10 @@ static time_t screen_off_hint_start_wallclock = 0;
 
 // Dialog states
 static bool show_quit_confirm = false;
+
+// Set once the user confirms the quit dialog.
+// Sticky, any subsequent call to ModuleCommon_handleGlobalInput() will return should_quit = true
+static bool quit_requested = false;
 static bool show_controls_help = false;
 
 // START button long press detection
@@ -43,6 +47,7 @@ void ModuleCommon_init(void) {
     last_input_time = SDL_GetTicks();
     screen_off_hint_active = false;
     show_quit_confirm = false;
+    quit_requested = false;
     show_controls_help = false;
     start_was_pressed = false;
     overlay_buttons_were_active = false;
@@ -51,6 +56,13 @@ void ModuleCommon_init(void) {
 
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
+
+    // Keep reporting a confirmed quit until somebody acts on it
+    if (quit_requested) {
+        result.input_consumed = true;
+        result.should_quit = true;
+        return result;
+    }
 
     // Poll USB HID events (earphone buttons)
     USBHIDEvent hid_event;
@@ -137,6 +149,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     if (show_quit_confirm) {
         if (PAD_justPressed(BTN_A)) {
             show_quit_confirm = false;
+            quit_requested = true;
             result.input_consumed = true;
             result.should_quit = true;
             return result;

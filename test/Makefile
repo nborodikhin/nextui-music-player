@@ -10,6 +10,10 @@
 # out into list_nav_pad.c so api.h never reaches the tested TU. toast_state.c
 # follows it, with the drawing left in toast.c and the clock passed in.
 #
+# keyboard_map.c qualifies the same way: the key tables and the pair lookups are
+# plain C, with the font probe passed in as a callback so SDL_ttf stays in
+# ui_keyboard.c.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -22,7 +26,7 @@ SRC      = ../src
 BIN      = bin
 
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
-           $(BIN)/test_file_utils
+           $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_utf8
 
 .PHONY: all run clean
 all: run
@@ -38,6 +42,12 @@ $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h te
 
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
+
+$(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c
+
+$(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
