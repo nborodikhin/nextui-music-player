@@ -395,7 +395,7 @@ void UIKeyboard_render(SDL_Surface* screen, const char* prompt, const char* text
     }
 
     // B rubs out what has been typed, and leaves once there is nothing left
-    char* b_label = (text && text[0] != '\0') ? "BACK" : "CANCEL";
+    char* b_label = (text && text[0] != '\0') ? "DELETE" : "CANCEL";
 
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
     GFX_blitButtonGroup((char*[]){"B", b_label, "A", "TYPE", "SELECT", "DONE", NULL}, 1, screen, 1);

@@ -66,11 +66,19 @@ static const KeyboardKey geometry[KEYBOARD_ROWS][KEYBOARD_COLS] = {
 // up across the alphabets the map serves. An alternate with no case of its own
 // repeats itself.
 static const KeyMapping mapping_lat[] = {
-    {'`',  "`~"},
-    {'1',  "1!"},  {'2', "2@"},  {'3', "3#"},  {'4', "4$"},  {'5', "5%"},
-    {'6',  "6^"},  {'7', "7&"},  {'8', "8*"},  {'9', "9("},  {'0', "0)"},
-    {'-',  "-_——––"},
-    {'=',  "=+"},
+    {'`',  "`~~`"},
+    {'1',  "1!!1¡¡"},
+    {'2',  "2@@2"},
+    {'3',  "3##3№№"},
+    {'4',  "4$$4€€££¥¥¢¢₽₽₴₴₸₸"},
+    {'5',  "5%%5"},
+    {'6',  "6^^6°°"},
+    {'7',  "7&&7§§¶¶"},
+    {'8',  "8**8••××"},
+    {'9',  "9((9‹‹"},
+    {'0',  "0))0››"},
+    {'-',  "-__-——––±±÷÷"},
+    {'=',  "=++=≠≠≈≈"},
 
     {'q',  "qQ"},
     {'w',  "wWŵŴ"},
@@ -82,9 +90,9 @@ static const KeyMapping mapping_lat[] = {
     {'i',  "iIíÍìÌîÎïÏĩĨīĪįĮıIiİ"},
     {'o',  "oOóÓòÒôÔöÖõÕōŌøØőŐœŒǫǪȯȮ"},
     {'p',  "pP"},
-    {'[',  "[{"},
-    {']',  "]}"},
-    {'\\', "\\|"},
+    {'[',  "[{{["},
+    {']',  "]}}]"},
+    {'\\', "\\||\\"},
 
     {'a',  "aAáÁàÀâÂäÄãÃåÅāĀăĂąĄæÆ"},
     {'s',  "sSšŠśŚşŞșȘßẞŝŜ"},
@@ -95,7 +103,7 @@ static const KeyMapping mapping_lat[] = {
     {'j',  "jJĵĴ"},
     {'k',  "kKķĶǩǨ"},
     {'l',  "lLłŁľĽĺĹļĻḻḺ"},
-    {';',  ";:"},
+    {';',  ";::;"},
     {'\'', "'\"\"'``‘‘’’„„““””««»»ʻʻʼʼ"},
 
     {'z',  "zZžŽźŹżŻ"},
@@ -105,16 +113,21 @@ static const KeyMapping mapping_lat[] = {
     {'b',  "bB"},
     {'n',  "nNñÑńŃňŇņŅŋŊṉṈ"},
     {'m',  "mM"},
-    {',',  ",<"},
-    {'.',  ".>……"},
-    {'/',  "/?"},
+    {',',  ",<<,‚‚"},
+    {'.',  ".>>.……··"},
+    {'/',  "/?\?/¿¿"},
 };
 
 // Russian primaries. Letters the neighbouring alphabets add - Ukrainian,
 // Belarusian, Kazakh, Serbian - hang off the letter they belong to. Digits and
 // punctuation this map leaves out come from the Latin one.
 static const KeyMapping mapping_cyr[] = {
-    {'1',  "1!ӏӀ"},  {'2', "2\""},  {'3', "3№"},  {'4', "4;"},  {'6', "6:"},  {'7', "7?"},
+    {'1',  "1!!1¡¡ӏӀ"},
+    {'2',  "2\"\"2„„"},
+    {'3',  "3№№3"},
+    {'4',  "4;;4$$€€££¥¥¢¢₽₽₴₴₸₸"},
+    {'6',  "6::6"},
+    {'7',  "7??7¿¿"},
 
     {'q',  "йЙјЈ"},
     {'w',  "цЦџЏҵҴ"},
@@ -150,7 +163,7 @@ static const KeyMapping mapping_cyr[] = {
     {'m',  "ьЬ"},
     {',',  "бБ"},
     {'.',  "юЮ"},
-    {'/',  ".,"},
+    {'/',  ".,,."},
 };
 
 #define COUNT_OF(array) ((int)(sizeof(array) / sizeof((array)[0])))
