@@ -3,52 +3,62 @@
 #include "keyboard_map.h"
 #include "utf8.h"
 
+// Room for the longest row, its END terminator included
+#define KEYBOARD_COLS 16
+
+// Digits, tab, home, shift, space
+#define KEYBOARD_ROWS 5
+
+// Every row is authored to this width; END pads out what its keys leave over
+#define KEYBOARD_ROW_WIDTH_UNITS 15
+
 // Preferred backspace label, and what to draw when the font has no arrow
 #define BACKSPACE_ARROW "\u2190"
 #define BACKSPACE_FALLBACK "<-"
 
 // A character key, one unit wide unless the table says otherwise
-#define K(slot) KW(slot, 100)
+#define K(slot) KW(slot, 1.0f)
 
-#define KW(slot, width) {   \
-    .action = KEY_TEXT,     \
-    .ansi   = slot,         \
-    .label  = NULL,         \
-    .units  = width,        \
+#define KW(slot, key_width) {   \
+    .action = KEY_TEXT,         \
+    .ansi   = slot,             \
+    .label  = NULL,             \
+    .width  = key_width,        \
 }
 
 // A key that types nothing: it acts, and shows a label instead of a character
-#define KEY(what, name, width) { \
-    .action = what,              \
-    .ansi   = '\0',              \
-    .label  = name,              \
-    .units  = width,             \
+#define KEY(what, name, key_width) { \
+    .action = what,                  \
+    .ansi   = '\0',                  \
+    .label  = name,                  \
+    .width  = key_width,             \
 }
 
-#define K_BKSP    KEY(KEY_BACKSPACE, BACKSPACE_ARROW, 200)
-#define K_TAB     KEY(KEY_TAB,       "tab",           150)
-#define K_CAPS    KEY(KEY_CAPS,      "cl",            175)
-#define K_ENTER   KEY(KEY_ENTER,     "enter",         225)
-#define K_LANG    KEY(KEY_LANG,      NULL,            250)
-#define K_LSHIFT  KEY(KEY_SHIFT,     "shift",         225)
-#define K_RSHIFT  KEY(KEY_SHIFT,     "shift",         275)
-#define K_SPACE   KEY(KEY_SPACE,     "space",         625)
-#define K_CANCEL  KEY(KEY_CANCEL,    "cancel",        250)
-#define GAP_187   KEY(KEY_GAP,       NULL,            187)
+#define K_BKSP    KEY(KEY_BACKSPACE, BACKSPACE_ARROW, 2.0f)
+#define K_TAB     KEY(KEY_TAB,       "TAB",            1.5f)
+#define K_CAPS    KEY(KEY_CAPS,      "CL",             1.75f)
+#define K_ENTER   KEY(KEY_ENTER,     "ENTER",          2.25f)
+#define K_LANG    KEY(KEY_LANG,      NULL,             2.5f)
+#define K_LSHIFT  KEY(KEY_SHIFT,     "SHIFT",          2.25f)
+#define K_RSHIFT  KEY(KEY_SHIFT,     "SHIFT",          2.75f)
+#define K_SPACE   KEY(KEY_SPACE,     "SPACE",          6.25f)
+#define K_CANCEL  KEY(KEY_CANCEL,    "CANCEL",         2.5f)
+#define GAP_1875  KEY(KEY_GAP,       NULL,             1.875f)
 
 // END closes a row and stands for the units left over up to the full 15u
-#define END       KEY(KEY_END,       NULL,              0)
+#define END       KEY(KEY_END,       NULL,             0.0f)
 
-// Standard ANSI geometry, each row 15 units wide, shared by every map. Text
+// Standard ANSI geometry, each row 15 units wide, shared by every map. Not
+// const: _prepare() walks it once to give every key its place in its row. Text
 // keys carry the ANSI character naming their slot; the maps below say what
 // each slot types. The input row holds no keys: what END pads out is the
 // text field.
-static const KeyboardKey geometry[KEYBOARD_ROWS][KEYBOARD_COLS] = {
+static KeyboardKey geometry[KEYBOARD_ROWS][KEYBOARD_COLS] = {
     {K('`'), K('1'), K('2'), K('3'), K('4'), K('5'), K('6'),
      K('7'), K('8'), K('9'), K('0'), K('-'), K('='), K_BKSP, END},
 
     {K_TAB, K('q'), K('w'), K('e'), K('r'), K('t'), K('y'),
-     K('u'), K('i'), K('o'), K('p'), K('['), K(']'), KW('\\', 150), END},
+     K('u'), K('i'), K('o'), K('p'), K('['), K(']'), KW('\\', 1.5f), END},
 
     {K_CAPS, K('a'), K('s'), K('d'), K('f'), K('g'), K('h'),
      K('j'), K('k'), K('l'), K(';'), K('\''), K_ENTER, END},
@@ -56,14 +66,20 @@ static const KeyboardKey geometry[KEYBOARD_ROWS][KEYBOARD_COLS] = {
     {K_LSHIFT, K('z'), K('x'), K('c'), K('v'), K('b'), K('n'),
      K('m'), K(','), K('.'), K('/'), K_RSHIFT, END},
 
-    {K_LANG, GAP_187, K_SPACE, GAP_187, K_CANCEL, END},
+    {K_LANG, GAP_1875, K_SPACE, GAP_1875, K_CANCEL, END},
 };
 
 // Each entry spells unshifted/shifted pairs. The first pair is what the key
 // types and shows; the rest are its alternates, ordered by how often they come
 // up across the alphabets the map serves. An alternate with no case of its own
 // repeats itself.
-static const KeyMapping mapping_lat[] = {
+// One slot as the tables spell it: unshifted/shifted pairs in one string
+typedef struct {
+    char        ansi;
+    const char* pairs;
+} SourceMapping;
+
+static const SourceMapping mapping_lat[] = {
     {'`',  "`~~`"},
     {'1',  "1!!1¡¡"},
     {'2',  "2@@2"},
@@ -119,7 +135,7 @@ static const KeyMapping mapping_lat[] = {
 // Russian primaries. Letters the neighbouring alphabets add - Ukrainian,
 // Belarusian, Kazakh, Serbian - hang off the letter they belong to. Digits and
 // punctuation this map leaves out come from the Latin one.
-static const KeyMapping mapping_cyr[] = {
+static const SourceMapping mapping_cyr[] = {
     {'1',  "1!!1¡¡ӏӀ"},
     {'2',  "2\"\"2„„"},
     {'3',  "3№№3"},
@@ -166,10 +182,23 @@ static const KeyMapping mapping_cyr[] = {
 
 #define COUNT_OF(array) ((int)(sizeof(array) / sizeof((array)[0])))
 
-// Room for every map's pairs once the font has had its say, terminators included
-#define PAIRS_POOL_SIZE 2048
+// Most slots a map fills: what prepared_keys has room for
+#define KEYBOARD_MAX_MAPPINGS 64
 
-static const KeyboardMap maps[KEYBOARD_MAP_COUNT] = {
+// Every character of every map, split out of the pair strings and kept as its
+// own string. The tables hold about 650 of them; the rest is room to grow.
+#define CHAR_POOL_SLOTS 1024
+
+// The source tables, before the font has had its say
+typedef struct {
+    const char*          name;
+    const SourceMapping* base;
+    int                  base_count;
+    const SourceMapping* keys;
+    int                  count;
+} SourceMap;
+
+static const SourceMap sources[KEYBOARD_MAP_COUNT] = {
     {
         .name       = "LAT",
         .base       = NULL,
@@ -189,93 +218,120 @@ static const KeyboardMap maps[KEYBOARD_MAP_COUNT] = {
 // The maps as the font can actually draw them: every primary kept, alternates
 // only where the glyphs exist. A primary the font lacks stays put and comes out
 // as the font's own tofu, which says more than a missing key would.
-static KeyboardMap filtered_maps[KEYBOARD_MAP_COUNT];
-static KeyMapping filtered_keys[KEYBOARD_MAP_COUNT][KEYBOARD_MAX_MAPPINGS];
-static char pairs_pool[PAIRS_POOL_SIZE];
-static int pairs_used = 0;
-static bool filtered_ready = false;
+static KeyboardMap prepared_maps[KEYBOARD_MAP_COUNT];
+static KeyMapping prepared_keys[KEYBOARD_MAP_COUNT][KEYBOARD_MAX_MAPPINGS];
+static char char_pool[CHAR_POOL_SLOTS][UTF8_CHAR_SIZE];
+static int chars_used = 0;
 
-// Start of the nth character of a UTF-8 string, or NULL past its end
-static const char* utf8_at(const char* text, int index) {
-    if (!text) return NULL;
+// Split one key's pairs into the pool, dropping the alternates this font has no
+// glyph for. The primary is kept whatever the font says.
+static void split_pairs(KeyMapping* out, const char* pairs,
+                        GlyphSupportedFn supported, void* context) {
+    out->count = 0;
+    out->chars = (const char (*)[UTF8_CHAR_SIZE])char_pool[chars_used];
 
-    const char* c = text;
-    for (int step = 0; step < index; step++) {
-        if (*c == '\0') return NULL;
-        c += UTF8_charBytes(c);
+    for (const char* c = pairs; *c; ) {
+        int first = UTF8_charBytes(c);
+        if (first == 0 || c[first] == '\0') break;
+
+        int second = UTF8_charBytes(c + first);
+        if (second == 0) break;
+
+        bool keep = (out->count == 0) ||
+                    (supported(context, c) && supported(context, c + first));
+        // A full pool would silently shorten a key; the tests count what the
+        // tables hold, so this is a build-time problem, not a runtime one
+        if (chars_used + 2 > CHAR_POOL_SLOTS) break;
+        if (keep) {
+            memcpy(char_pool[chars_used], c, first);
+            char_pool[chars_used][first] = '\0';
+            memcpy(char_pool[chars_used + 1], c + first, second);
+            char_pool[chars_used + 1][second] = '\0';
+
+            chars_used += 2;
+            out->count++;
+        }
+        c += first + second;
     }
-    return (*c == '\0') ? NULL : c;
 }
 
-// Copy the pairs this font can draw into the pool, primary first and always
-static const char* filter_pairs(const char* pairs, GlyphSupportedFn supported,
-                                void* context) {
-    char* out = pairs_pool + pairs_used;
-    int length = 0;
-
-    const char* c = pairs;
-    for (int pair = 0; *c; pair++) {
-        int first = UTF8_charBytes(c);
-        if (c[first] == '\0') break;
-        int second = UTF8_charBytes(c + first);
-
-        int width = first + second;
-        bool keep = (pair == 0) ||
-                    (supported(context, c) && supported(context, c + first));
-        if (keep && pairs_used + length + width + 1 <= PAIRS_POOL_SIZE) {
-            memcpy(out + length, c, width);
-            length += width;
+// The backspace key wears an arrow where the font has one, and a plain
+// fallback where it does not
+static void label_backspace(GlyphSupportedFn supported, void* context) {
+    const char* label = supported(context, BACKSPACE_ARROW) ? BACKSPACE_ARROW
+                                                            : BACKSPACE_FALLBACK;
+    for (int row = 0; row < KEYBOARD_ROWS; row++) {
+        for (int col = 0; geometry[row][col].action != KEY_END; col++) {
+            if (geometry[row][col].action == KEY_BACKSPACE) geometry[row][col].label = label;
         }
-        c += width;
     }
+}
 
-    out[length] = '\0';
-    pairs_used += length + 1;
-    return out;
+// Where each key starts, so nothing has to add up the row to draw one
+static void place_keys(void) {
+    for (int row = 0; row < KEYBOARD_ROWS; row++) {
+        float left = 0.0f;
+        for (int col = 0; geometry[row][col].action != KEY_END; col++) {
+            geometry[row][col].left = left;
+            left += geometry[row][col].width;
+        }
+    }
 }
 
 void KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
+    place_keys();
+
     if (!supported) return;
-    pairs_used = 0;
+
+    label_backspace(supported, context);
+    chars_used = 0;
 
     for (int index = 0; index < KEYBOARD_MAP_COUNT; index++) {
-        const KeyboardMap* source = &maps[index];
+        const SourceMap* source = &sources[index];
         int count = source->count;
         if (count > KEYBOARD_MAX_MAPPINGS) count = KEYBOARD_MAX_MAPPINGS;
 
         for (int key = 0; key < count; key++) {
-            filtered_keys[index][key].ansi = source->keys[key].ansi;
-            filtered_keys[index][key].pairs =
-                filter_pairs(source->keys[key].pairs, supported, context);
+            prepared_keys[index][key].ansi = source->keys[key].ansi;
+            split_pairs(&prepared_keys[index][key], source->keys[key].pairs,
+                        supported, context);
         }
 
-        filtered_maps[index] = (KeyboardMap){
+        prepared_maps[index] = (KeyboardMap){
             .name       = source->name,
             .base       = NULL,
             .base_count = 0,
-            .keys       = filtered_keys[index],
+            .keys       = prepared_keys[index],
             .count      = count,
         };
     }
 
-    // A map's base is another map's filtered keys, so it inherits what survived
+    // A map's base is another map's prepared keys, so it inherits what survived
     for (int index = 0; index < KEYBOARD_MAP_COUNT; index++) {
-        if (!maps[index].base) continue;
+        if (!sources[index].base) continue;
 
         for (int other = 0; other < KEYBOARD_MAP_COUNT; other++) {
-            if (maps[other].keys != maps[index].base) continue;
+            if (sources[other].keys != sources[index].base) continue;
 
-            filtered_maps[index].base = filtered_maps[other].keys;
-            filtered_maps[index].base_count = filtered_maps[other].count;
+            prepared_maps[index].base = prepared_maps[other].keys;
+            prepared_maps[index].base_count = prepared_maps[other].count;
         }
     }
-
-    filtered_ready = true;
 }
 
+// Nothing can be drawn before the font has been probed: the maps served here
+// are the split ones, and _prepare() is what fills them.
 const KeyboardMap* KeyboardMap_get(int index) {
     if (index < 0 || index >= KEYBOARD_MAP_COUNT) index = 0;
-    return filtered_ready ? &filtered_maps[index] : &maps[index];
+    return &prepared_maps[index];
+}
+
+int KeyboardMap_rowCount(void) {
+    return KEYBOARD_ROWS;
+}
+
+int KeyboardMap_rowWidthUnits(void) {
+    return KEYBOARD_ROW_WIDTH_UNITS;
 }
 
 const KeyboardKey* KeyboardMap_row(int row) {
@@ -299,39 +355,29 @@ bool KeyboardMap_isSpecial(const KeyboardKey* key) {
     return key->action != KEY_TEXT;
 }
 
-static const char* find_pairs(const KeyMapping* entries, int count, char ansi) {
+static const KeyMapping* find_key(const KeyMapping* entries, int count, char ansi) {
     for (int index = 0; index < count; index++) {
-        if (entries[index].ansi == ansi) return entries[index].pairs;
+        if (entries[index].ansi == ansi) return &entries[index];
     }
     return NULL;
 }
 
-const char* KeyboardMap_pairs(const KeyboardMap* map, const KeyboardKey* key) {
+const KeyMapping* KeyboardMap_key(const KeyboardMap* map, const KeyboardKey* key) {
     if (!map || key->action != KEY_TEXT) return NULL;
 
-    const char* pairs = find_pairs(map->keys, map->count, key->ansi);
-    if (!pairs) pairs = find_pairs(map->base, map->base_count, key->ansi);
-    return pairs;
+    const KeyMapping* mapping = find_key(map->keys, map->count, key->ansi);
+    if (!mapping) mapping = find_key(map->base, map->base_count, key->ansi);
+    return mapping;
 }
 
-int KeyboardMap_variantCount(const char* pairs) {
-    if (!pairs) return 0;
-
-    int characters = 0;
-    for (const char* c = pairs; *c; c += UTF8_charBytes(c)) characters++;
-    return characters / 2;
+int KeyboardMap_variantCount(const KeyMapping* mapping) {
+    return mapping ? mapping->count : 0;
 }
 
-void KeyboardMap_variant(const char* pairs, int index, bool shifted,
-                         char out[KEYBOARD_TEXT_SIZE]) {
-    out[0] = '\0';
+const char* KeyboardMap_variant(const KeyMapping* mapping, int index, bool shifted) {
+    if (!mapping || index < 0 || index >= mapping->count) return "";
 
-    const char* c = utf8_at(pairs, index * 2 + (shifted ? 1 : 0));
-    if (!c) return;
-
-    int length = UTF8_charBytes(c);
-    memcpy(out, c, length);
-    out[length] = '\0';
+    return mapping->chars[index * 2 + (shifted ? 1 : 0)];
 }
 
 // Which key of the row below each key leads to, and which of the row above.
@@ -372,19 +418,4 @@ void KeyboardMap_step(int row, int col, int step, int* out_row, int* out_col) {
 
     *out_row = target;
     *out_col = landing;
-}
-
-int KeyboardMap_keyCenter(int row, int col) {
-    const KeyboardKey* keys = KeyboardMap_row(row);
-
-    int offset = 0;
-    for (int index = 0; index < col && keys[index].action != KEY_END; index++) {
-        offset += keys[index].units;
-    }
-    return offset + keys[col].units / 2;
-}
-
-// The backspace label, or its plain fallback when the font has no arrow
-const char* KeyboardMap_backspaceLabel(bool font_has_arrow) {
-    return font_has_arrow ? BACKSPACE_ARROW : BACKSPACE_FALLBACK;
 }

@@ -17,6 +17,7 @@
 
 // UI modules
 #include "ui_fonts.h"
+#include "ui_keyboard.h"
 #include "ui_icons.h"
 #include "toast.h"
 
@@ -207,6 +208,7 @@ cleanup:
     Player_quit();
     Toast_quit();
     Icons_quit();
+    UIKeyboard_quit();
     Fonts_unload();
 
     QuitSettings();

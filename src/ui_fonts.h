@@ -20,12 +20,11 @@ TTF_Font* Fonts_getMedium(void);  // General medium (lists)
 TTF_Font* Fonts_getSmall(void);   // Badges, secondary text
 TTF_Font* Fonts_getTiny(void);    // Genre, bitrate
 
-// Font at an exact pixel size, for text sized from a screen measurement rather
-// than from the fixed scale.
+// Open the app font at an exact pixel size, for text sized from a screen
+// measurement rather than from the fixed scale.
 //
-// Obtained font should not be freed, and may be invalidated by a subsequent call
-// to Fonts_getSized() with a different size.
-TTF_Font* Fonts_getSized(int pixels);
+// The caller owns the font and closes it with TTF_CloseFont().
+TTF_Font* Fonts_open(int pixels);
 
 // Theme color helpers for list items (follows system appearance)
 SDL_Color Fonts_getListTextColor(bool selected);

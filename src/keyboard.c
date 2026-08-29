@@ -50,7 +50,7 @@ static const KeyboardKey* key_at(const KeyboardCursor* cursor) {
 // Move the cursor off a gap, and back inside the row
 static void cursor_rescue(KeyboardCursor* cursor) {
     if (cursor->row < 0) cursor->row = 0;
-    if (cursor->row > KEYBOARD_ROWS - 1) cursor->row = KEYBOARD_ROWS - 1;
+    if (cursor->row > KeyboardMap_rowCount() - 1) cursor->row = KeyboardMap_rowCount() - 1;
 
     int length = KeyboardMap_rowLength(cursor->row);
     if (cursor->col > length - 1) cursor->col = length - 1;
@@ -171,8 +171,8 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
         }
 
         const KeyboardKey* key = key_at(&cursor);
-        const char* pairs = KeyboardMap_pairs(KeyboardMap_get(cursor.map), key);
-        int variant_count = KeyboardMap_variantCount(pairs);
+        const KeyMapping* mapping = KeyboardMap_key(KeyboardMap_get(cursor.map), key);
+        int variant_count = KeyboardMap_variantCount(mapping);
 
         // A held button owns the pad, except while the alternates are up, where
         // left and right pick between them
@@ -254,9 +254,8 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
 
             switch (key->action) {
                 case KEY_TEXT: {
-                    char typed[KEYBOARD_TEXT_SIZE];
-                    KeyboardMap_variant(pairs, variant > 0 ? variant : 0,
-                                        cursor.shift != SHIFT_OFF, typed);
+                    const char* typed = KeyboardMap_variant(
+                        mapping, variant > 0 ? variant : 0, cursor.shift != SHIFT_OFF);
                     append_text(text, limit, typed);
                     if (cursor.shift == SHIFT_ONCE) cursor.shift = SHIFT_OFF;
                     break;
