@@ -29,6 +29,20 @@ TEST(char_bytes_rejects_malformed) {
     CHECK(UTF8_charBytes("\xFF") == 0);
 }
 
+TEST(codepoint) {
+    CHECK(UTF8_codepoint("a") == 0x61);
+    CHECK(UTF8_codepoint("é") == 0xE9);
+    CHECK(UTF8_codepoint("ф") == 0x444);
+    CHECK(UTF8_codepoint("€") == 0x20AC);
+    CHECK(UTF8_codepoint("😀") == 0x1F600);
+
+    // Malformed input reads as nothing, the same as the end of a string
+    CHECK(UTF8_codepoint("\xD1") == 0);
+    CHECK(UTF8_codepoint("\x80") == 0);
+    CHECK(UTF8_codepoint("") == 0);
+    CHECK(UTF8_codepoint(NULL) == 0);
+}
+
 TEST(copy_keeps_whole_characters) {
     char out[16];
 
@@ -102,6 +116,7 @@ TEST(last_char_bytes) {
 int main(void) {
     RUN(char_bytes_by_lead);
     RUN(char_bytes_rejects_malformed);
+    RUN(codepoint);
     RUN(copy_keeps_whole_characters);
     RUN(copy_stops_at_malformed_input);
     RUN(copy_handles_combining_marks);

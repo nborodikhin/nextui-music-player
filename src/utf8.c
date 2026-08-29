@@ -47,6 +47,13 @@ static unsigned int codepoint(const char* c, int length) {
     return code;
 }
 
+unsigned int UTF8_codepoint(const char* c) {
+    int length = UTF8_charBytes(c);
+    if (length == 0) return 0;
+
+    return codepoint(c, length);
+}
+
 bool UTF8_isCombining(const char* c) {
     int length = UTF8_charBytes(c);
     if (length < 2) return false;

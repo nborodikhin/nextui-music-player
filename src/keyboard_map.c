@@ -44,8 +44,6 @@
 // each slot types. The input row holds no keys: what END pads out is the
 // text field.
 static const KeyboardKey geometry[KEYBOARD_ROWS][KEYBOARD_COLS] = {
-    {END},
-
     {K('`'), K('1'), K('2'), K('3'), K('4'), K('5'), K('6'),
      K('7'), K('8'), K('9'), K('0'), K('-'), K('='), K_BKSP, END},
 
@@ -236,7 +234,7 @@ static const char* filter_pairs(const char* pairs, GlyphSupportedFn supported,
     return out;
 }
 
-void KeyboardMap_filter(GlyphSupportedFn supported, void* context) {
+void KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
     if (!supported) return;
     pairs_used = 0;
 
@@ -343,19 +341,19 @@ void KeyboardMap_variant(const char* pairs, int index, bool shifted,
 #define X (-1)
 
 static const signed char below_col[KEYBOARD_ROWS][KEYBOARD_COLS] = {
-    [1] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // digits -> tab row
-    [2] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12},          // tab row -> home row
-    [3] = {0, 1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11},               // home row -> shift row
-    [4] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},                    // shift row -> space row
-    [5] = {0, X, 6, X, 13},                                        // space row -> digits
+    [0] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // digits -> tab row
+    [1] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12},          // tab row -> home row
+    [2] = {0, 1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11},               // home row -> shift row
+    [3] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},                    // shift row -> space row
+    [4] = {0, X, 6, X, 13},                                        // space row -> digits
 };
 
 static const signed char above_col[KEYBOARD_ROWS][KEYBOARD_COLS] = {
-    [1] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},              // digits -> space row
-    [2] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // tab row -> digits
-    [3] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13},              // home row -> tab row
-    [4] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12},                 // shift row -> home row
-    [5] = {0, X, 5, X, 11},                                        // space row -> shift row
+    [0] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},              // digits -> space row
+    [1] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // tab row -> digits
+    [2] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13},              // home row -> tab row
+    [3] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12},                 // shift row -> home row
+    [4] = {0, X, 5, X, 11},                                        // space row -> shift row
 };
 
 #undef X
@@ -364,10 +362,9 @@ void KeyboardMap_step(int row, int col, int step, int* out_row, int* out_col) {
     *out_row = row;
     *out_col = col;
 
-    // The input row holds no keys, so the grid wraps between the two ends of it
-    int target = (step > 0) ? ((row >= KEYBOARD_ROWS - 1) ? 1 : row + 1)
-                            : ((row <= 1) ? KEYBOARD_ROWS - 1 : row - 1);
-    if (row < 1 || row >= KEYBOARD_ROWS) return;
+    if (row < 0 || row >= KEYBOARD_ROWS) return;
+
+    int target = (row + step + KEYBOARD_ROWS) % KEYBOARD_ROWS;
     if (col < 0 || col >= KEYBOARD_COLS) return;
 
     int landing = (step > 0) ? below_col[row][col] : above_col[row][col];

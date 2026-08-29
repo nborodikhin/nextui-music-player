@@ -3,11 +3,12 @@
 
 #include <stdbool.h>
 
-#define KEYBOARD_ROWS 6
+// Digits, tab, home, shift, space. The text field is not one of them - it is
+// drawn above the grid, and belongs to whoever lays the screen out.
+#define KEYBOARD_ROWS 5
 
-// The top row holds the text field alone; the cursor opens on the home row
-#define KEYBOARD_INPUT_ROW 0
-#define KEYBOARD_HOME_ROW 3
+// Where the cursor opens
+#define KEYBOARD_HOME_ROW 2
 #define KEYBOARD_COLS 16
 
 // Latin and Cyrillic
@@ -76,9 +77,11 @@ typedef struct {
 // module stays free of the font library.
 typedef bool (*GlyphSupportedFn)(void* context, const char* c);
 
-// Drop the alternates the font cannot draw, keeping every primary. Called once
-// per process; the accessors below serve the filtered maps afterwards.
-void KeyboardMap_filter(GlyphSupportedFn supported, void* context);
+// Build the maps this font can actually draw: every primary is kept, and the
+// alternates it has no glyph for are dropped. Call this before anything else
+// here - until it runs, the accessors serve the unfiltered maps and can hand
+// out a character the font would draw as tofu. Once per process is enough.
+void KeyboardMap_prepare(GlyphSupportedFn supported, void* context);
 
 // Latin (0) or Cyrillic (1), as the font allows. Wraps out-of-range indices.
 const KeyboardMap* KeyboardMap_get(int index);

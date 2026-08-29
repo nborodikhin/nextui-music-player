@@ -73,12 +73,12 @@ TEST(map_inherits_from_base) {
 
     const KeyboardKey* backtick = NULL;
     const KeyboardKey* letter = NULL;
-    for (int col = 0; col < KeyboardMap_rowLength(1); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(1)[col];
+    for (int col = 0; col < KeyboardMap_rowLength(0); col++) {
+        const KeyboardKey* key = &KeyboardMap_row(0)[col];
         if (key->ansi == '`') backtick = key;
     }
-    for (int col = 0; col < KeyboardMap_rowLength(3); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(3)[col];
+    for (int col = 0; col < KeyboardMap_rowLength(2); col++) {
+        const KeyboardKey* key = &KeyboardMap_row(2)[col];
         if (key->ansi == 'a') letter = key;
     }
     CHECK(backtick != NULL);
@@ -96,8 +96,8 @@ TEST(map_inherits_from_base) {
 TEST(special_keys_have_no_pairs) {
     const KeyboardMap* latin = KeyboardMap_get(0);
 
-    for (int col = 0; col < KeyboardMap_rowLength(5); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(5)[col];
+    for (int col = 0; col < KeyboardMap_rowLength(4); col++) {
+        const KeyboardKey* key = &KeyboardMap_row(4)[col];
         if (!KeyboardMap_isSpecial(key)) continue;
         CHECK(KeyboardMap_pairs(latin, key) == NULL);
     }
@@ -106,8 +106,8 @@ TEST(special_keys_have_no_pairs) {
 TEST(apostrophe_popup_keeps_the_same_characters) {
     const KeyboardMap* latin = KeyboardMap_get(KEYBOARD_MAP_LATIN);
     const KeyboardKey* apostrophe = NULL;
-    for (int col = 0; col < KeyboardMap_rowLength(3); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(3)[col];
+    for (int col = 0; col < KeyboardMap_rowLength(2); col++) {
+        const KeyboardKey* key = &KeyboardMap_row(2)[col];
         if (key->ansi == '\'') apostrophe = key;
     }
     CHECK(apostrophe != NULL);
@@ -133,14 +133,14 @@ static bool ascii_only(void* context, const char* c) {
 }
 
 TEST(filter_keeps_primaries) {
-    KeyboardMap_filter(ascii_only, NULL);
+    KeyboardMap_prepare(ascii_only, NULL);
 
     const KeyboardMap* latin = KeyboardMap_get(0);
     const KeyboardMap* cyrillic = KeyboardMap_get(1);
 
     const KeyboardKey* a = NULL;
-    for (int col = 0; col < KeyboardMap_rowLength(3); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(3)[col];
+    for (int col = 0; col < KeyboardMap_rowLength(2); col++) {
+        const KeyboardKey* key = &KeyboardMap_row(2)[col];
         if (key->ansi == 'a') a = key;
     }
     CHECK(a != NULL);
@@ -154,7 +154,7 @@ TEST(filter_keeps_primaries) {
     CHECK(strcmp(out, "ф") == 0);
 }
 
-// Rows: 1 digits, 2 tab, 3 home, 4 shift, 5 space
+// Rows: 0 digits, 1 tab, 2 home, 3 shift, 4 space
 static void check_step(int row, int col, int step, int want_row, int want_col) {
     int got_row = -1;
     int got_col = -1;
@@ -165,62 +165,62 @@ static void check_step(int row, int col, int step, int want_row, int want_col) {
 
 // Down the columns: the rows have different key counts, so the ends bunch up
 TEST(step_down) {
-    check_step(1, 0, 1, 2, 0);      // ` -> tab
-    check_step(1, 1, 1, 2, 1);      // 1 -> q
-    check_step(1, 10, 1, 2, 10);    // 0 -> p
-    check_step(1, 12, 1, 2, 12);    // = -> ]
-    check_step(1, 13, 1, 2, 13);    // backspace -> backslash
+    check_step(0, 0, 1, 1, 0);      // ` -> tab
+    check_step(0, 1, 1, 1, 1);      // 1 -> q
+    check_step(0, 10, 1, 1, 10);    // 0 -> p
+    check_step(0, 12, 1, 1, 12);    // = -> ]
+    check_step(0, 13, 1, 1, 13);    // backspace -> backslash
 
-    check_step(2, 0, 1, 3, 0);      // tab -> caps
-    check_step(2, 10, 1, 3, 10);    // p -> ;
-    check_step(2, 11, 1, 3, 11);    // [ -> '
-    check_step(2, 12, 1, 3, 11);    // ] -> '
-    check_step(2, 13, 1, 3, 12);    // backslash -> enter
+    check_step(1, 0, 1, 2, 0);      // tab -> caps
+    check_step(1, 10, 1, 2, 10);    // p -> ;
+    check_step(1, 11, 1, 2, 11);    // [ -> '
+    check_step(1, 12, 1, 2, 11);    // ] -> '
+    check_step(1, 13, 1, 2, 12);    // backslash -> enter
 
-    check_step(3, 0, 1, 4, 0);      // caps -> left shift
-    check_step(3, 1, 1, 4, 1);      // a -> z
-    check_step(3, 5, 1, 4, 5);      // g -> b
-    check_step(3, 6, 1, 4, 5);      // h -> b
-    check_step(3, 11, 1, 4, 10);    // ' -> /
-    check_step(3, 12, 1, 4, 11);    // enter -> right shift
+    check_step(2, 0, 1, 3, 0);      // caps -> left shift
+    check_step(2, 1, 1, 3, 1);      // a -> z
+    check_step(2, 5, 1, 3, 5);      // g -> b
+    check_step(2, 6, 1, 3, 5);      // h -> b
+    check_step(2, 11, 1, 3, 10);    // ' -> /
+    check_step(2, 12, 1, 3, 11);    // enter -> right shift
 
     // Every letter drops into the space bar; only the shifts flank it
-    check_step(4, 0, 1, 5, 0);      // left shift -> lang
-    check_step(4, 5, 1, 5, 2);      // b -> space
-    check_step(4, 10, 1, 5, 2);     // / -> space
-    check_step(4, 11, 1, 5, 4);     // right shift -> cancel
+    check_step(3, 0, 1, 4, 0);      // left shift -> lang
+    check_step(3, 5, 1, 4, 2);      // b -> space
+    check_step(3, 10, 1, 4, 2);     // / -> space
+    check_step(3, 11, 1, 4, 4);     // right shift -> cancel
 
-    check_step(5, 0, 1, 1, 0);      // lang -> `
-    check_step(5, 2, 1, 1, 6);      // space -> 6
-    check_step(5, 4, 1, 1, 13);     // cancel -> backspace
+    check_step(4, 0, 1, 0, 0);      // lang -> `
+    check_step(4, 2, 1, 0, 6);      // space -> 6
+    check_step(4, 4, 1, 0, 13);     // cancel -> backspace
 }
 
 // Up is the mirror of down, except where two keys shared one target
 TEST(step_up) {
-    check_step(5, 0, -1, 4, 0);     // lang -> left shift
-    check_step(5, 2, -1, 4, 5);     // space -> b
-    check_step(5, 4, -1, 4, 11);    // cancel -> right shift
+    check_step(4, 0, -1, 3, 0);     // lang -> left shift
+    check_step(4, 2, -1, 3, 5);     // space -> b
+    check_step(4, 4, -1, 3, 11);    // cancel -> right shift
 
-    check_step(4, 1, -1, 3, 1);     // z -> a
-    check_step(4, 5, -1, 3, 5);     // b -> g, not h
-    check_step(4, 11, -1, 3, 12);   // right shift -> enter
+    check_step(3, 1, -1, 2, 1);     // z -> a
+    check_step(3, 5, -1, 2, 5);     // b -> g, not h
+    check_step(3, 11, -1, 2, 12);   // right shift -> enter
 
-    check_step(3, 11, -1, 2, 11);   // ' -> [
-    check_step(3, 12, -1, 2, 13);   // enter -> backslash
+    check_step(2, 11, -1, 1, 11);   // ' -> [
+    check_step(2, 12, -1, 1, 13);   // enter -> backslash
 
-    check_step(2, 1, -1, 1, 1);     // q -> 1
+    check_step(1, 1, -1, 0, 1);     // q -> 1
 
-    check_step(1, 0, -1, 5, 0);     // ` -> lang
-    check_step(1, 6, -1, 5, 2);     // 6 -> space
-    check_step(1, 5, -1, 5, 2);     // 5 -> space
-    check_step(1, 13, -1, 5, 4);    // backspace -> cancel
+    check_step(0, 0, -1, 4, 0);     // ` -> lang
+    check_step(0, 6, -1, 4, 2);     // 6 -> space
+    check_step(0, 5, -1, 4, 2);     // 5 -> space
+    check_step(0, 13, -1, 4, 4);    // backspace -> cancel
 }
 
 // A move that has nowhere to go leaves the cursor where it was
 TEST(step_stays_put_off_grid) {
-    check_step(KEYBOARD_INPUT_ROW, 0, 1, KEYBOARD_INPUT_ROW, 0);
-    check_step(1, KEYBOARD_COLS, 1, 1, KEYBOARD_COLS);
-    check_step(5, 1, 1, 5, 1);      // the gap beside the space bar
+    check_step(0, KEYBOARD_COLS, 1, 0, KEYBOARD_COLS);
+    check_step(-1, 0, 1, -1, 0);    // the text field is not a row here
+    check_step(4, 1, 1, 4, 1);      // the gap beside the space bar
 }
 
 int main(void) {

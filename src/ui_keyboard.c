@@ -10,9 +10,11 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 
-// Gap between keys, and between the text field and the grid
-#define KEY_SPACING 4
-#define INPUT_GAP 8
+// Space around every key, taken out of its cell, so two neighbours sit twice
+// this far apart. Plus the gap under the text field, which is what sets it
+// apart from the key grid.
+#define KEY_PADDING 2
+#define INPUT_ROW_GAP 8
 
 // Share of a key's height the glyphs take
 #define KEY_FONT_RATIO 55
@@ -20,20 +22,19 @@
 // Special keys are set in small caps: uppercase, at this share of the key font
 #define LABEL_FONT_RATIO 78
 
-// Keys that type nothing sit this far from the plain key color towards the
-// selected one
+// Special keys color - distance from COLOR_ACCENT to COLOR_MAIN, percents
 #define KEY_BG_SPECIAL_MIX 20
 
-// The lock LED, as a share of the key height, and its inset from the corner
-#define LOCK_LED_RATIO 14
+// The lock LED size as a percentage of the key height, and its inset from the corner
+#define LOCK_LED_HEIGHT_RATIO 15
 #define LOCK_LED_INSET 3
 
-// A pressed key shrinks inside its cell
+// A pressed key shrinked size, percentage of the unpressed key size
 #define KEY_PRESSED_RATIO 90
 
 // The alternates are keys like any other, on a panel that separates them from
-// the grid underneath
-#define VARIANT_PANEL_PADDING 1
+// the grid underneath. Its padding is counted in key paddings.
+#define VARIANT_PANEL_PADDING 2
 
 // One key unit, in the hundredths the table is written in
 #define UNIT 100
@@ -43,35 +44,21 @@
 #define BACKSPACE_FALLBACK "<-"
 
 // Every ANSI row is 15 units wide; END pads out whatever a row leaves over
-#define ROW_UNITS 1500
+#define ROW_UNITS (15 * UNIT)
 
-// Where the grid sits, derived from the space between header and button hints
+// Keyboard position, metrics and fonts.
+// Keyboard consists of input field area and 5 rows of key grid
 typedef struct {
-    int       unit;        // width and height of one key unit
-    int       spacing;     // taken out of a cell, not added between them
-    int       board_x;     // left edge of every row
-    int       board_w;
-    int       grid_y;      // top of the input row
-    int       input_gap;   // extra space under the input row
-    TTF_Font* font;        // key characters
-    TTF_Font* label_font;  // the small caps on special keys
+    int       left;
+    int       top;
+    int       width;
+    int       height;
+    int       key_unit_size;  // one key unit, in pixels
+    int       key_padding;    // spacing around each key inside its cell
+    int       grid_y_offset;  // distance of the digit row from the `top`
+    TTF_Font* font;           // key characters
+    TTF_Font* label_font;     // the small caps on special keys
 } KeyboardMetrics;
-
-// The codepoint of the UTF-8 character starting at c
-static Uint32 utf8_codepoint(const char* c) {
-    unsigned char lead = (unsigned char)*c;
-    int length = UTF8_charBytes(c);
-    if (length == 0) return 0;
-
-    Uint32 code = (length == 1) ? lead
-                : (length == 2) ? (lead & 0x1F)
-                : (length == 3) ? (lead & 0x0F)
-                                : (lead & 0x07);
-    for (int index = 1; index < length; index++) {
-        code = (code << 6) | ((unsigned char)c[index] & 0x3F);
-    }
-    return code;
-}
 
 // Whether the app font can draw this character, for the map filter
 static bool font_has(void* context, const char* c) {
@@ -80,27 +67,18 @@ static bool font_has(void* context, const char* c) {
 
     // Every character the maps use is in the BMP, so the 16-bit lookup covers
     // them; the device's SDL_ttf is too old for the 32-bit one
-    Uint32 code = utf8_codepoint(c);
+    Uint32 code = UTF8_codepoint(c);
     if (code > 0xFFFF) return false;
     return TTF_GlyphIsProvided(font, (Uint16)code) != 0;
 }
 
 void UIKeyboard_init(void) {
-    KeyboardMap_filter(font_has, Fonts_getMedium());
-}
-
-// Units a row spells out, before END pads it to the full width
-static int row_units(int row) {
-    const KeyboardKey* keys = KeyboardMap_row(row);
-
-    int units = 0;
-    for (int index = 0; keys[index].action != KEY_END; index++) units += keys[index].units;
-    return units;
+    KeyboardMap_prepare(font_has, Fonts_getMedium());
 }
 
 static KeyboardMetrics compute_metrics(SDL_Surface* screen) {
     KeyboardMetrics m;
-    m.spacing = SCALE1(KEY_SPACING);
+    m.key_padding = SCALE1(KEY_PADDING);
 
     // The keyboard owns everything between the title pill and the button hints.
     // Both pills are PILL_SIZE tall a PADDING from their edge, so the band is
@@ -109,47 +87,49 @@ static KeyboardMetrics compute_metrics(SDL_Surface* screen) {
     int bottom = screen->h - SCALE1(PADDING + PILL_SIZE);
     int available_h = bottom - top;
 
-    // The input row is one unit tall like the key rows, plus the gap under it
-    int unit_h = (available_h - SCALE1(INPUT_GAP)) / KEYBOARD_ROWS;
+    // The text field is one unit tall like the key rows, plus the gap under it
+    int unit_h = (available_h - SCALE1(INPUT_ROW_GAP)) / (KEYBOARD_ROWS + 1);
 
     // Every row is the full width. Keys are drawn inset inside their cells
     // rather than spaced apart, so rows stay aligned however many keys they hold.
     int unit_w = screen->w * UNIT / ROW_UNITS;
 
     // One unit drives both axes, so a height-limited board shrinks whole
-    m.unit = MIN(unit_h, unit_w);
-    m.font = Fonts_getSized(m.unit * KEY_FONT_RATIO / 100);
-    m.label_font = Fonts_getSized(m.unit * KEY_FONT_RATIO * LABEL_FONT_RATIO / 10000);
+    m.key_unit_size = MIN(unit_h, unit_w);
+    m.font = Fonts_getSized(m.key_unit_size * KEY_FONT_RATIO / 100);
+    m.label_font = Fonts_getSized(m.key_unit_size * KEY_FONT_RATIO * LABEL_FONT_RATIO / 10000);
 
-    m.input_gap = SCALE1(INPUT_GAP);
-    m.board_w = ROW_UNITS * m.unit / UNIT;
-    m.board_x = (screen->w - m.board_w) / 2;
-
-    int block_h = KEYBOARD_ROWS * m.unit + m.input_gap;
-    m.grid_y = top + (available_h - block_h) / 2;
+    // From the top of the block, past the text field and its gap, to the digits
+    m.grid_y_offset = m.key_unit_size + SCALE1(INPUT_ROW_GAP);
+    m.width = ROW_UNITS * m.key_unit_size / UNIT;
+    m.height = m.grid_y_offset + KEYBOARD_ROWS * m.key_unit_size;
+    m.left = (screen->w - m.width) / 2;
+    m.top = top + (available_h - m.height) / 2;
 
     return m;
 }
 
-// Top of a row's cells. The keys keep their distance from the input row.
+// Top of a row's cells. The text field is the row above the grid, at the top of
+// the block; the grid starts a whole offset below it.
 static int row_y(const KeyboardMetrics* m, int row) {
-    return m->grid_y + row * m->unit + (row > 0 ? m->input_gap : 0);
+    if (row == KEYBOARD_INPUT_ROW) return m->top;
+
+    return m->top + m->grid_y_offset + row * m->key_unit_size;
 }
 
 // Trim a cell to the drawn key, so the gaps come out of the cells and every
 // row still spans the same width
 static SDL_Rect inset(const KeyboardMetrics* m, SDL_Rect cell) {
-    int margin = m->spacing / 2;
     return (SDL_Rect){
-        .x = cell.x + margin,
-        .y = cell.y + margin,
-        .w = cell.w - 2 * margin,
-        .h = cell.h - 2 * margin,
+        .x = cell.x + m->key_padding,
+        .y = cell.y + m->key_padding,
+        .w = cell.w - 2 * m->key_padding,
+        .h = cell.h - 2 * m->key_padding,
     };
 }
 
 static int key_width(const KeyboardMetrics* m, const KeyboardKey* key) {
-    return key->units * m->unit / UNIT;
+    return key->units * m->key_unit_size / UNIT;
 }
 
 static SDL_Rect key_rect(const KeyboardMetrics* m, int row, int col) {
@@ -158,24 +138,31 @@ static SDL_Rect key_rect(const KeyboardMetrics* m, int row, int col) {
     int units = 0;
     for (int index = 0; index < col; index++) units += keys[index].units;
 
-    return inset(m, (SDL_Rect){m->board_x + units * m->unit / UNIT, row_y(m, row),
-                               key_width(m, &keys[col]), m->unit});
+    return inset(m, (SDL_Rect){m->left + units * m->key_unit_size / UNIT, row_y(m, row),
+                               key_width(m, &keys[col]), m->key_unit_size});
 }
 
-// The stretch END pads out at the end of a row, empty on every row but the
-// input one, where it is the text field
-static SDL_Rect row_tail_rect(const KeyboardMetrics* m, int row) {
-    int units = row_units(row);
-
-    return inset(m, (SDL_Rect){m->board_x + units * m->unit / UNIT, row_y(m, row),
-                               (ROW_UNITS - units) * m->unit / UNIT, m->unit});
+// The text field: a row of its own above the grid, the full width of the board
+static SDL_Rect input_rect(const KeyboardMetrics* m) {
+    return inset(m, (SDL_Rect){m->left, row_y(m, KEYBOARD_INPUT_ROW),
+                               m->width, m->key_unit_size});
 }
 
-// Blend two theme colors, percent of the way from first to second, and map the
-// result for this screen
-static uint32_t mix_colors(SDL_Surface* screen, uint32_t first, uint32_t second, int percent) {
-    SDL_Color a = uintToColour(first);
-    SDL_Color b = uintToColour(second);
+// A theme color named by its NextUI setting, for text
+static SDL_Color theme_text(int color_id) {
+    return uintToColour(CFG_getColor(color_id));
+}
+
+// The same, mapped for this screen's format, for fills
+static uint32_t theme_fill(SDL_Surface* screen, int color_id) {
+    SDL_Color color = theme_text(color_id);
+    return SDL_MapRGB(screen->format, color.r, color.g, color.b);
+}
+
+// Blend two theme colors, percent of the way from the first to the second
+static uint32_t mix_colors(SDL_Surface* screen, int first_id, int second_id, int percent) {
+    SDL_Color a = theme_text(first_id);
+    SDL_Color b = theme_text(second_id);
 
     return SDL_MapRGB(screen->format,
                       a.r + (b.r - a.r) * percent / 100,
@@ -249,7 +236,8 @@ static void draw_label(SDL_Surface* screen, TTF_Font* font, const char* label,
 
 static void render_input(SDL_Surface* screen, const KeyboardMetrics* m,
                          const SDL_Rect* field, const char* text) {
-    render_rounded_rect_bg(screen, field->x, field->y, field->w, field->h, THEME_COLOR1);
+    render_rounded_rect_bg(screen, field->x, field->y, field->w, field->h,
+                           theme_fill(screen, COLOR_MAIN));
     if (!text || text[0] == '\0' || !m->font) return;
 
     // A long entry scrolls out to the left, so the caret end stays visible
@@ -259,7 +247,7 @@ static void render_input(SDL_Surface* screen, const KeyboardMetrics* m,
     int inner_w = field->w - SCALE1(BUTTON_PADDING * 2);
 
     SDL_Surface* surface = TTF_RenderUTF8_Blended(m->font, text,
-                                                  uintToColour(THEME_COLOR5_255));
+                                                  theme_text(COLOR_LIST_TEXT_SELECTED));
     if (!surface) return;
 
     SDL_Rect clip = {0, 0, surface->w, surface->h};
@@ -284,8 +272,8 @@ static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
 
     // The strip is a keyboard row at the pressed key's scale, pitch included,
     // so one ratio governs the cells and the gaps between them
-    int pitch = m->unit * KEY_PRESSED_RATIO / 100;
-    int padding = m->spacing * VARIANT_PANEL_PADDING;
+    int pitch = m->key_unit_size * KEY_PRESSED_RATIO / 100;
+    int padding = m->key_padding * VARIANT_PANEL_PADDING;
     int panel_w = pitch * count + padding * 2;
     int panel_h = pitch + padding * 2;
 
@@ -296,9 +284,10 @@ static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
 
     // Above the key, or below it when there is no room over the top row
     int panel_y = anchor.y - padding - panel_h;
-    if (panel_y < m->grid_y) panel_y = anchor.y + anchor.h + padding;
+    if (panel_y < m->top) panel_y = anchor.y + anchor.h + padding;
 
-    render_rounded_rect_bg(screen, panel_x, panel_y, panel_w, panel_h, THEME_COLOR1);
+    render_rounded_rect_bg(screen, panel_x, panel_y, panel_w, panel_h,
+                           theme_fill(screen, COLOR_MAIN));
 
     for (int index = 0; index < count; index++) {
         // Drawn like a key under a finger, since that is what they are
@@ -310,30 +299,31 @@ static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
         });
         bool active = (index == selected);
         if (active) {
-            render_rounded_rect_bg(screen, cell.x, cell.y, cell.w, cell.h, THEME_COLOR3);
+            render_rounded_rect_bg(screen, cell.x, cell.y, cell.w, cell.h,
+                                   theme_fill(screen, COLOR_ACCENT2));
         }
 
         char label[KEYBOARD_TEXT_SIZE];
         KeyboardMap_variant(pairs, index, shifted, label);
         draw_label(screen, m->font, label,
                    active ? Fonts_getListTextColor(false)
-                          : uintToColour(THEME_COLOR5_255),
+                          : theme_text(COLOR_LIST_TEXT_SELECTED),
                    cell);
     }
 }
 
-void UIKeyboard_render(SDL_Surface* screen, const char* prompt, const char* text,
+void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
                        int map_index, ShiftState shift, int row, int col, bool pressed,
-                       int variant, int show_setting) {
+                       int selected_variant, int show_setting) {
     GFX_clear(screen);
-    render_screen_header(screen, prompt ? prompt : "", show_setting);
+    render_screen_header(screen, title ? title : "", show_setting);
 
     const KeyboardMap* map = KeyboardMap_get(map_index);
     const KeyboardMap* other = KeyboardMap_get((map_index + 1) % KEYBOARD_MAP_COUNT);
     bool shifted = (shift != SHIFT_OFF);
     KeyboardMetrics m = compute_metrics(screen);
 
-    SDL_Rect field = row_tail_rect(&m, KEYBOARD_INPUT_ROW);
+    SDL_Rect field = input_rect(&m);
     render_input(screen, &m, &field, text);
 
     SDL_Rect cursor_rect = {0, 0, 0, 0};
@@ -353,13 +343,12 @@ void UIKeyboard_render(SDL_Surface* screen, const char* prompt, const char* text
 
             // Nothing but the press changes a key's color: the shift state
             // shows in the characters the keys carry, and the lock in the LED
-            uint32_t bg = THEME_COLOR3;
+            uint32_t bg = theme_fill(screen, COLOR_ACCENT2);
             if (selected) {
-                bg = THEME_COLOR1;
+                bg = theme_fill(screen, COLOR_MAIN);
             }
             else if (KeyboardMap_isSpecial(key)) {
-                bg = mix_colors(screen, THEME_COLOR3_255, THEME_COLOR1_255,
-                                KEY_BG_SPECIAL_MIX);
+                bg = mix_colors(screen, COLOR_ACCENT2, COLOR_MAIN, KEY_BG_SPECIAL_MIX);
             }
             render_rounded_rect_bg(screen, rect.x, rect.y, rect.w, rect.h, bg);
 
@@ -368,7 +357,7 @@ void UIKeyboard_render(SDL_Surface* screen, const char* prompt, const char* text
             // purpose, against the rule that colors come from the theme - an
             // LED reads as on or off only when its two states never move.
             if (key->action == KEY_CAPS) {
-                int radius = rect.h * LOCK_LED_RATIO / 100;
+                int radius = rect.h * LOCK_LED_HEIGHT_RATIO / 100;
                 int led_inset = radius + SCALE1(LOCK_LED_INSET);
                 uint32_t led = (shift == SHIFT_LOCKED)
                                    ? SDL_MapRGB(screen->format, 0, 220, 0)
@@ -390,8 +379,8 @@ void UIKeyboard_render(SDL_Surface* screen, const char* prompt, const char* text
         }
     }
 
-    if (variant >= 0 && cursor_key) {
-        render_variants(screen, &m, map, cursor_key, cursor_rect, shifted, variant);
+    if (selected_variant >= 0 && cursor_key) {
+        render_variants(screen, &m, map, cursor_key, cursor_rect, shifted, selected_variant);
     }
 
     // B rubs out what has been typed, and leaves once there is nothing left

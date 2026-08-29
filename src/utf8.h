@@ -15,6 +15,12 @@
 int UTF8_charBytes(const char* c);
 
 /**
+ * The codepoint of the character starting at c, or 0 when the sequence is
+ * malformed - which is also what a NUL byte gives, since neither can be typed.
+ */
+unsigned int UTF8_codepoint(const char* c);
+
+/**
  * True for a combining mark - a character that has no meaning without the one
  * it attaches to (the accent in `o` + U+0300).
  */
