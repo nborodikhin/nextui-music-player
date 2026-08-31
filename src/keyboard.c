@@ -14,7 +14,6 @@
 // How long A is held on a character key before its alternates come up.
 #define KEYBOARD_HOLD_MS 250
 
-// Where the cursor sits on the keyboard and what it types there
 typedef struct {
     const char *prompt;
     char text[KEYBOARD_MAX_INPUT];
@@ -34,7 +33,6 @@ typedef struct {
     const char *current_char; // what that key types now, "" where it types nothing
 } KeyboardState;
 
-// Describe the keyboard as the drawing side needs to see it
 static void prepare_ui_state(const KeyboardState *in, KeyboardUiState *out) {
     const Keyboard *keyboard = in->keyboard;
     int next = (in->layout_index + 1) % keyboard->layout_count;
@@ -58,7 +56,7 @@ void Keyboard_init(void) {
     UIKeyboard_init();
 }
 
-// Keys in a row, which the NULL at its end marks
+// Number of keys in the raw.
 static int row_length(const KeyboardState *state, int row) {
     const KeyboardGeometry *g = state->geometry;
     if (row < 0 || row >= g->rows) return 0;
@@ -68,7 +66,8 @@ static int row_length(const KeyboardState *state, int row) {
     return length;
 }
 
-// Follow the cursor, the layout, the shift and the alternate being picked
+// Update current key and char, must be called after any change that affects
+// key/char selection (cursor, layout, shift change etc)
 static void update_current_key(KeyboardState *state) {
     state->current_key = state->geometry->keys[state->row][state->col];
 
@@ -87,7 +86,6 @@ static void update_current_key(KeyboardState *state) {
                                            state->shift != SHIFT_OFF, variant);
 }
 
-// Move on to the next layout, wrapping at the last
 static void next_layout(KeyboardState *state) {
     state->layout_index = (state->layout_index + 1) % state->keyboard->layout_count;
     state->current_layout = state->keyboard->layouts[state->layout_index];
@@ -99,49 +97,27 @@ static void set_shift(KeyboardState *state, ShiftState shift) {
     update_current_key(state);
 }
 
-// A tap on shift turns it on for one character, and turns it off again from
-// anywhere. Caps lock only ever comes off with a tap.
 static void tap_shift(KeyboardState *state) {
     set_shift(state, (state->shift == SHIFT_OFF) ? SHIFT_ONCE : SHIFT_OFF);
 }
 
-// Caps lock is the lock alone: on from anywhere else, off from locked
 static void tap_caps(KeyboardState *state) {
     set_shift(state, (state->shift == SHIFT_LOCKED) ? SHIFT_OFF : SHIFT_LOCKED);
 }
 
-// Bring the alternates of the current key up, starting on the first
-static void open_variants(KeyboardState *state) {
+static void open_variants_panel(KeyboardState *state) {
     state->picking_variant = true;
     state->current_variant = 0;
     update_current_key(state);
 }
 
-static void close_variants(KeyboardState *state) {
+static void close_variants_panel(KeyboardState *state) {
     state->picking_variant = false;
     update_current_key(state);
 }
 
 static void set_current_variant(KeyboardState *state, int variant) {
     state->current_variant = variant;
-    update_current_key(state);
-}
-
-// Move the cursor off a gap, and back inside the row
-static void cursor_rescue(KeyboardState *state) {
-    const KeyboardGeometry *g = state->geometry;
-
-    if (state->row < 0) state->row = 0;
-    if (state->row > g->rows - 1) state->row = g->rows - 1;
-
-    int length = row_length(state, state->row);
-    if (state->col > length - 1) state->col = length - 1;
-    if (state->col < 0) state->col = 0;
-
-    const Key *const*keys = g->keys[state->row];
-    while (state->col < length - 1 && keys[state->col]->action == KEY_SPACER) state->col++;
-    while (state->col > 0 && keys[state->col]->action == KEY_SPACER) state->col--;
-
     update_current_key(state);
 }
 
@@ -154,11 +130,17 @@ static void move_vertical(KeyboardState *state, int step) {
     int target_col = (step > 0) ? state->current_key->col_down : state->current_key->col_up;
     if (target_col == KEY_NO_COLUMN) return;
 
-    if (target_col >= row_length(state, target_row)) return;
+    int length = row_length(state, target_row);
+    if (target_col >= length) return;
+
+    // The column led to may hold a gap, which the cursor cannot sit on
+    const Key *const*keys = state->geometry->keys[target_row];
+    while (target_col < length - 1 && keys[target_col]->action == KEY_SPACER) target_col++;
+    while (target_col > 0 && keys[target_col]->action == KEY_SPACER) target_col--;
 
     state->row = target_row;
     state->col = target_col;
-    cursor_rescue(state);
+    update_current_key(state);
 }
 
 static void move_horizontal(KeyboardState *state, int step) {
@@ -174,8 +156,7 @@ static void move_horizontal(KeyboardState *state, int step) {
     update_current_key(state);
 }
 
-// Add a character, or leave the text alone when it no longer fits. Whole
-// characters only, so a multibyte one is never half-written.
+// Add a character (whole UTF-8 only), if it fits.
 static void append_text(KeyboardState *state, const char *addition) {
     size_t length = strlen(state->text);
     size_t addition_length = strlen(addition);
@@ -345,7 +326,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
             if (hold_consumed) {
                 holding = false;
                 cancelled = false;
-                close_variants(&state);
+                close_variants_panel(&state);
                 GFX_sync();
                 continue;
             }
@@ -381,7 +362,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
             }
 
             holding = false;
-            close_variants(&state);
+            close_variants_panel(&state);
         } else if (holding && !hold_consumed && !state.picking_variant &&
                    SDL_GetTicks() - held_since >= KEYBOARD_HOLD_MS) {
             // Once: reopening every frame would put the pick back on the first
@@ -389,7 +370,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
             if (key->action == KEY_TEXT) {
                 // Even a key with a single character opens, so the gesture is
                 // the same wherever the cursor is
-                open_variants(&state);
+                open_variants_panel(&state);
             }
         } else if (PAD_justPressed(BTN_B) && state.text[0] == '\0') {
             // B backs out of an empty field, the way it leaves any other screen
