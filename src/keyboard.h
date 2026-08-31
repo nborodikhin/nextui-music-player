@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 
+// Longest text the keyboard takes, terminator included
+#define KEYBOARD_MAX_INPUT 512
+
 // Initialize keyboard module
 // Call this before using Keyboard_open()
 void Keyboard_init(void);

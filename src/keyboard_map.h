@@ -5,109 +5,82 @@
 
 #include "utf8.h"
 
-// Where the cursor opens
-#define KEYBOARD_HOME_ROW 2
-
-// Which character map a key types from. COUNT is the wrap, not a map.
 typedef enum {
-    KEYBOARD_MAP_LATIN,
-    KEYBOARD_MAP_CYRILLIC,
-    KEYBOARD_MAP_COUNT,
-} KeyboardMapIndex;
-
-typedef enum {
-    KEY_END,        // row terminator
-    KEY_TEXT,       // types the character its map gives this slot
+    KEY_TEXT,       // regular key
     KEY_SPACE,
     KEY_BACKSPACE,
-    KEY_TAB,        // no-op
-    KEY_CAPS,       // shift lock
-    KEY_SHIFT,      // off -> once -> locked
-    KEY_LANG,       // other map
-    KEY_ENTER,      // confirm
+    KEY_TAB,
+    KEY_CAPS,
+    KEY_SHIFT,      // shift (either left or right)
+    KEY_LANG,       // layout change key
+    KEY_ENTER,
     KEY_CANCEL,     // abort
-    KEY_GAP,        // laid out, not drawn
+    KEY_SPACER,     // invisible pseudo-key, used where empty space is needed (e.g. around SPACE bar)
 } KeyAction;
 
-// Shift is off, on for the next character, or locked until pressed again
 typedef enum {
     SHIFT_OFF,
     SHIFT_ONCE,
     SHIFT_LOCKED,
 } ShiftState;
 
-// One slot of the keyboard. The geometry is the same for every map; `ansi`
-// names the slot, and each map says what it types there.
+#define KEY_NO_COLUMN (-1)
+
+// Description of a key on the keyboard, layout-independent.
+// "ANSI character" is used to identify the key on the keyboard.
 typedef struct {
+    char        ansi;         // ANSI character the key stands for, \0 where it
+                              // stands for none. A special key may still name one
+                              // without typing it: tab, enter and space do.
     KeyAction   action;
-    char        ansi;    // ANSI character this slot stands for, text keys only
-    const char* label;   // drawn instead of a character, special keys only.
-                         // Written in caps: it is drawn as it stands.
-    float       width;   // in key units, 1.0f being a plain key
-    float       left;    // from the row's left edge, filled in by _prepare()
-} KeyboardKey;
+    const char* label;        // drawn instead of a character, special keys only.
+                              // Written in caps: it is drawn as it stands.
+    int         row, col;     // where this key sits
+    int         col_up;       // the column of the key above this one, KEY_NO_COLUMN if no key
+    int         col_down;     // the column of the key below this one, KEY_NO_COLUMN if no key
+    float       width;        // in key units, 1.0f being a regular key
+    float       left;         // in key units, 1.0f being a regular key
+} Key;
 
-// What one map types on one slot: pairs of an unshifted and a shifted
-// character, the first pair primary and the rest offered on a long press.
-// _prepare() splits them out of the table's pair strings, so each is a string
-// of its own and nothing has to be copied out to be drawn or typed.
+// The shape, size and key placement on the keyboard.
+// Rows may have different number of keys in them, keys[row] is a null-terminated array.
 typedef struct {
-    char ansi;
-    int  count;                            // pairs, the primary included
-    const char (*chars)[UTF8_CHAR_SIZE];   // 2 * count, unshifted first
-} KeyMapping;
+    float                    width;   // in key units
+    int                      rows;
+    const Key* const* const* keys;    // keys[row][col]
+} KeyboardGeometry;
+
+typedef struct KeyChars KeyChars;
+
+// Character layout on the keyboard (e.g. LAT/CYR).
+typedef struct {
+    const char*             name;
+    const KeyboardGeometry* geometry;
+    const KeyChars*         chars;      // use char access functions
+} KeyboardLayout;
 
 typedef struct {
-    const char*       name;     // shown on the lang key
-    const KeyMapping* base;     // consulted for slots this map leaves out
-    int               base_count;
-    const KeyMapping* keys;
-    int               count;
-} KeyboardMap;
+    const KeyboardGeometry*      geometry;
+    const KeyboardLayout* const* layouts;
+    int                          layout_count;
+    int                          home_row;   // the row the cursor opens on
+} Keyboard;
 
-// Answers whether a font can draw the UTF-8 character at c. Passed in so this
-// module stays free of the font library.
+// Callback to answer whether UTF-8 character `c` could be displayed (e.g. can check the font).
 typedef bool (*GlyphSupportedFn)(void* context, const char* c);
 
-// Build the maps this font can actually draw: every primary is kept, and the
-// alternates it has no glyph for are dropped. Call this before anything else
-// here - the accessors serve what it builds, and hand out nothing until it has
-// run. Once per process is enough.
+// Initialize keyboard internal data, must be called before any other keyboard methods.
 void KeyboardMap_prepare(GlyphSupportedFn supported, void* context);
 
-// Latin (0) or Cyrillic (1), as the font allows. Wraps out-of-range indices.
-const KeyboardMap* KeyboardMap_get(int index);
+const Keyboard* KeyboardMap_get(void);
 
-// Rows of keys: digits, tab, home, shift, space. The text field is not one of
-// them - it is drawn above the grid, and belongs to whoever lays the screen out.
-int KeyboardMap_rowCount(void);
+// Number of characters a key produces - includes primary character and alternatives.
+// Zero for a key that types nothing.
+int KeyboardMap_charCount(const KeyboardLayout* layout, const Key* key);
 
-// The width every row spans, in key units. Rows hold different numbers of
-// keys and all come out the same width: END stands for what the keys leave
-// over.
-int KeyboardMap_rowWidthUnits(void);
-
-// A row of the keyboard, terminated by a KEY_END key.
-const KeyboardKey* KeyboardMap_row(int row);
-
-// Keys in a row, not counting the terminator.
-int KeyboardMap_rowLength(int row);
-
-// True for keys the cursor cannot land on.
-bool KeyboardMap_isSkipped(const KeyboardKey* key);
-
-// True for keys that type nothing - the modifiers and the space bar.
-bool KeyboardMap_isSpecial(const KeyboardKey* key);
-
-// What this map gives the key, or NULL when the key types nothing.
-const KeyMapping* KeyboardMap_key(const KeyboardMap* map, const KeyboardKey* key);
-
-// Alternates the key offers, the primary included.
-int KeyboardMap_variantCount(const KeyMapping* mapping);
-
-// The nth alternate, shifted or not. An empty string when there is no such one.
-const char* KeyboardMap_variant(const KeyMapping* mapping, int index, bool shifted);
-
-void KeyboardMap_step(int row, int col, int step, int* out_row, int* out_col);
+// The nth character assigned to the key (the sequence of char's UTF-8 bytes).
+// Empty string if not found or not applicable.
+const char* KeyboardMap_char(const KeyboardLayout* layout, const Key* key,
+                             bool shifted, int index);
 
 #endif

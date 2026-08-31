@@ -11,110 +11,221 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KEYBOARD_MAX_INPUT 512
-
 // How long A is held on a character key before its alternates come up.
 #define KEYBOARD_HOLD_MS 250
 
-// No alternate is being picked
-#define VARIANT_NONE (-1)
-
-// Where the cursor sits, and what it types there
+// Where the cursor sits on the keyboard and what it types there
 typedef struct {
-    int row;
-    int col;
+    const char *prompt;
+    char text[KEYBOARD_MAX_INPUT];
+    size_t text_limit; // bytes the text may grow to, terminator aside
+    int text_version; // bumped on every edit, so a redraw sees one
+    int show_setting;
+    const Keyboard *keyboard;
+    const KeyboardGeometry *geometry;
+    int layout_index;
+    const KeyboardLayout *current_layout;
+    int row, col;
+    const Key *current_key; // the key at row and col
     ShiftState shift;
-    int map;
-} KeyboardCursor;
+    bool pressed; // the key under the cursor is held down
+    bool picking_variant; // the alternates of the current key are up
+    int current_variant; // the alternate being picked, while they are
+    const char *current_char; // what that key types now, "" where it types nothing
+} KeyboardState;
+
+// Describe the keyboard as the drawing side needs to see it
+static void prepare_ui_state(const KeyboardState *in, KeyboardUiState *out) {
+    const Keyboard *keyboard = in->keyboard;
+    int next = (in->layout_index + 1) % keyboard->layout_count;
+
+    out->title = in->prompt;
+    out->show_setting = in->show_setting;
+    out->text = in->text;
+
+    out->row = in->row;
+    out->col = in->col;
+    out->layout = in->current_layout;
+    out->lang_label = keyboard->layouts[next]->name;
+    out->shift = in->shift;
+    out->pressed = in->pressed;
+    out->picking_variant = in->picking_variant;
+    // Canonical while the alternates are down, so a stale pick is not a redraw
+    out->current_variant = in->picking_variant ? in->current_variant : 0;
+}
 
 void Keyboard_init(void) {
-    // Probe the font now rather than during the first frame
     UIKeyboard_init();
+}
+
+// Keys in a row, which the NULL at its end marks
+static int row_length(const KeyboardState *state, int row) {
+    const KeyboardGeometry *g = state->geometry;
+    if (row < 0 || row >= g->rows) return 0;
+
+    int length = 0;
+    while (g->keys[row][length]) length++;
+    return length;
+}
+
+// Follow the cursor, the layout, the shift and the alternate being picked
+static void update_current_key(KeyboardState *state) {
+    state->current_key = state->geometry->keys[state->row][state->col];
+
+    const Key *key = state->current_key;
+    if (key->action == KEY_SPACE) {
+        state->current_char = " ";
+        return;
+    }
+    if (key->action != KEY_TEXT) {
+        state->current_char = "";
+        return;
+    }
+
+    int variant = state->picking_variant ? state->current_variant : 0;
+    state->current_char = KeyboardMap_char(state->current_layout, key,
+                                           state->shift != SHIFT_OFF, variant);
+}
+
+// Move on to the next layout, wrapping at the last
+static void next_layout(KeyboardState *state) {
+    state->layout_index = (state->layout_index + 1) % state->keyboard->layout_count;
+    state->current_layout = state->keyboard->layouts[state->layout_index];
+    update_current_key(state);
+}
+
+static void set_shift(KeyboardState *state, ShiftState shift) {
+    state->shift = shift;
+    update_current_key(state);
 }
 
 // A tap on shift turns it on for one character, and turns it off again from
 // anywhere. Caps lock only ever comes off with a tap.
-static ShiftState shift_tapped(ShiftState shift) {
-    return (shift == SHIFT_OFF) ? SHIFT_ONCE : SHIFT_OFF;
+static void tap_shift(KeyboardState *state) {
+    set_shift(state, (state->shift == SHIFT_OFF) ? SHIFT_ONCE : SHIFT_OFF);
 }
 
 // Caps lock is the lock alone: on from anywhere else, off from locked
-static ShiftState caps_tapped(ShiftState shift) {
-    return (shift == SHIFT_LOCKED) ? SHIFT_OFF : SHIFT_LOCKED;
+static void tap_caps(KeyboardState *state) {
+    set_shift(state, (state->shift == SHIFT_LOCKED) ? SHIFT_OFF : SHIFT_LOCKED);
 }
 
-static const KeyboardKey* key_at(const KeyboardCursor* cursor) {
-    return &KeyboardMap_row(cursor->row)[cursor->col];
+// Bring the alternates of the current key up, starting on the first
+static void open_variants(KeyboardState *state) {
+    state->picking_variant = true;
+    state->current_variant = 0;
+    update_current_key(state);
+}
+
+static void close_variants(KeyboardState *state) {
+    state->picking_variant = false;
+    update_current_key(state);
+}
+
+static void set_current_variant(KeyboardState *state, int variant) {
+    state->current_variant = variant;
+    update_current_key(state);
 }
 
 // Move the cursor off a gap, and back inside the row
-static void cursor_rescue(KeyboardCursor* cursor) {
-    if (cursor->row < 0) cursor->row = 0;
-    if (cursor->row > KeyboardMap_rowCount() - 1) cursor->row = KeyboardMap_rowCount() - 1;
+static void cursor_rescue(KeyboardState *state) {
+    const KeyboardGeometry *g = state->geometry;
 
-    int length = KeyboardMap_rowLength(cursor->row);
-    if (cursor->col > length - 1) cursor->col = length - 1;
-    if (cursor->col < 0) cursor->col = 0;
+    if (state->row < 0) state->row = 0;
+    if (state->row > g->rows - 1) state->row = g->rows - 1;
 
-    const KeyboardKey* keys = KeyboardMap_row(cursor->row);
-    while (cursor->col < length && KeyboardMap_isSkipped(&keys[cursor->col])) cursor->col++;
-    while (cursor->col > 0 && KeyboardMap_isSkipped(&keys[cursor->col])) cursor->col--;
+    int length = row_length(state, state->row);
+    if (state->col > length - 1) state->col = length - 1;
+    if (state->col < 0) state->col = 0;
+
+    const Key *const*keys = g->keys[state->row];
+    while (state->col < length - 1 && keys[state->col]->action == KEY_SPACER) state->col++;
+    while (state->col > 0 && keys[state->col]->action == KEY_SPACER) state->col--;
+
+    update_current_key(state);
 }
 
-static void move_vertical(KeyboardCursor* cursor, int step) {
-    KeyboardMap_step(cursor->row, cursor->col, step, &cursor->row, &cursor->col);
-    cursor_rescue(cursor);
+// Up and down follow the column the key leads to; the rows wrap, so the digit
+// row and the space row are neighbours
+static void move_vertical(KeyboardState *state, int step) {
+    // do not wrapping for vertical movement
+    int target_row = state->row + step;
+    if (target_row < 0 || target_row >= state->geometry->rows) {
+        return;
+    }
+
+    int target_col = (step > 0) ? state->current_key->col_down : state->current_key->col_up;
+    if (target_col == KEY_NO_COLUMN) return;
+
+    if (target_col >= row_length(state, target_row)) return;
+
+    state->row = target_row;
+    state->col = target_col;
+    cursor_rescue(state);
 }
 
-static void move_horizontal(KeyboardCursor* cursor, int step) {
-    const KeyboardKey* keys = KeyboardMap_row(cursor->row);
-    int length = KeyboardMap_rowLength(cursor->row);
+static void move_horizontal(KeyboardState *state, int step) {
+    const Key *const*keys = state->geometry->keys[state->row];
+    int length = row_length(state, state->row);
     if (length <= 0) return;
 
     for (int attempt = 0; attempt < length; attempt++) {
-        cursor->col = (cursor->col + step + length) % length;
-        if (!KeyboardMap_isSkipped(&keys[cursor->col])) return;
+        state->col = (state->col + step + length) % length;
+        if (keys[state->col]->action != KEY_SPACER) break;
     }
+
+    update_current_key(state);
 }
 
 // Add a character, or leave the text alone when it no longer fits. Whole
 // characters only, so a multibyte one is never half-written.
-static void append_text(char* text, size_t limit, const char* addition) {
-    size_t length = strlen(text);
+static void append_text(KeyboardState *state, const char *addition) {
+    size_t length = strlen(state->text);
     size_t addition_length = strlen(addition);
-    if (length + addition_length > limit) return;
+    if (addition_length == 0) return;
+    if (length + addition_length > state->text_limit) return;
 
-    memcpy(text + length, addition, addition_length + 1);
+    memcpy(state->text + length, addition, addition_length + 1);
+    state->text_version++;
 }
 
-static void backspace(char* text) {
-    size_t bytes = UTF8_lastCharBytes(text);
+static void backspace(KeyboardState *state) {
+    size_t bytes = UTF8_lastCharBytes(state->text);
     if (bytes == 0) return;
 
-    text[strlen(text) - bytes] = '\0';
+    state->text[strlen(state->text) - bytes] = '\0';
+    state->text_version++;
 }
 
-char* Keyboard_open(const char* prompt, size_t max_bytes) {
-    DisplayContext* display = DisplayHelper_current();
+char *Keyboard_open(const char *prompt, size_t max_bytes) {
+    DisplayContext *display = DisplayHelper_current();
 
     size_t limit = KEYBOARD_MAX_INPUT - 1;
     if (max_bytes > 0 && max_bytes < limit) limit = max_bytes;
 
+    const Keyboard *keyboard = KeyboardMap_get();
+
     // Opens on "a": start of the home row, one step from caps and shift
-    KeyboardCursor cursor = {
-        .row   = KEYBOARD_HOME_ROW,
-        .col   = 1,
+    KeyboardState state = {
+        .prompt = prompt,
+        .text_limit = limit,
+        .keyboard = keyboard,
+        .geometry = keyboard->geometry,
+        .layout_index = 0,
+        .current_layout = keyboard->layouts[0],
+        .row = keyboard->home_row,
+        .col = 1,
         .shift = SHIFT_OFF,
-        .map   = KEYBOARD_MAP_LATIN,
+        .pressed = false,
     };
-    char text[KEYBOARD_MAX_INPUT] = "";
+    update_current_key(&state);
+
     bool confirmed = false;
     bool done = false;
 
     // A character key types on release, so holding it can bring up its
     // alternates instead
     bool holding = false;
-    bool pressed = false;
 
     // Set once a hold has done its work, so the release does not act again
     bool hold_consumed = false;
@@ -130,23 +241,37 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
     // back up: closing the controls help with X is not a shift
     bool swallow_buttons = false;
     uint32_t held_since = 0;
-    int variant = VARIANT_NONE;
 
-    int dirty = 1;
-    int show_setting = 0;
+    // important: Keyboard UI state must be zeroed to make sure padding is zeroed and does not break comparison.
+    KeyboardUiState* ui_state      = UIKeyboard_createState();
+    KeyboardUiState* last_ui_state = UIKeyboard_createState();
+    if (!ui_state || !last_ui_state) {
+        UIKeyboard_freeState(ui_state);
+        UIKeyboard_freeState(last_ui_state);
+        return NULL;
+    }
+    // text version tracking is needed because keyboard UI state equality is shallow
+    int last_text_version = -1;
+
+    // Except a frame the keyboard does not own: an overlay leaves the screen
+    // needing a redraw the state cannot tell us about
+    bool force_render = false;
 
     while (!done) {
         ModuleCommon_frameBegin();
-        SDL_Surface* const screen = DisplayHelper_getSurface(display);
+        SDL_Surface *const screen = DisplayHelper_getSurface(display);
 
-        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting,
+        GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &state.show_setting,
                                                                   HELP_KEYBOARD);
         if (global.should_quit) {
-            // The app is quitting; the caller sees it on its own next frame
-            return NULL;
+            // The app is quitting; the caller sees it on its own next frame.
+            // Nothing was confirmed, so the exit below returns NULL.
+            break;
         }
         if (global.input_consumed) {
-            if (global.dirty) dirty = 1;
+            // The overlay drew over the keyboard, or animated: draw it again
+            // once the state alone would not say so
+            if (global.dirty) force_render = true;
             swallow_buttons = true;
             GFX_sync();
             continue;
@@ -162,17 +287,11 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
             swallow_buttons = false;
         }
 
-        // A key drawn as held has to be redrawn when it comes back up, and a
-        // special key acts on the press, so nothing else marks that frame dirty
-        bool held = PAD_isPressed(BTN_A) && !cancelled;
-        if (held != pressed) {
-            pressed = held;
-            dirty = 1;
-        }
+        state.pressed = PAD_isPressed(BTN_A) && !cancelled;
 
-        const KeyboardKey* key = key_at(&cursor);
-        const KeyMapping* mapping = KeyboardMap_key(KeyboardMap_get(cursor.map), key);
-        int variant_count = KeyboardMap_variantCount(mapping);
+        const KeyboardLayout *layout = state.current_layout;
+        const Key *key = state.current_key;
+        int variant_count = KeyboardMap_charCount(layout, key);
 
         // A held button owns the pad, except while the alternates are up, where
         // left and right pick between them
@@ -180,32 +299,21 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
                            PAD_isPressed(BTN_X) || PAD_isPressed(BTN_Y) ||
                            PAD_isPressed(BTN_SELECT);
 
-        if (variant >= 0) {
-            if (PAD_justRepeated(BTN_LEFT) && variant > 0) {
-                variant--;
-                dirty = 1;
+        if (state.picking_variant) {
+            if (PAD_justRepeated(BTN_LEFT) && state.current_variant > 0) {
+                set_current_variant(&state, state.current_variant - 1);
+            } else if (PAD_justRepeated(BTN_RIGHT) && state.current_variant < variant_count - 1) {
+                set_current_variant(&state, state.current_variant + 1);
             }
-            else if (PAD_justRepeated(BTN_RIGHT) && variant < variant_count - 1) {
-                variant++;
-                dirty = 1;
-            }
-        }
-        else if (!button_held) {
+        } else if (!button_held) {
             if (PAD_justRepeated(BTN_UP)) {
-                move_vertical(&cursor, -1);
-                dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_DOWN)) {
-                move_vertical(&cursor, 1);
-                dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_LEFT)) {
-                move_horizontal(&cursor, -1);
-                dirty = 1;
-            }
-            else if (PAD_justRepeated(BTN_RIGHT)) {
-                move_horizontal(&cursor, 1);
-                dirty = 1;
+                move_vertical(&state, -1);
+            } else if (PAD_justRepeated(BTN_DOWN)) {
+                move_vertical(&state, 1);
+            } else if (PAD_justRepeated(BTN_LEFT)) {
+                move_horizontal(&state, -1);
+            } else if (PAD_justRepeated(BTN_RIGHT)) {
+                move_horizontal(&state, 1);
             }
         }
 
@@ -216,10 +324,8 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
              PAD_justPressed(BTN_LEFT) || PAD_justPressed(BTN_RIGHT))) {
             cancelled = true;
             hold_consumed = true;
-            dirty = 1;
-        }
-        else if (PAD_justRepeated(BTN_A) && !cancelled &&
-                 key->action == KEY_BACKSPACE) {
+        } else if (PAD_justRepeated(BTN_A) && !cancelled &&
+                   key->action == KEY_BACKSPACE) {
             // The one key that works like the B button: it deletes on the way
             // down and keeps deleting while it is held. The press is still a
             // hold as far as the rest of the loop is concerned, so a direction
@@ -230,48 +336,37 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
                 cancelled = false;
                 held_since = SDL_GetTicks();
             }
-            backspace(text);
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_A)) {
+            backspace(&state);
+        } else if (PAD_justPressed(BTN_A)) {
             // Every other key acts on release, so a hold can mean something
             // else - the alternates on a character key, the lock on shift
             holding = true;
             hold_consumed = false;
             cancelled = false;
             held_since = SDL_GetTicks();
-            dirty = 1;
-        }
-        else if (holding && !PAD_isPressed(BTN_A)) {
+        } else if (holding && !PAD_isPressed(BTN_A)) {
             if (hold_consumed) {
                 holding = false;
                 cancelled = false;
-                variant = VARIANT_NONE;
-                dirty = 1;
+                close_variants(&state);
                 GFX_sync();
                 continue;
             }
 
             switch (key->action) {
-                case KEY_TEXT: {
-                    const char* typed = KeyboardMap_variant(
-                        mapping, variant > 0 ? variant : 0, cursor.shift != SHIFT_OFF);
-                    append_text(text, limit, typed);
-                    if (cursor.shift == SHIFT_ONCE) cursor.shift = SHIFT_OFF;
-                    break;
-                }
+                case KEY_TEXT:
                 case KEY_SPACE:
-                    append_text(text, limit, " ");
-                    if (cursor.shift == SHIFT_ONCE) cursor.shift = SHIFT_OFF;
+                    append_text(&state, state.current_char);
+                    if (state.shift == SHIFT_ONCE) set_shift(&state, SHIFT_OFF);
                     break;
                 case KEY_CAPS:
-                    cursor.shift = caps_tapped(cursor.shift);
+                    tap_caps(&state);
                     break;
                 case KEY_SHIFT:
-                    cursor.shift = shift_tapped(cursor.shift);
+                    tap_shift(&state);
                     break;
                 case KEY_LANG:
-                    cursor.map = (cursor.map + 1) % KEYBOARD_MAP_COUNT;
+                    next_layout(&state);
                     break;
                 case KEY_ENTER:
                     confirmed = true;
@@ -280,84 +375,80 @@ char* Keyboard_open(const char* prompt, size_t max_bytes) {
                 case KEY_CANCEL:
                     done = true;
                     break;
-                case KEY_BACKSPACE:   // already deleted on the way down
+                case KEY_SPACER:
                 case KEY_TAB:
-                case KEY_GAP:
-                case KEY_END:
+                    // no-op
+                    break;
+                case KEY_BACKSPACE: // already deleted on the way down
                     break;
             }
 
             holding = false;
-            variant = VARIANT_NONE;
-            dirty = 1;
-        }
-        else if (holding && !hold_consumed && variant < 0 &&
-                 SDL_GetTicks() - held_since >= KEYBOARD_HOLD_MS) {
+            close_variants(&state);
+        } else if (holding && !hold_consumed && !state.picking_variant &&
+                   SDL_GetTicks() - held_since >= KEYBOARD_HOLD_MS) {
             // Once: reopening every frame would put the pick back on the first
             // alternate as fast as Left and Right could move it
             if (key->action == KEY_TEXT) {
                 // Even a key with a single character opens, so the gesture is
                 // the same wherever the cursor is
-                variant = 0;
-                dirty = 1;
+                open_variants(&state);
             }
-        }
-        else if (PAD_justPressed(BTN_B) && text[0] == '\0') {
+        } else if (PAD_justPressed(BTN_B) && state.text[0] == '\0') {
             // B backs out of an empty field, the way it leaves any other screen
             done = true;
-        }
-        else if (PAD_justRepeated(BTN_B)) {
+        } else if (PAD_justRepeated(BTN_B)) {
             // Held down it keeps deleting, and stops at the empty field rather
             // than leaving through it
-            if (text[0] != '\0') {
-                backspace(text);
-                dirty = 1;
+            if (state.text[0] != '\0') {
+                backspace(&state);
             }
-        }
-        else if (PAD_justPressed(BTN_X)) {
+        } else if (PAD_justPressed(BTN_X)) {
             x_held_since = SDL_GetTicks();
             x_consumed = false;
-        }
-        else if (PAD_isPressed(BTN_X) && !x_consumed &&
-                 SDL_GetTicks() - x_held_since >= KEYBOARD_HOLD_MS) {
+        } else if (PAD_isPressed(BTN_X) && !x_consumed &&
+                   SDL_GetTicks() - x_held_since >= KEYBOARD_HOLD_MS) {
             // Held, X is the caps key
-            cursor.shift = caps_tapped(cursor.shift);
+            tap_caps(&state);
             x_consumed = true;
-            dirty = 1;
-        }
-        else if (PAD_justReleased(BTN_X)) {
+        } else if (PAD_justReleased(BTN_X)) {
             if (!x_consumed) {
-                cursor.shift = shift_tapped(cursor.shift);
-                dirty = 1;
+                tap_shift(&state);
             }
             x_consumed = false;
-        }
-        else if (PAD_justPressed(BTN_Y)) {
-            cursor.map = (cursor.map + 1) % KEYBOARD_MAP_COUNT;
-            dirty = 1;
-        }
-        else if (PAD_justPressed(BTN_SELECT)) {
+        } else if (PAD_justPressed(BTN_Y)) {
+            next_layout(&state);
+        } else if (PAD_justPressed(BTN_SELECT)) {
             confirmed = true;
             done = true;
         }
 
         if (done) break;
 
-        if (dirty) {
-            UIKeyboard_render(screen, prompt, text, cursor.map, cursor.shift,
-                              cursor.row, cursor.col, pressed, variant, show_setting);
+        prepare_ui_state(&state, ui_state);
+
+        if (force_render ||
+            state.text_version != last_text_version ||
+            !UIKeyboard_stateEquals(ui_state, last_ui_state)
+        ) {
+            UIKeyboard_render(screen, ui_state);
             GFX_flip(screen);
-            dirty = 0;
-        }
-        else {
+
+            memcpy(last_ui_state, ui_state, sizeof *last_ui_state);
+            last_text_version = state.text_version;
+            force_render = false;
+        } else {
             GFX_sync();
         }
     }
 
-    if (!confirmed || text[0] == '\0') return NULL;
+    UIKeyboard_freeState(ui_state);
+    UIKeyboard_freeState(last_ui_state);
 
-    char* result = malloc(strlen(text) + 1);
+    if (!confirmed || state.text[0] == '\0') return NULL;
+
+    char *result = malloc(strlen(state.text) + 1);
     if (!result) return NULL;
-    strcpy(result, text);
+    strcpy(result, state.text);
     return result;
 }

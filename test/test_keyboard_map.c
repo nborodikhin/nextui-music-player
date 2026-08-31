@@ -3,113 +3,138 @@
 #include "test.h"
 #include "keyboard_map.h"
 
-// A font that draws everything, so the maps come through whole
+// A font that draws everything, so the layouts come through whole
 static bool supports_all(void* context, const char* c) {
     (void)context;
     (void)c;
     return true;
 }
 
-// Every alternate a key claims can be read back, on both maps: a pairs string
-// with an odd character in the table would lose one here rather than in a key
-// that types the wrong letter
-TEST(every_variant_reads_back) {
+static const KeyboardGeometry* geometry(void) {
+    return KeyboardMap_get()->geometry;
+}
+
+// The layouts, in the order the map hands them out
+enum { LATIN, CYRILLIC };
+
+static const KeyboardLayout* layout(int index) {
+    return KeyboardMap_get()->layouts[index];
+}
+
+// Keys in a row, which the NULL at its end marks
+static int row_length(int row) {
+    int length = 0;
+    while (geometry()->keys[row][length]) length++;
+    return length;
+}
+
+// Find a key by the ANSI character its slot stands for
+static const Key* key_at(int row, char ansi) {
+    for (const Key* const* key = geometry()->keys[row]; *key; key++) {
+        if ((*key)->ansi == ansi) return *key;
+    }
+    return NULL;
+}
+
+// Every character a key claims can be read back, on every layout: a pairs
+// string with an odd character in the table would lose one here rather than in
+// a key that types the wrong letter
+TEST(every_char_reads_back) {
     int keys_seen = 0;
 
-    for (int map = 0; map < KEYBOARD_MAP_COUNT; map++) {
-        for (int row = 0; row < KeyboardMap_rowCount(); row++) {
-            int length = KeyboardMap_rowLength(row);
-            for (int col = 0; col < length; col++) {
-                const KeyboardKey* key = &KeyboardMap_row(row)[col];
-                const KeyMapping* mapping = KeyboardMap_key(KeyboardMap_get(map), key);
-                if (!mapping) continue;
-
-                int count = KeyboardMap_variantCount(mapping);
-                CHECK(count > 0);
+    for (int index = 0; index < KeyboardMap_get()->layout_count; index++) {
+        for (int row = 0; row < geometry()->rows; row++) {
+            for (const Key* const* key = geometry()->keys[row]; *key; key++) {
+                int count = KeyboardMap_charCount(layout(index), *key);
+                if (count == 0) continue;
                 keys_seen++;
 
-                for (int index = 0; index < count; index++) {
-                    CHECK(KeyboardMap_variant(mapping, index, false)[0] != '\0');
-                    CHECK(KeyboardMap_variant(mapping, index, true)[0] != '\0');
+                for (int c = 0; c < count; c++) {
+                    CHECK(KeyboardMap_char(layout(index), *key, false, c)[0] != '\0');
+                    CHECK(KeyboardMap_char(layout(index), *key, true, c)[0] != '\0');
                 }
             }
         }
     }
 
-    // Both maps, every row: a walk that found nothing would pass silently
+    // Both layouts, every row: a walk that found nothing would pass silently
     CHECK(keys_seen > 60);
 }
 
-// Find a key by the ANSI character its slot stands for
-static const KeyboardKey* key_at(int row, char ansi) {
-    for (int col = 0; col < KeyboardMap_rowLength(row); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(row)[col];
-        if (key->ansi == ansi) return key;
-    }
-    return NULL;
-}
-
 // A key's primary is its first pair, and the alternates follow it
-TEST(variant_indexing) {
-    const KeyboardKey* a = key_at(2, 'a');
+TEST(char_indexing) {
+    const Key* a = key_at(2, 'a');
     CHECK(a != NULL);
 
-    const KeyMapping* mapping = KeyboardMap_key(KeyboardMap_get(KEYBOARD_MAP_LATIN), a);
-    CHECK(KeyboardMap_variantCount(mapping) > 3);
+    const KeyboardLayout* latin = layout(LATIN);
+    int count = KeyboardMap_charCount(latin, a);
+    CHECK(count > 3);
 
-    CHECK(strcmp(KeyboardMap_variant(mapping, 0, false), "a") == 0);
-    CHECK(strcmp(KeyboardMap_variant(mapping, 0, true), "A") == 0);
-    CHECK(strcmp(KeyboardMap_variant(mapping, 1, false), "\u00e1") == 0);
+    CHECK(strcmp(KeyboardMap_char(latin, a, false, 0), "a") == 0);
+    CHECK(strcmp(KeyboardMap_char(latin, a, true, 0), "A") == 0);
+    CHECK(strcmp(KeyboardMap_char(latin, a, false, 1), "á") == 0);
 
     // Past either end is empty, not the nearest pair over again
-    int count = KeyboardMap_variantCount(mapping);
-    CHECK(KeyboardMap_variant(mapping, count, false)[0] == '\0');
-    CHECK(KeyboardMap_variant(mapping, -1, false)[0] == '\0');
-    CHECK(KeyboardMap_variant(NULL, 0, false)[0] == '\0');
-    CHECK(KeyboardMap_variantCount(NULL) == 0);
+    CHECK(KeyboardMap_char(latin, a, false, count)[0] == '\0');
+    CHECK(KeyboardMap_char(latin, a, false, -1)[0] == '\0');
+    CHECK(KeyboardMap_char(NULL, a, false, 0)[0] == '\0');
+    CHECK(KeyboardMap_char(latin, NULL, false, 0)[0] == '\0');
+    CHECK(KeyboardMap_charCount(latin, NULL) == 0);
+    CHECK(KeyboardMap_charCount(NULL, a) == 0);
 }
 
-// The Cyrillic map leaves digits and most punctuation to the Latin one
-TEST(map_inherits_from_base) {
-    const KeyboardMap* cyrillic = KeyboardMap_get(KEYBOARD_MAP_CYRILLIC);
+// The Cyrillic layout leaves digits and most punctuation to the Latin one
+TEST(layout_inherits_from_base) {
+    const KeyboardLayout* cyrillic = layout(CYRILLIC);
 
-    const KeyboardKey* backtick = key_at(0, '`');
-    const KeyboardKey* letter = key_at(2, 'a');
+    const Key* backtick = key_at(0, '`');
+    const Key* letter = key_at(2, 'a');
     CHECK(backtick != NULL);
     CHECK(letter != NULL);
 
-    CHECK(strcmp(KeyboardMap_variant(KeyboardMap_key(cyrillic, backtick), 0, false),
-                 "`") == 0);
-    CHECK(strcmp(KeyboardMap_variant(KeyboardMap_key(cyrillic, letter), 0, false),
-                 "\u0444") == 0);
+    CHECK(strcmp(KeyboardMap_char(cyrillic, backtick, false, 0), "`") == 0);
+    CHECK(strcmp(KeyboardMap_char(cyrillic, letter, false, 0), "ф") == 0);
 }
 
 // Only the keys that type anything have characters
 TEST(special_keys_type_nothing) {
-    const KeyboardMap* latin = KeyboardMap_get(KEYBOARD_MAP_LATIN);
+    const KeyboardLayout* latin = layout(LATIN);
 
-    for (int col = 0; col < KeyboardMap_rowLength(4); col++) {
-        const KeyboardKey* key = &KeyboardMap_row(4)[col];
-        if (!KeyboardMap_isSpecial(key)) continue;
-        CHECK(KeyboardMap_key(latin, key) == NULL);
+    for (const Key* const* key = geometry()->keys[4]; *key; key++) {
+        if ((*key)->action == KEY_TEXT) continue;
+        CHECK(KeyboardMap_charCount(latin, *key) == 0);
     }
 }
 
 TEST(apostrophe_popup_keeps_the_same_characters) {
-    const KeyboardMap* latin = KeyboardMap_get(KEYBOARD_MAP_LATIN);
-    const KeyboardKey* apostrophe = key_at(2, '\'');
+    const KeyboardLayout* latin = layout(LATIN);
+    const Key* apostrophe = key_at(2, '\'');
     CHECK(apostrophe != NULL);
 
-    const char* lower[] = {"'", "\"", "`", "\u2018", "\u2019", "\u201e",
-                           "\u201c", "\u201d", "\u00ab", "\u00bb", "\u02bb", "\u02bc"};
-    const char* upper[] = {"\"", "'", "`", "\u2018", "\u2019", "\u201e",
-                           "\u201c", "\u201d", "\u00ab", "\u00bb", "\u02bb", "\u02bc"};
-    const KeyMapping* mapping = KeyboardMap_key(latin, apostrophe);
-    CHECK(KeyboardMap_variantCount(mapping) == 12);
+    const char* lower[] = {"'", "\"", "`", "‘", "’", "„",
+                           "“", "”", "«", "»", "ʻ", "ʼ"};
+    const char* upper[] = {"\"", "'", "`", "‘", "’", "„",
+                           "“", "”", "«", "»", "ʻ", "ʼ"};
+    CHECK(KeyboardMap_charCount(latin, apostrophe) == 12);
 
     for (int index = 0; index < 12; index++) {
-        CHECK(strcmp(KeyboardMap_variant(mapping, index, false), lower[index]) == 0);
-        CHECK(strcmp(KeyboardMap_variant(mapping, index, true), upper[index]) == 0);
+        CHECK(strcmp(KeyboardMap_char(latin, apostrophe, false, index), lower[index]) == 0);
+        CHECK(strcmp(KeyboardMap_char(latin, apostrophe, true, index), upper[index]) == 0);
+    }
+}
+
+// Every row spans the geometry's width, so the rows line up however many keys
+// they hold. The last key stops short of it: what is left over is the gap at
+// the end of the row.
+TEST(rows_fit_the_geometry_width) {
+    for (int row = 0; row < geometry()->rows; row++) {
+        float left = 0.0f;
+        for (const Key* const* key = geometry()->keys[row]; *key; key++) {
+            CHECK((*key)->left == left);
+            CHECK((*key)->row == row);
+            left += (*key)->width;
+        }
+        CHECK(left <= geometry()->width);
     }
 }
 
@@ -122,23 +147,36 @@ static bool ascii_only(void* context, const char* c) {
 TEST(prepare_keeps_primaries) {
     KeyboardMap_prepare(ascii_only, NULL);
 
-    const KeyboardKey* a = key_at(2, 'a');
+    const Key* a = key_at(2, 'a');
     CHECK(a != NULL);
 
-    const KeyMapping* latin = KeyboardMap_key(KeyboardMap_get(KEYBOARD_MAP_LATIN), a);
-    const KeyMapping* cyrillic = KeyboardMap_key(KeyboardMap_get(KEYBOARD_MAP_CYRILLIC), a);
+    const KeyboardLayout* latin = layout(LATIN);
+    const KeyboardLayout* cyrillic = layout(CYRILLIC);
 
-    // "a" loses its accents, "\u0444" is a primary and survives as tofu
-    CHECK(KeyboardMap_variantCount(latin) == 1);
-    CHECK(KeyboardMap_variantCount(cyrillic) == 1);
-    CHECK(strcmp(KeyboardMap_variant(cyrillic, 0, false), "\u0444") == 0);
+    // "a" loses its accents, "ф" is a primary and survives as tofu
+    CHECK(KeyboardMap_charCount(latin, a) == 1);
+    CHECK(KeyboardMap_charCount(cyrillic, a) == 1);
+    CHECK(strcmp(KeyboardMap_char(cyrillic, a, false, 0), "ф") == 0);
 }
 
-// Rows: 0 digits, 1 tab, 2 home, 3 shift, 4 space
+// Rows: 0 digits, 1 tab, 2 home, 3 shift, 4 space.
+// Follows a key's col_up/col_down the way keyboard.c does: the rows wrap, and a
+// column the target row does not reach leaves the cursor where it was.
 static void check_step(int row, int col, int step, int want_row, int want_col) {
-    int got_row = -1;
-    int got_col = -1;
-    KeyboardMap_step(row, col, step, &got_row, &got_col);
+    const Key* key = geometry()->keys[row][col];
+    int landing = (step > 0) ? key->col_down : key->col_up;
+
+    int got_row = row;
+    int got_col = col;
+    if (landing != KEY_NO_COLUMN) {
+        int rows = geometry()->rows;
+        int target = (row + step + rows) % rows;
+        if (landing < row_length(target)) {
+            got_row = target;
+            got_col = landing;
+        }
+    }
+
     CHECK(got_row == want_row);
     CHECK(got_col == want_col);
 }
@@ -196,27 +234,50 @@ TEST(step_up) {
     check_step(0, 13, -1, 4, 4);    // backspace -> cancel
 }
 
-// A move that has nowhere to go leaves the cursor where it was
-TEST(step_stays_put_off_grid) {
-    check_step(0, 99, 1, 0, 99);    // a column past the end of any row
-    check_step(-1, 0, 1, -1, 0);    // the text field is not a row here
-    check_step(4, 1, 1, 4, 1);      // the gap beside the space bar
+// A spacer holds a place in its row and nothing else. What a spacer itself
+// leads to is never read - the cursor cannot be on one - but no key may lead
+// *to* one, or a step up or down would land the cursor where it cannot sit.
+TEST(nothing_leads_to_a_spacer) {
+    int rows = geometry()->rows;
+    int spacers = 0;
+
+    for (int row = 0; row < rows; row++) {
+        int above = (row - 1 + rows) % rows;
+        int below = (row + 1) % rows;
+
+        for (const Key* const* key = geometry()->keys[row]; *key; key++) {
+            if ((*key)->action == KEY_SPACER) spacers++;
+
+            int up = (*key)->col_up;
+            if (up != KEY_NO_COLUMN && up < row_length(above)) {
+                CHECK(geometry()->keys[above][up]->action != KEY_SPACER);
+            }
+
+            int down = (*key)->col_down;
+            if (down != KEY_NO_COLUMN && down < row_length(below)) {
+                CHECK(geometry()->keys[below][down]->action != KEY_SPACER);
+            }
+        }
+    }
+
+    CHECK(spacers == 2);
 }
 
 int main(void) {
-    // The maps are what _prepare() builds; nothing can be read before it runs
+    // The keyboard is what _prepare() builds; nothing can be read before it runs
     KeyboardMap_prepare(supports_all, NULL);
 
-    RUN(every_variant_reads_back);
-    RUN(variant_indexing);
-    RUN(map_inherits_from_base);
+    RUN(every_char_reads_back);
+    RUN(char_indexing);
+    RUN(layout_inherits_from_base);
     RUN(special_keys_type_nothing);
     RUN(apostrophe_popup_keeps_the_same_characters);
+    RUN(rows_fit_the_geometry_width);
     RUN(step_down);
     RUN(step_up);
-    RUN(step_stays_put_off_grid);
+    RUN(nothing_leads_to_a_spacer);
 
-    // Rebuilds the maps with a font that has no glyph past ASCII
+    // Rebuilds the layouts with a font that has no glyph past ASCII
     RUN(prepare_keeps_primaries);
     return test_summary();
 }

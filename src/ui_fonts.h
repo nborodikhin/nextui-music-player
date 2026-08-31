@@ -26,6 +26,10 @@ TTF_Font* Fonts_getTiny(void);    // Genre, bitrate
 // The caller owns the font and closes it with TTF_CloseFont().
 TTF_Font* Fonts_open(int pixels);
 
+// Whether this font can draw the UTF-8 character at c. Shaped as a callback:
+// context is the TTF_Font*, and a NULL one answers yes to everything.
+bool Fonts_hasGlyph(void* context, const char* c);
+
 // Theme color helpers for list items (follows system appearance)
 SDL_Color Fonts_getListTextColor(bool selected);
 void Fonts_drawListItemBg(SDL_Surface* screen, SDL_Rect* rect, bool selected);

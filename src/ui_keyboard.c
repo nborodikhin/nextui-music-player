@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "defines.h"
@@ -52,18 +53,6 @@ typedef struct {
     TTF_Font* label_font;     // the small caps on special keys
 } KeyboardMetrics;
 
-// Whether the app font can draw this character, for the map filter
-static bool font_has(void* context, const char* c) {
-    TTF_Font* font = (TTF_Font*)context;
-    if (!font) return true;
-
-    // Every character the maps use is in the BMP, so the 16-bit lookup covers
-    // them; the device's SDL_ttf is too old for the 32-bit one
-    Uint32 code = UTF8_codepoint(c);
-    if (code > 0xFFFF) return false;
-    return TTF_GlyphIsProvided(font, (Uint16)code) != 0;
-}
-
 // The two fonts the keyboard draws with, opened for the key unit the screen
 // gives them and kept until the display is rebuilt. Opening a font per frame
 // would mean a file read and a face built on every repaint.
@@ -72,12 +61,12 @@ static TTF_Font* label_font = NULL;   // aliases key_font when the small size fa
 static int font_unit = 0;             // 0 until a size has been opened for
 
 // One key unit for a screen of this size, the value every metric derives from
-static int key_unit_for(int width, int height) {
+static int key_unit_for(const KeyboardGeometry* g, int width, int height) {
     int band = height - 2 * SCALE1(PADDING + PILL_SIZE);
 
     // The text field is one unit tall like the key rows, plus the gap under it
-    int by_height = (band - SCALE1(INPUT_ROW_GAP)) / (KeyboardMap_rowCount() + 1);
-    int by_width = width / KeyboardMap_rowWidthUnits();
+    int by_height = (band - SCALE1(INPUT_ROW_GAP)) / (g->rows + 1);
+    int by_width = (int)(width / g->width);
 
     return MIN(by_height, by_width);
 }
@@ -113,7 +102,6 @@ static void open_fonts(int unit) {
 }
 
 void UIKeyboard_init(void) {
-    KeyboardMap_prepare(font_has, Fonts_getMedium());
     DisplayHelper_addRecreatedCallback(display_recreated);
 }
 
@@ -122,7 +110,7 @@ void UIKeyboard_quit(void) {
     close_fonts();
 }
 
-static KeyboardMetrics compute_metrics(SDL_Surface* screen) {
+static KeyboardMetrics compute_metrics(const KeyboardGeometry* g, SDL_Surface* screen) {
     KeyboardMetrics m;
     m.key_padding = SCALE1(KEY_PADDING);
 
@@ -136,7 +124,7 @@ static KeyboardMetrics compute_metrics(SDL_Surface* screen) {
     // One unit drives both axes, so a height-limited board shrinks whole. Keys
     // are drawn inset inside their cells rather than spaced apart, so rows stay
     // aligned however many keys they hold.
-    m.key_unit_size = key_unit_for(screen->w, screen->h);
+    m.key_unit_size = key_unit_for(g, screen->w, screen->h);
 
     // Opened on the first frame after a display is built, not per frame
     open_fonts(m.key_unit_size);
@@ -145,8 +133,8 @@ static KeyboardMetrics compute_metrics(SDL_Surface* screen) {
 
     // From the top of the block, past the text field and its gap, to the digits
     m.grid_y_offset = m.key_unit_size + SCALE1(INPUT_ROW_GAP);
-    m.width = KeyboardMap_rowWidthUnits() * m.key_unit_size;
-    m.height = m.grid_y_offset + KeyboardMap_rowCount() * m.key_unit_size;
+    m.width = (int)(g->width * m.key_unit_size);
+    m.height = m.grid_y_offset + g->rows * m.key_unit_size;
     m.left = (screen->w - m.width) / 2;
     m.top = top + (available_h - m.height) / 2;
 
@@ -223,10 +211,10 @@ static SDL_Rect press(SDL_Rect rect) {
 }
 
 // labels are stored as they are drawn, so only a typed character needs `out`.
-static const char* key_label(const KeyboardMap* map, const KeyboardKey* key, bool shifted) {
+static const char* key_label(const KeyboardLayout* layout, const Key* key, bool shifted) {
     if (key->label) return key->label;
 
-    return KeyboardMap_variant(KeyboardMap_key(map, key), 0, shifted);
+    return KeyboardMap_char(layout, key, shifted, 0);
 }
 
 static void draw_label(SDL_Surface* screen, TTF_Font* font, const char* label,
@@ -272,10 +260,9 @@ static void render_input(SDL_Surface* screen, const KeyboardMetrics* m,
 // key sits against the top of the grid. The row carries its own panel, so it
 // reads as sitting above the keyboard rather than among the keys.
 static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
-                            const KeyboardMap* map, const KeyboardKey* key,
+                            const KeyboardLayout* layout, const Key* key,
                             SDL_Rect anchor, bool shifted, int selected_variant) {
-    const KeyMapping* mapping = KeyboardMap_key(map, key);
-    int count = KeyboardMap_variantCount(mapping);
+    int count = KeyboardMap_charCount(layout, key);
     if (count <= 0) return;
 
     // The strip is a keyboard row at the pressed key's scale, pitch included,
@@ -319,40 +306,52 @@ static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
 
         render_rounded_rect_bg(screen, rect.x, rect.y, rect.w, rect.h,
                                theme_color_mapped(screen, color_id_bg));
-        draw_label(screen, m->font, KeyboardMap_variant(mapping, index, shifted),
+        draw_label(screen, m->font, KeyboardMap_char(layout, key, shifted, index),
                    theme_color(color_id_label),
                    rect);
     }
 }
 
-void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
-                       int map_index, ShiftState shift, int selected_row, int selected_col, bool pressed,
-                       int selected_variant, int show_setting) {
-    GFX_clear(screen);
-    render_screen_header(screen, title ? title : "", show_setting);
+KeyboardUiState* UIKeyboard_createState(void) {
+    return calloc(1, sizeof(KeyboardUiState));
+}
 
-    const KeyboardMap* map = KeyboardMap_get(map_index);
-    const KeyboardMap* other = KeyboardMap_get((map_index + 1) % KEYBOARD_MAP_COUNT);
-    bool shifted = (shift != SHIFT_OFF);
-    KeyboardMetrics m = compute_metrics(screen);
+void UIKeyboard_freeState(KeyboardUiState* state) {
+    free(state);
+}
+
+bool UIKeyboard_stateEquals(const KeyboardUiState* a, const KeyboardUiState* b) {
+    // Bytewise, so a field added to the state is covered without a line here
+    return memcmp(a, b, sizeof *a) == 0;
+}
+
+void UIKeyboard_render(SDL_Surface* screen, const KeyboardUiState* state) {
+    const char* text = state->text;
+
+    GFX_clear(screen);
+    render_screen_header(screen, state->title ? state->title : "", state->show_setting);
+
+    const KeyboardLayout* layout = state->layout;
+    bool shifted = (state->shift != SHIFT_OFF);
+    KeyboardMetrics m = compute_metrics(layout->geometry, screen);
 
     SDL_Rect field = input_rect(&m);
     render_input(screen, &m, &field, text);
 
     SDL_Rect cursor_rect = {0, 0, 0, 0};
-    const KeyboardKey* cursor_key = NULL;
+    const Key* cursor_key = NULL;
 
-    for (int row = 0; row < KeyboardMap_rowCount(); row++) {
-        const KeyboardKey* keys = KeyboardMap_row(row);
-        int length = KeyboardMap_rowLength(row);
+    for (int row = 0; layout->geometry->keys[row]; row++) {
+        const Key* const* keys = layout->geometry->keys[row];
 
-        for (int col = 0; col < length; col++) {
-            const KeyboardKey* key = &keys[col];
-            if (key->action == KEY_GAP) continue;
+        for (int col = 0; keys[col]; col++) {
+            const Key* key = keys[col];
+            if (key->action == KEY_SPACER) continue;
 
-            // The lang key names where it takes you, not the current map name
-            const char* label =
-                (key->action != KEY_LANG) ? key_label(map, key, shifted) : other->name;
+            // The lang key names where it takes you, not the current layout
+            const char* label = (key->action != KEY_LANG)
+                                    ? key_label(layout, key, shifted)
+                                    : state->lang_label;
 
             // Both edges are narrowed, not the width, so a key's right edge
             // is exactly the next one's left edge and the row ends on m.width
@@ -367,8 +366,8 @@ void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
             };
 
             SDL_Rect rect = key_rect(&m, key_cell);
-            bool selected = (row == selected_row && col == selected_col);
-            if (selected && pressed) rect = press(rect);
+            bool selected = (row == state->row && col == state->col);
+            if (selected && state->pressed) rect = press(rect);
 
             // Nothing but the press changes a key's color: the shift state
             // shows in the characters the keys carry, and the lock in the LED
@@ -378,7 +377,7 @@ void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
             uint32_t bg = regular_bg;
             if (selected) {
                 bg = selected_bg;
-            } else if (KeyboardMap_isSpecial(key)) {
+            } else if (key->action != KEY_TEXT) {
                 bg = mix_mapped_colors(screen, regular_bg, selected_bg, KEY_BG_SPECIAL_MIX);
             }
             render_rounded_rect_bg(screen, rect.x, rect.y, rect.w, rect.h, bg);
@@ -390,14 +389,14 @@ void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
             if (key->action == KEY_CAPS) {
                 int radius = rect.h * LOCK_LED_HEIGHT_RATIO / 100;
                 int led_inset = radius + SCALE1(LOCK_LED_INSET);
-                uint32_t led = (shift == SHIFT_LOCKED)
+                uint32_t led = (state->shift == SHIFT_LOCKED)
                                    ? SDL_MapRGB(screen->format, 0, 220, 0)
                                    : SDL_MapRGB(screen->format, 0, 0, 0);
                 fill_circle(screen, rect.x + rect.w - led_inset, rect.y + led_inset,
                             radius, led);
             }
 
-            TTF_Font* font = KeyboardMap_isSpecial(key) ? m.label_font : m.font;
+            TTF_Font* font = key->action != KEY_TEXT ? m.label_font : m.font;
 
             int label_color_id = selected ? COLOR_LIST_TEXT_SELECTED : COLOR_LIST_TEXT;
             draw_label(screen, font, label, theme_color(label_color_id), rect);
@@ -409,8 +408,9 @@ void UIKeyboard_render(SDL_Surface* screen, const char* title, const char* text,
         }
     }
 
-    if (selected_variant >= 0 && cursor_key) {
-        render_variants(screen, &m, map, cursor_key, cursor_rect, shifted, selected_variant);
+    if (state->picking_variant && cursor_key) {
+        render_variants(screen, &m, layout, cursor_key, cursor_rect, shifted,
+                        state->current_variant);
     }
 
     // B rubs out what has been typed, and leaves once there is nothing left

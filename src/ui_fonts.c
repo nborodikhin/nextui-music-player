@@ -7,6 +7,7 @@
 #include "api.h"
 #include "config.h"
 #include "ui_fonts.h"
+#include "utf8.h"
 
 // Path to app's bundled font
 #define APP_FONT_PATH "res/font.ttf"
@@ -34,6 +35,17 @@ void Fonts_load(void) {
     app_font.medium = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_MEDIUM));
     app_font.small = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_SMALL));
     app_font.tiny = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_TINY));
+}
+
+bool Fonts_hasGlyph(void* context, const char* c) {
+    TTF_Font* font = (TTF_Font*)context;
+    if (!font) return true;
+
+    // Every character the maps use is in the BMP, so the 16-bit lookup covers
+    // them; the device's SDL_ttf is too old for the 32-bit one
+    Uint32 code = UTF8_codepoint(c);
+    if (code > 0xFFFF) return false;
+    return TTF_GlyphIsProvided(font, (Uint16)code) != 0;
 }
 
 void Fonts_unload(void) {
