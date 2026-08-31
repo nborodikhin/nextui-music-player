@@ -97,11 +97,13 @@ int AddToPlaylist_handleInput(void) {
     else if (PAD_justPressed(BTN_A)) {
         if (selected == 0) {
             // New Playlist
-            char* name = Keyboard_open("Playlist name");
+            char* name = Keyboard_open("Playlist name", MAX_PLAYLIST_NAME - 1);
             if (name && name[0]) {
-                if (M3U_create(name) == 0) {
+                char safe_name[MAX_PLAYLIST_NAME];
+                if (M3U_sanitizeName(name, safe_name, sizeof(safe_name)) &&
+                    M3U_create(name) == 0) {
                     char new_path[512];
-                    snprintf(new_path, sizeof(new_path), "%s/%s.m3u", PLAYLISTS_DIR, name);
+                    snprintf(new_path, sizeof(new_path), "%s/%s.m3u", PLAYLISTS_DIR, safe_name);
                     int added = 0;
                     char dname[256];
                     for (int i = 0; i < file_count; i++) {
@@ -109,7 +111,7 @@ int AddToPlaylist_handleInput(void) {
                         if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
                     }
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, name);
+                    snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, safe_name);
                     Toast_show(msg, TOAST_DURATION);
                 }
                 free(name);

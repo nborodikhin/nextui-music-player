@@ -17,6 +17,8 @@
 
 // UI modules
 #include "ui_fonts.h"
+#include "keyboard_map.h"
+#include "ui_keyboard.h"
 #include "ui_icons.h"
 #include "toast.h"
 
@@ -59,6 +61,10 @@ int main(int argc, char* argv[]) {
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load bundled fonts
     Fonts_load();
+
+    // The keyboard's characters are filtered by what the font can draw, so the
+    // map is built once the fonts are up rather than on the first keyboard
+    KeyboardMap_prepare(Fonts_hasGlyph, Fonts_getMedium());
 
     // Show splash screen immediately while heavy subsystems initialize
     {
@@ -207,6 +213,8 @@ cleanup:
     Player_quit();
     Toast_quit();
     Icons_quit();
+    UIKeyboard_quit();
+    KeyboardMap_quit();
     Fonts_unload();
 
     QuitSettings();

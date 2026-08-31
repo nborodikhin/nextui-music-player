@@ -8,6 +8,7 @@
 #include "defines.h"
 #include "api.h"
 #include "playlist_m3u.h"
+#include "utf8.h"
 #include "player.h"
 
 void M3U_init(void) {
@@ -72,13 +73,43 @@ int M3U_listPlaylists(PlaylistInfo* out, int max) {
     return count;
 }
 
+bool M3U_sanitizeName(const char* name, char* out, size_t out_size) {
+    if (!name || !out || out_size == 0) return false;
+
+    while (*name == ' ') name++;
+
+    // Characters a path cannot hold become '_' before the copy, so the length
+    // the copier works to is the one that lands on disk
+    char cleaned[512];
+    size_t cleaned_length = 0;
+    for (; *name && cleaned_length + 1 < sizeof(cleaned); name++) {
+        unsigned char c = (unsigned char)*name;
+        bool forbidden = (c == '/' || c == '\\' || c < 0x20 || c == 0x7F);
+        cleaned[cleaned_length++] = forbidden ? '_' : (char)c;
+    }
+    cleaned[cleaned_length] = '\0';
+
+    // Whole characters only: a name cut mid-character would name a file nothing
+    // can render
+    size_t length = UTF8_copy(out, out_size, cleaned);
+    while (length > 0 && out[length - 1] == ' ') length--;
+    out[length] = '\0';
+
+    // A name made only of dots would address the directory itself
+    if (length == 0 || strcmp(out, ".") == 0 || strcmp(out, "..") == 0) return false;
+    return true;
+}
+
 int M3U_create(const char* name) {
     if (!name || !name[0]) return -1;
 
     M3U_init();
 
+    char safe_name[MAX_PLAYLIST_NAME];
+    if (!M3U_sanitizeName(name, safe_name, sizeof(safe_name))) return -1;
+
     char path[512];
-    snprintf(path, sizeof(path), "%s/%s.m3u", PLAYLISTS_DIR, name);
+    snprintf(path, sizeof(path), "%s/%s.m3u", PLAYLISTS_DIR, safe_name);
 
     // Don't overwrite existing
     if (access(path, F_OK) == 0) return -1;

@@ -3,7 +3,6 @@ pak.json
 
 # Shared runtime payload
 launch.sh
-bin/keyboard
 res/font.ttf
 res/cacert.pem
 res/icon-*

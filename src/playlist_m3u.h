@@ -2,6 +2,7 @@
 #define __PLAYLIST_M3U_H__
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "playlist.h"  // For PlaylistTrack
 
 #define PLAYLISTS_DIR  SHARED_USERDATA_PATH "/music-player/playlists"
@@ -22,6 +23,11 @@ int M3U_listPlaylists(PlaylistInfo* out, int max);
 
 // Create an empty .m3u file with the given name. Returns 0 on success.
 int M3U_create(const char* name);
+
+// Make a user-typed name safe to build a file name from: path separators and
+// control characters become '_', surrounding spaces go, and the copy is cut on
+// a character boundary. False when nothing usable is left ("", ".", "..").
+bool M3U_sanitizeName(const char* name, char* out, size_t out_size);
 
 // Delete a playlist file. Returns 0 on success.
 int M3U_delete(const char* m3u_path);

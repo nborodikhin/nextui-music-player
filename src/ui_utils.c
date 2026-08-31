@@ -610,8 +610,8 @@ MenuItemPos render_menu_item_pill(SDL_Surface* screen, ListLayout* layout,
 // Works at any size — unlike pill asset which requires PILL_SIZE height.
 void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uint32_t color) {
     int r = SCALE1(7);
-    if (r > h / 2) r = h / 2;
-    if (r > w / 2) r = w / 2;
+    if (r > h / 4) r = h / 4;
+    if (r > w / 4) r = w / 4;
 
     // Main body between corner rows (full width)
     if (h - 2 * r > 0) {

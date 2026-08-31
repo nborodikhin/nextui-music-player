@@ -7,6 +7,7 @@
 #include "api.h"
 #include "config.h"
 #include "ui_fonts.h"
+#include "utf8.h"
 
 // Path to app's bundled font
 #define APP_FONT_PATH "res/font.ttf"
@@ -36,6 +37,17 @@ void Fonts_load(void) {
     app_font.tiny = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_TINY));
 }
 
+bool Fonts_hasGlyph(void* context, const char* c) {
+    TTF_Font* font = (TTF_Font*)context;
+    if (!font) return true;
+
+    // Every character the maps use is in the BMP, so the 16-bit lookup covers
+    // them; the device's SDL_ttf is too old for the 32-bit one
+    Uint32 code = UTF8_codepoint(c);
+    if (code > 0xFFFF) return false;
+    return TTF_GlyphIsProvided(font, (Uint16)code) != 0;
+}
+
 void Fonts_unload(void) {
     if (app_font.xlarge) { TTF_CloseFont(app_font.xlarge); app_font.xlarge = NULL; }
     if (app_font.title) { TTF_CloseFont(app_font.title); app_font.title = NULL; }
@@ -54,6 +66,11 @@ TTF_Font* Fonts_getLarge(void) { return app_font.large; }
 TTF_Font* Fonts_getMedium(void) { return app_font.medium; }
 TTF_Font* Fonts_getSmall(void) { return app_font.small; }
 TTF_Font* Fonts_getTiny(void) { return app_font.tiny; }
+
+TTF_Font* Fonts_open(int pixels) {
+    if (pixels < 1) pixels = 1;
+    return TTF_OpenFont(APP_FONT_PATH, pixels);
+}
 
 // Get text color for list items based on selection state
 SDL_Color Fonts_getListTextColor(bool selected) {

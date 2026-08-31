@@ -151,7 +151,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             }
             else if (PAD_justPressed(BTN_Y)) {
                 // New Playlist
-                char* name = Keyboard_open("Playlist name");
+                char* name = Keyboard_open("Playlist name", MAX_PLAYLIST_NAME - 1);
                 if (name && name[0]) {
                     if (M3U_create(name) == 0) {
                         Toast_show("Playlist created", TOAST_DURATION);
