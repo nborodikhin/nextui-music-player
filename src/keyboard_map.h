@@ -69,8 +69,13 @@ typedef struct {
 // Callback to answer whether UTF-8 character `c` could be displayed (e.g. can check the font).
 typedef bool (*GlyphSupportedFn)(void* context, const char* c);
 
-// Initialize keyboard internal data, must be called before any other keyboard methods.
-void KeyboardMap_prepare(GlyphSupportedFn supported, void* context);
+// Initialize keyboard internal data, must be called before any other keyboard
+// methods. False when the map could not be built; the previous one, if any, is
+// left intact.
+bool KeyboardMap_prepare(GlyphSupportedFn supported, void* context);
+
+// Release what prepare allocated. The map has no layouts until prepared again.
+void KeyboardMap_quit(void);
 
 const Keyboard* KeyboardMap_get(void);
 

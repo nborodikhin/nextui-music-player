@@ -312,14 +312,6 @@ static void render_variants(SDL_Surface* screen, const KeyboardMetrics* m,
     }
 }
 
-KeyboardUiState* UIKeyboard_createState(void) {
-    return calloc(1, sizeof(KeyboardUiState));
-}
-
-void UIKeyboard_freeState(KeyboardUiState* state) {
-    free(state);
-}
-
 bool UIKeyboard_stateEquals(const KeyboardUiState* a, const KeyboardUiState* b) {
     // Bytewise, so a field added to the state is covered without a line here
     return memcmp(a, b, sizeof *a) == 0;

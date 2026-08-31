@@ -145,10 +145,7 @@ static void cursor_rescue(KeyboardState *state) {
     update_current_key(state);
 }
 
-// Up and down follow the column the key leads to; the rows wrap, so the digit
-// row and the space row are neighbours
 static void move_vertical(KeyboardState *state, int step) {
-    // do not wrapping for vertical movement
     int target_row = state->row + step;
     if (target_row < 0 || target_row >= state->geometry->rows) {
         return;
@@ -204,6 +201,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
     if (max_bytes > 0 && max_bytes < limit) limit = max_bytes;
 
     const Keyboard *keyboard = KeyboardMap_get();
+    if (keyboard->layout_count <= 0) return NULL;
 
     // Opens on "a": start of the home row, one step from caps and shift
     KeyboardState state = {
@@ -242,14 +240,13 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
     bool swallow_buttons = false;
     uint32_t held_since = 0;
 
-    // important: Keyboard UI state must be zeroed to make sure padding is zeroed and does not break comparison.
-    KeyboardUiState* ui_state      = UIKeyboard_createState();
-    KeyboardUiState* last_ui_state = UIKeyboard_createState();
-    if (!ui_state || !last_ui_state) {
-        UIKeyboard_freeState(ui_state);
-        UIKeyboard_freeState(last_ui_state);
-        return NULL;
-    }
+    // The states are compared bytewise, so both must start out zeroed, padding
+    // included.
+    KeyboardUiState ui_state;
+    KeyboardUiState last_ui_state;
+    memset(&ui_state, 0, sizeof ui_state);
+    memset(&last_ui_state, 0, sizeof ui_state);
+
     // text version tracking is needed because keyboard UI state equality is shallow
     int last_text_version = -1;
 
@@ -425,25 +422,22 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
 
         if (done) break;
 
-        prepare_ui_state(&state, ui_state);
+        prepare_ui_state(&state, &ui_state);
 
         if (force_render ||
             state.text_version != last_text_version ||
-            !UIKeyboard_stateEquals(ui_state, last_ui_state)
+            !UIKeyboard_stateEquals(&ui_state, &last_ui_state)
         ) {
-            UIKeyboard_render(screen, ui_state);
+            UIKeyboard_render(screen, &ui_state);
             GFX_flip(screen);
 
-            memcpy(last_ui_state, ui_state, sizeof *last_ui_state);
+            memcpy(&last_ui_state, &ui_state, sizeof last_ui_state);
             last_text_version = state.text_version;
             force_render = false;
         } else {
             GFX_sync();
         }
     }
-
-    UIKeyboard_freeState(ui_state);
-    UIKeyboard_freeState(last_ui_state);
 
     if (!confirmed || state.text[0] == '\0') return NULL;
 

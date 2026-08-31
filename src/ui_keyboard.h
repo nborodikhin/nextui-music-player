@@ -30,13 +30,6 @@ typedef struct {
     int                   current_variant;   // the alternate being picked, while they are
 } KeyboardUiState;
 
-// Allocate a state, returns NULL if it could not be allocated.
-// Free it with UIKeyboard_freeState().
-KeyboardUiState* UIKeyboard_createState(void);
-
-// Free the state allocated with UIKeyboard_createState
-void UIKeyboard_freeState(KeyboardUiState* state);
-
 // Compare states for equality, could be used to avoid extra rendering.
 // Note: it is shallow comparison, pointers must remain the same to be considered equal.
 bool UIKeyboard_stateEquals(const KeyboardUiState* a, const KeyboardUiState* b);

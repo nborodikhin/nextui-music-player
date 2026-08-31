@@ -214,6 +214,7 @@ cleanup:
     Toast_quit();
     Icons_quit();
     UIKeyboard_quit();
+    KeyboardMap_quit();
     Fonts_unload();
 
     QuitSettings();

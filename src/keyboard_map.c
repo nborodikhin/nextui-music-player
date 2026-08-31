@@ -422,24 +422,32 @@ static int count_pairs(void) {
     return pairs;
 }
 
-void KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
+bool KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
     place_keys();
 
     keyboard.layouts      = layout_pointers;
     keyboard.layout_count = 0;
 
-    if (!supported) return;
+    if (!supported) return false;
 
     label_backspace(supported, context);
 
     // Sized before anything is split, so the second pass never runs short
     int pairs = count_pairs();
 
+    // The running map stays usable until both pools are in hand
+    char (*pool)[UTF8_CHAR_SIZE] = calloc((size_t)pairs * 2, UTF8_CHAR_SIZE);
+    KeyChar* pool_pairs = calloc((size_t)pairs, sizeof(*char_pairs));
+    if (!pool || !pool_pairs) {
+        free(pool);
+        free(pool_pairs);
+        return false;
+    }
+
     free(char_pool);
     free(char_pairs);
-    char_pool = calloc((size_t)pairs * 2, UTF8_CHAR_SIZE);
-    char_pairs = calloc((size_t)pairs, sizeof(*char_pairs));
-    if (!char_pool || !char_pairs) return;
+    char_pool  = pool;
+    char_pairs = pool_pairs;
 
     int pairs_used = 0;
 
@@ -474,6 +482,16 @@ void KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
     }
 
     keyboard.layout_count = LAYOUT_COUNT;
+    return true;
+}
+
+void KeyboardMap_quit(void) {
+    free(char_pool);
+    free(char_pairs);
+    char_pool  = NULL;
+    char_pairs = NULL;
+
+    keyboard.layout_count = 0;
 }
 
 const Keyboard* KeyboardMap_get(void) {

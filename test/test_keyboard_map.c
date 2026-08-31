@@ -160,7 +160,7 @@ TEST(prepare_keeps_primaries) {
 }
 
 // Rows: 0 digits, 1 tab, 2 home, 3 shift, 4 space.
-// Follows a key's col_up/col_down the way keyboard.c does: the rows wrap, and a
+// Follows a key's col_up/col_down as the map defines them: the rows wrap, and a
 // column the target row does not reach leaves the cursor where it was.
 static void check_step(int row, int col, int step, int want_row, int want_col) {
     const Key* key = geometry()->keys[row][col];
