@@ -1127,15 +1127,25 @@ def run_on_device(device):
     launch_from_nextui(device)
 
 
-def run_desktop():
+def run_desktop(extra_args=None):
     prefix = "/var/tmp/nextui"
     env = os.environ.copy()
+    changed = {}
     for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
         current = env.get(name, "")
         env[name] = prefix + "/lib" + ((":" + current) if current else "")
+        changed[name] = env[name]
     (Path(prefix) / "sdcard/.userdata/shared").mkdir(parents=True, exist_ok=True)
     (Path(prefix) / "sdcard/.userdata/desktop").mkdir(parents=True, exist_ok=True)
-    return run_command([str(ROOT / "bin/desktop/musicplayer.elf")], env=env).returncode
+
+    args = [str(ROOT / "bin/desktop/musicplayer.elf")] + list(extra_args or [])
+    # Print the command so it can be repeated by hand, with the options of the
+    # app and a debugger.
+    assignments = " ".join(
+        "{}={}".format(name, shlex.quote(value)) for name, value in changed.items()
+    )
+    print(assignments + " " + shlex.join(args), flush=True)
+    return run_command(args, env=env).returncode
 
 
 def clean_local():
