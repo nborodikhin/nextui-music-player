@@ -32,6 +32,11 @@
 // Space between two steps, so the pad sees a release before the next press.
 #define STEP_GAP_MS   50
 
+// Limits for the arguments of a command. The delay stays far inside the
+// interval that a wrap-safe comparison of the SDL clock can measure.
+#define MAX_DELAY_MS   600000
+#define MAX_PRESS_N    (MAX_ACTIONS / 2)
+
 #define REPLY_PREFIX  "@"
 
 typedef enum {
@@ -106,6 +111,11 @@ static int      line_len = 0;
 static int      line_no = 0;
 static uint32_t cursor = 0;         // when the next step starts
 
+// True if now is at or after t. Correct across the wrap of SDL_GetTicks().
+static bool time_reached(uint32_t now, uint32_t t) {
+    return (int32_t)(now - t) >= 0;
+}
+
 static void reply(const char* fmt, ...) {
     char buf[512];
     int n = snprintf(buf, sizeof(buf), REPLY_PREFIX);
@@ -142,13 +152,35 @@ static bool split_value(const char* value, char* in, size_t in_size, char* out, 
     return true;
 }
 
-// Give the descriptor of "fd:<n>", or -1 if the text has another form.
-static int parse_fd(const char* spec) {
-    if (strncmp(spec, "fd:", 3) != 0) return -1;
+typedef enum {
+    FD_SPEC_NONE,   // the text is not of the form "fd:<n>"
+    FD_SPEC_OK,
+    FD_SPEC_BAD,    // the text starts with "fd:" and the rest is not a descriptor
+} FdSpec;
+
+// Examine "fd:<n>". A text that starts with "fd:" is never a path, thus a bad
+// descriptor gives FD_SPEC_BAD and not the name of a file.
+static FdSpec parse_fd(const char* spec, int* fd) {
+    if (strncmp(spec, "fd:", 3) != 0) return FD_SPEC_NONE;
+    if (spec[3] == '\0') return FD_SPEC_BAD;
+    errno = 0;
     char* end = NULL;
     long n = strtol(spec + 3, &end, 10);
-    if (!end || *end != '\0' || n < 0 || n > 1024) return -1;
-    return (int)n;
+    if (errno != 0 || !end || *end != '\0' || n < 0 || n > 1024) return FD_SPEC_BAD;
+    *fd = (int)n;
+    return FD_SPEC_OK;
+}
+
+// Read an unsigned number between 1 and max. Returns false for text that is
+// not a number, for a number out of that range, and for an overflow.
+static bool parse_number(const char* text, unsigned long max, unsigned long* out) {
+    if (!text || text[0] == '\0') return false;
+    errno = 0;
+    char* end = NULL;
+    unsigned long n = strtoul(text, &end, 10);
+    if (errno != 0 || !end || *end != '\0' || n < 1 || n > max) return false;
+    *out = n;
+    return true;
 }
 
 static bool open_in(const char* spec) {
@@ -157,8 +189,13 @@ static bool open_in(const char* spec) {
         eof_ends_run = true;
     }
     else {
-        int fd = parse_fd(spec);
-        if (fd >= 0) {
+        int fd = -1;
+        FdSpec kind = parse_fd(spec, &fd);
+        if (kind == FD_SPEC_BAD) {
+            fprintf(stderr, "test-control: bad descriptor '%s'\n", spec);
+            return false;
+        }
+        if (kind == FD_SPEC_OK) {
             struct stat st;
             if (fstat(fd, &st) != 0) {
                 fprintf(stderr, "test-control: descriptor %d is not open\n", fd);
@@ -202,8 +239,13 @@ static bool open_out(const char* spec) {
         return true;
     }
 
-    int fd = parse_fd(spec);
-    if (fd >= 0) {
+    int fd = -1;
+    FdSpec kind = parse_fd(spec, &fd);
+    if (kind == FD_SPEC_BAD) {
+        fprintf(stderr, "test-control: bad descriptor '%s'\n", spec);
+        return false;
+    }
+    if (kind == FD_SPEC_OK) {
         struct stat st;
         if (fstat(fd, &st) != 0) {
             fprintf(stderr, "test-control: descriptor %d is not open\n", fd);
@@ -232,6 +274,10 @@ static bool open_out(const char* spec) {
 
 bool TestControl_init(const char* value) {
     if (!value || value[0] == '\0') return false;
+    if (active) {
+        fprintf(stderr, "test-control: the option is given more than one time\n");
+        return false;
+    }
 
     char in_spec[MAX_PATH_LEN];
     char out_spec[MAX_PATH_LEN];
@@ -266,9 +312,32 @@ static const ButtonName* find_button(const char* name) {
 
 static int current_line = 0;
 
+// The queue keeps its actions in the sequence of their times, because the
+// commands of one line put their actions in at the same time. An action goes
+// after each action with the same time, thus the sequence of one line stays.
 static Action* push_action(ActionType type, uint32_t at) {
-    if (queue_count >= MAX_ACTIONS) return NULL;
-    Action* a = &queue[(queue_head + queue_count) % MAX_ACTIONS];
+    if (queue_count >= MAX_ACTIONS) {
+        // A command that gives its down action and not its up action leaves the
+        // button down. The warning tells a person why the app does not answer
+        // to more input.
+        LOG_warn("test-control: line %d, the action queue of %d is full\n",
+                 current_line, MAX_ACTIONS);
+        return NULL;
+    }
+
+    int at_index = queue_count;
+    for (int i = 0; i < queue_count; i++) {
+        const Action* other = &queue[(queue_head + i) % MAX_ACTIONS];
+        if (!time_reached(at, other->at)) {  // other->at > at
+            at_index = i;
+            break;
+        }
+    }
+    for (int i = queue_count; i > at_index; i--) {
+        queue[(queue_head + i) % MAX_ACTIONS] = queue[(queue_head + i - 1) % MAX_ACTIONS];
+    }
+
+    Action* a = &queue[(queue_head + at_index) % MAX_ACTIONS];
     queue_count++;
     memset(a, 0, sizeof(*a));
     a->type = type;
@@ -278,7 +347,13 @@ static Action* push_action(ActionType type, uint32_t at) {
 }
 
 static void push_step(int line, uint32_t end) {
-    if (steps_count >= MAX_STEPS) return;
+    if (steps_count >= MAX_STEPS) {
+        // The step executes, but its reply is lost. A harness that waits for
+        // that reply gets no answer.
+        LOG_warn("test-control: line %d, the step queue of %d is full, no reply\n",
+                 line, MAX_STEPS);
+        return;
+    }
     steps[(steps_head + steps_count) % MAX_STEPS] = (Step){ .line = line, .end = end };
     steps_count++;
 }
@@ -330,31 +405,38 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
             return base;
         }
 
-        long n = 1;
+        unsigned long n = 1;
         if (arg2) {
-            char* end = NULL;
-            n = strtol(arg2, &end, 10);
-            if (!end || *end != '\0' || n <= 0) {
-                reply("err %d bad count '%s', expected a number or 'keep'", line, arg2);
+            unsigned long max = (strcmp(name, "hold") == 0) ? MAX_DELAY_MS : MAX_PRESS_N;
+            if (!parse_number(arg2, max, &n)) {
+                reply("err %d bad value '%s', expected a number of 1 to %lu%s",
+                      line, arg2, max, (strcmp(name, "press") == 0) ? " or 'keep'" : "");
                 return base;
             }
         }
         if (strcmp(name, "hold") == 0) {
             uint32_t ms = arg2 ? (uint32_t)n : PRESS_HOLD_MS;
+            // Each action gets its button immediately, because a full queue
+            // can leave the down action without its up action.
             Action* down = push_action(ACT_DOWN, base);
+            if (down) { down->btn = b->btn; down->btn_id = b->btn_id; }
             Action* up = push_action(ACT_UP, base + ms);
-            if (!down || !up) { reply("err %d queue is full", line); return base; }
-            down->btn = up->btn = b->btn;
-            down->btn_id = up->btn_id = b->btn_id;
+            if (up) { up->btn = b->btn; up->btn_id = b->btn_id; }
+            if (!down || !up) {
+                reply("err %d queue is full, %s can stay down", line, b->name);
+            }
             return base + ms;
         }
         uint32_t at = base;
-        for (long i = 0; i < n; i++) {
+        for (unsigned long i = 0; i < n; i++) {
             Action* down = push_action(ACT_DOWN, at);
+            if (down) { down->btn = b->btn; down->btn_id = b->btn_id; }
             Action* up = push_action(ACT_UP, at + PRESS_HOLD_MS);
-            if (!down || !up) { reply("err %d queue is full", line); return at; }
-            down->btn = up->btn = b->btn;
-            down->btn_id = up->btn_id = b->btn_id;
+            if (up) { up->btn = b->btn; up->btn_id = b->btn_id; }
+            if (!down || !up) {
+                reply("err %d queue is full, %s can stay down", line, b->name);
+                return at + PRESS_HOLD_MS;
+            }
             at += PRESS_HOLD_MS;
             if (i + 1 < n) at += STEP_GAP_MS;
         }
@@ -362,10 +444,10 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
     }
 
     if (strcmp(name, "wait") == 0) {
-        char* end = NULL;
-        long ms = arg1 ? strtol(arg1, &end, 10) : -1;
-        if (!arg1 || !end || *end != '\0' || ms < 0) {
-            reply("err %d bad delay '%s'", line, arg1 ? arg1 : "");
+        unsigned long ms = 0;
+        if (!parse_number(arg1, MAX_DELAY_MS, &ms)) {
+            reply("err %d bad delay '%s', expected a number of 1 to %d",
+                  line, arg1 ? arg1 : "", MAX_DELAY_MS);
             return base;
         }
         return base + (uint32_t)ms;
@@ -406,7 +488,7 @@ static void schedule_line(char* text) {
     if (*p == '\0') return;
 
     uint32_t now = SDL_GetTicks();
-    uint32_t base = (cursor > now) ? cursor : now;
+    uint32_t base = time_reached(now, cursor) ? now : cursor;
     uint32_t end = base;
 
     while (*p) {
@@ -453,6 +535,13 @@ static void read_input(void) {
     for (;;) {
         ssize_t n = read(in_fd, buf, sizeof(buf));
         if (n == 0) {
+            // The last line of a file can have no newline. Execute it before
+            // the end of the source stops the app.
+            if (line_len > 0) {
+                line_buf[line_len] = '\0';
+                schedule_line(line_buf);
+                line_len = 0;
+            }
             if (eof_ends_run) input_eof = true;
             return;
         }
@@ -504,7 +593,7 @@ static void take_screenshot(const Action* a) {
 static void run_due_actions(uint32_t now) {
     while (queue_count > 0) {
         Action* a = &queue[queue_head];
-        if (a->at > now) break;
+        if (!time_reached(now, a->at)) break;
         switch (a->type) {
             case ACT_DOWN: button_down(a->btn, a->btn_id); break;
             case ACT_UP:   button_up(a->btn); break;
@@ -524,7 +613,7 @@ static void run_due_actions(uint32_t now) {
 static void reply_finished_steps(uint32_t now) {
     while (steps_count > 0) {
         const Step* s = &steps[steps_head];
-        if (s->end > now) break;
+        if (!time_reached(now, s->end)) break;
         reply("ok %d", s->line);
         steps_head = (steps_head + 1) % MAX_STEPS;
         steps_count--;
