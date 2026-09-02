@@ -528,7 +528,7 @@ static void schedule_line(char* text) {
         }
 
         uint32_t cmd_end = schedule_command(name, args, base, line_no);
-        if (cmd_end > end) end = cmd_end;
+        if (!time_reached(end, cmd_end)) end = cmd_end;
     }
 
     push_step(line_no, end);

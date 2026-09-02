@@ -59,14 +59,15 @@ static void print_usage(const char* program) {
         "Usage: %s [options]\n"
         "\n"
         "Options:\n"
-        "  --test-control=<in>[,<out>]  Read button commands from <in> and write the\n"
+        "  --test-control <in>[,<out>]  Read button commands from <in> and write the\n"
         "                               replies to <out>. Each side is 'std' for the\n"
         "                               standard streams, 'fd:<n>' for a descriptor\n"
         "                               that the caller opened, or the path of a file\n"
         "                               or a FIFO. Without <out> the replies go to\n"
         "                               standard output, with '@' before each one.\n"
         "                               One bidirectional descriptor is given twice,\n"
-        "                               as in fd:3,fd:3.\n"
+        "                               as in fd:3,fd:3. The form\n"
+        "                               --test-control=<in> is also accepted.\n"
         "  -h, --help                   Give this text and stop.\n"
         "\n"
         "Commands of the control channel, one step for each line:\n"
@@ -84,15 +85,29 @@ static void print_usage(const char* program) {
 
 int main(int argc, char* argv[]) {
     // Read the options before anything else, so --help gives its text without a
-    // display and a channel that cannot be opened stops the app at once.
+    // display, and an option that is not correct stops the app at once.
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+        const char* arg = argv[i];
+
+        if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
             print_usage(argv[0]);
             return EXIT_SUCCESS;
         }
-        if (strncmp(argv[i], "--test-control=", 15) == 0) {
-            if (!TestControl_init(argv[i] + 15)) return EXIT_FAILURE;
+        if (strncmp(arg, "--test-control=", 15) == 0) {
+            if (!TestControl_init(arg + 15)) return EXIT_FAILURE;
+            continue;
         }
+        if (strcmp(arg, "--test-control") == 0) {
+            if (i + 1 >= argc) {
+                LOG_error("--test-control needs a value\n");
+                return EXIT_FAILURE;
+            }
+            if (!TestControl_init(argv[++i])) return EXIT_FAILURE;
+            continue;
+        }
+
+        LOG_error("unknown option '%s', use --help for the options\n", arg);
+        return EXIT_FAILURE;
     }
 
     SDL_Surface* const screen = GFX_init(MODE_MAIN);
