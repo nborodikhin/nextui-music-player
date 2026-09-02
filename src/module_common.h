@@ -33,6 +33,10 @@ void ModuleCommon_init(void);
 //   help_id - which screen is asking (selects the controls help text)
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id);
 
+// Request the same quit that the confirmation dialog gives. Every module then
+// returns MODULE_EXIT_QUIT and the app stops with its usual cleanup.
+void ModuleCommon_requestQuit(void);
+
 // Disable/enable autosleep (for modules with active playback)
 void ModuleCommon_setAutosleepDisabled(bool disabled);
 

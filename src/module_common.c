@@ -14,6 +14,7 @@
 #include "spectrum.h"
 #include "background.h"
 #include "toast.h"
+#include "test_control.h"
 
 static bool autosleep_disabled = false;
 static uint32_t last_input_time = 0;
@@ -344,9 +345,14 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     overlay_buttons_were_active = overlay_buttons_active;
 }
 
+void ModuleCommon_requestQuit(void) {
+    quit_requested = true;
+}
+
 void ModuleCommon_frameBegin(void) {
     GFX_startFrame();
     PAD_poll();
+    TestControl_tick();
     Toast_tick();
 }
 

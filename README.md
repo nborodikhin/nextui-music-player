@@ -215,6 +215,110 @@ from the installed pak before uploading it (userdata is not cleared).
 Passing a path to a `.zip` pak alongside a device target skips the build and
 installs that archive as a full pak (`--delete` still applies).
 
+### Driving the App from a Script
+
+The app allows programmatic interaction via option `--test-control=<in>[,<out>]`.
+`<in>` is the source of the commands and `<out>` is the destination
+of the replies. Each side is one of these forms.
+
+| Form | Meaning |
+|---|---|
+| `std` | Standard input for `<in>`, standard output for `<out>` |
+| `fd:<n>` | A descriptor that the program which started the app opened |
+| A path | A regular file or a FIFO |
+
+If `<out>` is absent, the replies go to standard output. Each reply starts with
+`@`, to differentiate output from app's own log messages. A program
+with one bidirectional channel, such as a socket pair, may use that descriptor
+for both sides: `--test-control=fd:3,fd:3`.
+
+Each line of the script is one step. The commands of one line start together,
+and the next line starts only after the current line completes. A comma between
+two commands is permitted and has no effect. Spaces are permitted around each
+command and each argument. A `#` starts a comment.
+
+| Command            | Effect                                                   |
+|--------------------|----------------------------------------------------------|
+| `press(BTN)`       | One press and release                                    |
+| `press(BTN, n)`    | `n` presses and releases                                 |
+| `hold(BTN, ms)`    | Press a button and keep it pressed for `ms` milliseconds |
+| `hold(BTN, keep)`  | Press a button and keep it pressed until `release(BTN)`  |
+| `release(BTN)`     | Release a button that `hold(BTN, keep)` put down         |
+| `wait(ms)`         | A delay                                                  |
+| `screenshot(path)` | Take a PNG screenshot and save it into the file          |
+| `quit()`           | Exit the app (also see EOF note below)                   |
+| `keep()`           | End the script, do not exit the app                      |
+
+`BTN` is one of `UP`, `DOWN`, `LEFT`, `RIGHT`, `A`, `B`, `X`, `Y`, `START`,
+`SELECT`, `L1`, `R1`, `L2`, `R2`, `MENU`, `PLUS`, `MINUS`, `POWER`.
+
+The app writes `@ok <line>` when a step completes, `@err <line> <message>` for a
+command that it cannot execute, and `@bye` before it stops. A harness waits for
+the `@ok` of the last line it sent, rather than for an estimated delay.
+
+A regular file, standard input and a descriptor end the run at their end of
+file, after the app completes each step that it received. A FIFO does not end
+the run, thus a script that uses a FIFO must use explicit `quit()`.
+
+`hold(BTN, keep)` puts a button down and leaves it down. The button repeats
+in the same way as a button that a person holds, and it stays down through each
+step that follows, until `release(BTN)`. This is how a script makes an image, or
+presses other buttons, while a button stays down:
+
+```
+hold(L1, keep)
+press(DOWN), press(DOWN)
+screenshot(shots/with-l1-down.png)
+release(L1)
+```
+
+A script that ends with `keep()` leaves the app in operation after the end of
+its source. This leaves the app on the screen that the script made, for
+examination by eye or for input from the hardware. Such a run stops with
+`quit()` or with a signal.
+
+An example that opens the library and makes two images. Start the app from the
+directory that holds `res/`, because the app reads its resources by a relative
+path:
+
+```bash
+cat > case.txt <<'EOF'
+wait(2500)                      # the app starts its interface
+screenshot(shots/01-menu.png)
+press(A)                        # open the row under the cursor
+wait(1200)
+press(A)                        # open Files
+wait(1500)
+hold(DOWN, 500)                 # the automatic repeat moves 3 rows
+wait(400)
+screenshot(shots/02-files.png)
+quit()
+EOF
+
+mkdir -p shots
+./bin/desktop/musicplayer.elf --test-control=case.txt
+```
+
+A FIFO could be used for an interactive app operation, based on the analysis
+of the data received from the program.
+
+```bash
+mkfifo cmds
+./bin/desktop/musicplayer.elf --test-control=cmds,replies.log &
+echo 'screenshot(shots/03.png)' > cmds
+# if screenshot shows an expected state
+echo 'press(DOWN), press(A)' > cmds
+echo 'quit()' > cmds
+```
+
+The image shows what the app draws to its surface. The title that scrolls and
+the time of the track go to a graphics layer of the platform, thus they are not
+in the image.
+
+The same option operates a device build. The app also continues to accept the
+buttons of the hardware during a run.
+
+
 ### Project Structure
 
 ```

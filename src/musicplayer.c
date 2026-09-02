@@ -35,6 +35,7 @@
 #include "resume.h"
 #include "background.h"
 #include "display_helper.h"
+#include "test_control.h"
 
 // Global quit flag
 static bool quit = false;
@@ -51,9 +52,63 @@ static void sigHandler(int sig) {
     }
 }
 
+static void print_usage(const char* program) {
+    printf(
+        "Music Player for NextUI\n"
+        "\n"
+        "Usage: %s [options]\n"
+        "\n"
+        "Options:\n"
+        "  --test-control <in>[,<out>]  Read button commands from <in> and write the\n"
+        "                               replies to <out>. Each side is 'std' for the\n"
+        "                               standard streams, 'fd:<n>' for a descriptor\n"
+        "                               that the caller opened, or the path of a file\n"
+        "                               or a FIFO. Without <out> the replies go to\n"
+        "                               standard output, with '@' before each one.\n"
+        "                               One bidirectional descriptor is given twice,\n"
+        "                               as in fd:3,fd:3. The form\n"
+        "                               --test-control=<in> is also accepted.\n"
+        "  -h, --help                   Give this text and stop.\n"
+        "\n"
+        "Commands of the control channel, one step for each line:\n"
+        "  press(BTN)  press(BTN, n)  hold(BTN, ms)  hold(BTN, keep)  release(BTN)\n"
+        "  wait(ms)  screenshot(path)  keep()  quit()\n"
+        "\n"
+        "BTN is UP, DOWN, LEFT, RIGHT, A, B, X, Y, START, SELECT, L1, R1, L2, R2,\n"
+        "MENU, PLUS, MINUS or POWER.\n"
+        "\n"
+        "The app replies '@ok <line>' after each step, '@err <line> <message>' for a\n"
+        "command that it cannot execute, and '@bye' before it stops. The end of a file\n"
+        "or of a pipe stops the app, if the script did not give keep(). See README.md.\n",
+        program);
+}
+
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    // Read the options before anything else, so --help gives its text without a
+    // display, and an option that is not correct stops the app at once.
+    for (int i = 1; i < argc; i++) {
+        const char* arg = argv[i];
+
+        if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+            print_usage(argv[0]);
+            return EXIT_SUCCESS;
+        }
+        if (strncmp(arg, "--test-control=", 15) == 0) {
+            if (!TestControl_init(arg + 15)) return EXIT_FAILURE;
+            continue;
+        }
+        if (strcmp(arg, "--test-control") == 0) {
+            if (i + 1 >= argc) {
+                LOG_error("--test-control needs a value\n");
+                return EXIT_FAILURE;
+            }
+            if (!TestControl_init(argv[++i])) return EXIT_FAILURE;
+            continue;
+        }
+
+        LOG_error("unknown option '%s', use --help for the options\n", arg);
+        return EXIT_FAILURE;
+    }
 
     SDL_Surface* const screen = GFX_init(MODE_MAIN);
     display = DisplayHelper_init(screen);
@@ -218,6 +273,7 @@ cleanup:
     Fonts_unload();
 
     QuitSettings();
+    TestControl_quit();
     PWR_quit();
     PAD_quit();
     GFX_quit();
