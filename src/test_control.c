@@ -404,9 +404,9 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
             a->btn_id = b->btn_id;
             return base;
         }
-        // press(BTN, keep) puts the button down and does not release it. Its
+        // hold(BTN, keep) puts the button down and does not release it. Its
         // counterpart is release(BTN).
-        if (strcmp(name, "press") == 0 && arg2 && strcmp(arg2, "keep") == 0) {
+        if (strcmp(name, "hold") == 0 && arg2 && strcmp(arg2, "keep") == 0) {
             Action* a = push_action(ACT_DOWN, base);
             if (!a) { reply("err %d queue is full", line); return base; }
             a->btn = b->btn;
@@ -419,7 +419,7 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
             unsigned long max = (strcmp(name, "hold") == 0) ? MAX_DELAY_MS : MAX_PRESS_N;
             if (!parse_number(arg2, max, &n)) {
                 reply("err %d bad value '%s', expected a number of 1 to %lu%s",
-                      line, arg2, max, (strcmp(name, "press") == 0) ? " or 'keep'" : "");
+                      line, arg2, max, (strcmp(name, "hold") == 0) ? " or 'keep'" : "");
                 return base;
             }
         }

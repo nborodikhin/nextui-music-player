@@ -70,7 +70,7 @@ static void print_usage(const char* program) {
         "  -h, --help                   Give this text and stop.\n"
         "\n"
         "Commands of the control channel, one step for each line:\n"
-        "  press(BTN)  press(BTN, n)  press(BTN, keep)  hold(BTN, ms)  release(BTN)\n"
+        "  press(BTN)  press(BTN, n)  hold(BTN, ms)  hold(BTN, keep)  release(BTN)\n"
         "  wait(ms)  screenshot(path)  keep()  quit()\n"
         "\n"
         "BTN is UP, DOWN, LEFT, RIGHT, A, B, X, Y, START, SELECT, L1, R1, L2, R2,\n"

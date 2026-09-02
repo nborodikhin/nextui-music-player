@@ -241,9 +241,9 @@ command and each argument. A `#` starts a comment.
 |--------------------|----------------------------------------------------------|
 | `press(BTN)`       | One press and release                                    |
 | `press(BTN, n)`    | `n` presses and releases                                 |
-| `press(BTN, keep)` | Start a button press, must have a matching `release()`   |
 | `hold(BTN, ms)`    | Press a button and keep it pressed for `ms` milliseconds |
-| `release(BTN)`     | Release button pressed by `press(BTN, keep)`             |
+| `hold(BTN, keep)`  | Press a button and keep it pressed until `release(BTN)`  |
+| `release(BTN)`     | Release a button that `hold(BTN, keep)` put down         |
 | `wait(ms)`         | A delay                                                  |
 | `screenshot(path)` | Take a PNG screenshot and save it into the file          |
 | `quit()`           | Exit the app (also see EOF note below)                   |
@@ -260,13 +260,13 @@ A regular file, standard input and a descriptor end the run at their end of
 file, after the app completes each step that it received. A FIFO does not end
 the run, thus a script that uses a FIFO must use explicit `quit()`.
 
-`press(BTN, keep)` puts a button down and leaves it down. The button repeats
+`hold(BTN, keep)` puts a button down and leaves it down. The button repeats
 in the same way as a button that a person holds, and it stays down through each
 step that follows, until `release(BTN)`. This is how a script makes an image, or
 presses other buttons, while a button stays down:
 
 ```
-press(L1, keep)
+hold(L1, keep)
 press(DOWN), press(DOWN)
 screenshot(shots/with-l1-down.png)
 release(L1)
