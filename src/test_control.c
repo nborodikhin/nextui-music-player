@@ -10,6 +10,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "config.h"
 #include "display_helper.h"
 #include "module_common.h"
 #include "test_control.h"
@@ -118,11 +119,19 @@ static bool time_reached(uint32_t now, uint32_t t) {
 
 static void reply(const char* fmt, ...) {
     char buf[512];
-    int n = snprintf(buf, sizeof(buf), REPLY_PREFIX);
+    int n = snprintf(buf, sizeof(buf), "%s", REPLY_PREFIX);
+    if (n < 0 || n > (int)sizeof(buf) - 2) return;
+
     va_list args;
     va_start(args, fmt);
-    n += vsnprintf(buf + n, sizeof(buf) - (size_t)n - 2, fmt, args);
+    // The size keeps one byte for the newline. A text that is too long fills
+    // the line to that byte, thus the newline replaces the end of the text and
+    // the line holds no zero byte.
+    int written = vsnprintf(buf + n, sizeof(buf) - (size_t)n - 1, fmt, args);
     va_end(args);
+    if (written < 0) return;
+
+    n += written;
     if (n > (int)sizeof(buf) - 2) n = (int)sizeof(buf) - 2;
     buf[n++] = '\n';
 
@@ -579,15 +588,35 @@ static void button_up(int btn) {
     pad.is_pressed &= ~btn;
 }
 
+// The app draws no page background into the surface. The platform gives that
+// color when it puts the surface on the screen, thus a copy of the surface
+// alone is transparent. Put the surface on the background color of the theme.
 static void take_screenshot(const Action* a) {
     SDL_Surface* screen = DisplayHelper_getSurface(DisplayHelper_current());
     if (!screen) {
         reply("err %d no screen to save", a->line);
         return;
     }
-    if (IMG_SavePNG(screen, a->path) != 0) {
+
+    SDL_Surface* image = SDL_CreateRGBSurfaceWithFormat(0, screen->w, screen->h, 32,
+                                                        SDL_PIXELFORMAT_ARGB8888);
+    if (!image) {
+        reply("err %d cannot make the image: %s", a->line, SDL_GetError());
+        return;
+    }
+
+    // The theme keeps its colors packed as red, green, blue, alpha.
+    uint32_t color = CFG_getColor(COLOR_BACKGROUND);
+    SDL_FillRect(image, NULL, SDL_MapRGB(image->format,
+                                         (color >> 24) & 0xff,
+                                         (color >> 16) & 0xff,
+                                         (color >> 8) & 0xff));
+    SDL_BlitSurface(screen, NULL, image, NULL);
+
+    if (IMG_SavePNG(image, a->path) != 0) {
         reply("err %d cannot write %s: %s", a->line, a->path, IMG_GetError());
     }
+    SDL_FreeSurface(image);
 }
 
 static void run_due_actions(uint32_t now) {
