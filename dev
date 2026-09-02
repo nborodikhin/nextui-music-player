@@ -1127,7 +1127,7 @@ def run_on_device(device):
     launch_from_nextui(device)
 
 
-def run_desktop(extra_args=None):
+def run_desktop(extra_args=None, headless=False):
     prefix = "/var/tmp/nextui"
     env = os.environ.copy()
     changed = {}
@@ -1135,6 +1135,11 @@ def run_desktop(extra_args=None):
         current = env.get(name, "")
         env[name] = prefix + "/lib" + ((":" + current) if current else "")
         changed[name] = env[name]
+    if headless:
+        # The offscreen driver of SDL draws with no window, thus the app takes
+        # no focus. The dummy driver stops the app, thus do not use it.
+        env["SDL_VIDEODRIVER"] = "offscreen"
+        changed["SDL_VIDEODRIVER"] = env["SDL_VIDEODRIVER"]
     (Path(prefix) / "sdcard/.userdata/shared").mkdir(parents=True, exist_ok=True)
     (Path(prefix) / "sdcard/.userdata/desktop").mkdir(parents=True, exist_ok=True)
 
@@ -1736,7 +1741,7 @@ def command_install_or_run(args, should_run):
                     failures.append(str(error))
 
     if should_run and "desktop" in platforms:
-        run_desktop()
+        run_desktop(headless=getattr(args, "headless", False))
 
     if failures:
         raise DevError("\n".join(failures))
@@ -1946,7 +1951,7 @@ def create_parser():
         description="build, install, and run",
         usage=(
             "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
-            "[--full] [--delete] [-f]"
+            "[--full] [--delete] [--headless] [-f]"
         ),
     )
     add_install_options(
@@ -1957,6 +1962,11 @@ def create_parser():
             "ADB serial, plus an optional path to a pak zip to install "
             "instead of building"
         ),
+    )
+    run.add_argument(
+        "--headless",
+        action="store_true",
+        help="desktop only: draw to an offscreen display, with no window",
     )
     run.add_argument("-f", "--follow", action="store_true", help="follow the log")
     run.set_defaults(handler=command_run)
