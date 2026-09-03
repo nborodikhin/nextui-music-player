@@ -1698,6 +1698,11 @@ def command_install_or_run(args, should_run):
             raise DevError("install requires at least one target")
     full = args.full or args.delete or archive is not None
 
+    has_desktop = any(platform_for_alias(target) == "desktop" for target in targets)
+    app_args = getattr(args, "app_args", None) or []
+    if app_args and not has_desktop:
+        raise DevError("arguments after '--' go to the desktop app; add the desktop target")
+
     only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
     if archive and only_desktop:
         raise DevError("installing a pak zip requires a device target")
@@ -1741,7 +1746,10 @@ def command_install_or_run(args, should_run):
                     failures.append(str(error))
 
     if should_run and "desktop" in platforms:
-        run_desktop(headless=getattr(args, "headless", False))
+        run_desktop(
+            extra_args=app_args,
+            headless=getattr(args, "headless", False),
+        )
 
     if failures:
         raise DevError("\n".join(failures))
@@ -1951,8 +1959,22 @@ def create_parser():
         description="build, install, and run",
         usage=(
             "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
-            "[--full] [--delete] [--headless] [-f]"
+            "[--full] [--delete] [-f]\n"
+            "       %(prog)s desktop [-h] [--headless] [-- app-argument ...]"
         ),
+        epilog=(
+            "The desktop target takes more options than a device target,\n"
+            "because it starts a local process:\n"
+            "\n"
+            "  --headless            draw to an offscreen display. The app opens no\n"
+            "                        window and takes no focus, thus a scripted run\n"
+            "                        does not interrupt the user.\n"
+            "  -- app-argument ...   give the rest of the line to the app. Example:\n"
+            "                        ./dev run desktop -- --test-control script.txt,std\n"
+            "\n"
+            "./bin/desktop/musicplayer.elf --help gives the options of the app."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_install_options(
         run,
@@ -2150,6 +2172,20 @@ def create_parser():
     return parser
 
 
+def split_app_args(argv):
+    """Take the arguments for the desktop app that follow a "--" of a run command.
+
+    Gives the arguments for dev and the arguments for the app. Only the run
+    command has this form, because only the desktop target starts a local
+    process that can accept them.
+    """
+    argv = list(argv)
+    if argv[:1] != ["run"] or "--" not in argv:
+        return argv, []
+    separator = argv.index("--")
+    return argv[:separator], argv[separator + 1:]
+
+
 def normalize_container_options(argv):
     argv = list(argv)
     if argv[:1] != ["docker"]:
@@ -2170,7 +2206,9 @@ def normalize_container_options(argv):
 
 def main():
     parser = create_parser()
-    args = parser.parse_args(normalize_container_options(sys.argv[1:]))
+    argv, app_args = split_app_args(normalize_container_options(sys.argv[1:]))
+    args = parser.parse_args(argv)
+    args.app_args = app_args
     if args.command is None:
         parser.print_help()
         return 0
