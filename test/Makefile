@@ -6,6 +6,11 @@
 # qualifies for a test here if its translation unit has no platform includes -
 # that constraint is what keeps this harness stub-free and sub-second.
 #
+# ui_theme_utils.c is the one exception: it includes SDL for the SDL_Color type
+# only, and calls no SDL function, thus the test needs the SDL headers but no
+# SDL library. A color type of its own would need no header, but two color
+# structs in one codebase cost a reader more than one include costs the build.
+#
 # list_nav.c is the model: pure integer cursor logic, with the pad read split
 # out into list_nav_pad.c so api.h never reaches the tested TU. Its declaration
 # remains in list_nav.h because ListNavInput is part of that public API. toast_state.c
@@ -21,13 +26,14 @@
 
 CC      ?= cc
 CFLAGS  ?= -std=gnu99 -O0 -g -Wall -Wextra
-INC      = -I../src
+INC      = -I../src $(shell pkg-config --cflags sdl2)
 
 SRC      = ../src
 BIN      = bin
 
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
-           $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_utf8
+           $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
+           $(BIN)/test_utf8
 
 .PHONY: all run clean
 all: run
@@ -46,6 +52,9 @@ $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_st
 
 $(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c
+
+$(BIN)/test_ui_theme: test_ui_theme.c $(SRC)/ui_theme_utils.c $(SRC)/ui_theme.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_ui_theme.c $(SRC)/ui_theme_utils.c -lm
 
 $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
