@@ -39,7 +39,7 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
 all: run
 
 check:
-	./check_color_calls.sh
+	./check_color_calls.py
 
 $(BIN):
 	mkdir -p $(BIN)

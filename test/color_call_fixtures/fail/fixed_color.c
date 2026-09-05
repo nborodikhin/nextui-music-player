@@ -1,1 +1,0 @@
-draw(COLOR_WHITE);
