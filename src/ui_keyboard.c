@@ -29,10 +29,8 @@
 #define LOCK_LED_HEIGHT_RATIO 15
 #define LOCK_LED_INSET 3
 
-// The two states of the lock LED, packed as 0xRRGGBBAA, which is the form that
-// CFG_getColor() gives and uintToColour() reads. Fixed on purpose, against the
-// rule that a color comes from the theme: an LED reads as on or as off only
-// when its two states never move.
+// The two states of the caps lock LED, packed as 0xRRGGBBAA.
+// Since LED emulates a physical LED, it is fixed and not a obtained from the theme.
 #define LOCK_LED_ON 0x00DC00FF
 #define LOCK_LED_OFF 0x000000FF
 
