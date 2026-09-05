@@ -1,4 +1,5 @@
 #include "spectrum.h"
+#include "ui_theme.h"
 #include "player.h"
 #include "defines.h"
 #include "api.h"
@@ -21,6 +22,12 @@ static kiss_fft_scalar fft_input[SPECTRUM_FFT_SIZE];
 static kiss_fft_cpx fft_output[SPECTRUM_FFT_SIZE / 2 + 1];
 static float hann_window[SPECTRUM_FFT_SIZE];
 static float prev_bars[SPECTRUM_BARS];
+typedef struct {
+    float bars[SPECTRUM_BARS];
+    float peaks[SPECTRUM_BARS];
+    bool valid;
+} SpectrumData;
+
 static SpectrumData spectrum_data;
 static int16_t sample_buffer[SPECTRUM_FFT_SIZE * 2];
 
@@ -32,13 +39,6 @@ static bool position_set = false;
 
 static SpectrumStyle current_style = SPECTRUM_STYLE_VERTICAL;
 static bool spectrum_visible = true;
-
-static const char* style_names[] = {
-    "Vertical",
-    "White",
-    "Rainbow",
-    "Magnitude"
-};
 
 // Save spectrum settings to file
 static void save_settings(void) {
@@ -82,6 +82,26 @@ static void hsv_to_rgb(float h, float s, float v, uint8_t* r, uint8_t* g, uint8_
     *b = (uint8_t)((bf + m) * 255);
 }
 
+// The distance between the strongest and the weakest channel of a color.
+// A gray has a chroma of 0.
+static int chroma(SDL_Color color) {
+    uint8_t high = color.r > color.g ? color.r : color.g;
+    if (color.b > high) high = color.b;
+    uint8_t low = color.r < color.g ? color.r : color.g;
+    if (color.b < low) low = color.b;
+    return high - low;
+}
+
+// The top color of the gradient: the color of the theme that has the most hue.
+// Most themes keep the two accents as two shades of the background, thus a
+// gradient between them is flat. Their hue is in COLOR_MAIN. The default theme
+// is the other way round, because its COLOR_MAIN is white.
+static SDL_Color gradient_top(void) {
+    SDL_Color accent = uintToColour(CFG_getColor(COLOR_ACCENT));
+    SDL_Color main_color = uintToColour(CFG_getColor(COLOR_MAIN));
+    return chroma(accent) > chroma(main_color) ? accent : main_color;
+}
+
 // Get color for a bar based on current style
 static void get_bar_color(int bar_index, float magnitude, uint8_t* r, uint8_t* g, uint8_t* b) {
     float t;
@@ -107,13 +127,27 @@ static void get_bar_color(int bar_index, float magnitude, uint8_t* r, uint8_t* g
             }
             break;
 
-        case SPECTRUM_STYLE_VERTICAL:
-        case SPECTRUM_STYLE_WHITE:
-        default:
-            *r = 255;
-            *g = 255;
-            *b = 255;
+        case SPECTRUM_STYLE_VERTICAL: {
+            // The top of the gradient. A bar that reached this level had that
+            // color at its top, thus the peak mark that falls from it keeps it.
+            SDL_Color peak = gradient_top();
+            *r = peak.r;
+            *g = peak.g;
+            *b = peak.b;
             break;
+        }
+
+        case SPECTRUM_STYLE_SOLID:
+        default: {
+            // The color that the theme gives to a title on the page. The role
+            // layer holds it legible on the background of every theme, thus a
+            // light theme gets a dark bar and not a white one.
+            SDL_Color solid = Theme_getColor(THEME_ROLE_PRIMARY, false);
+            *r = solid.r;
+            *g = solid.g;
+            *b = solid.b;
+            break;
+        }
     }
 }
 
@@ -242,10 +276,6 @@ void Spectrum_update(void) {
     spectrum_data.valid = true;
 }
 
-const SpectrumData* Spectrum_getData(void) {
-    return &spectrum_data;
-}
-
 void Spectrum_setPosition(int x, int y, int w, int h) {
     spec_x = x;
     spec_y = y;
@@ -256,16 +286,6 @@ void Spectrum_setPosition(int x, int y, int w, int h) {
 
 bool Spectrum_needsRefresh(void) {
     return position_set && spectrum_visible && (Player_getState() == PLAYER_STATE_PLAYING);
-}
-
-void Spectrum_cycleStyle(void) {
-    current_style = (current_style + 1) % SPECTRUM_STYLE_COUNT;
-    save_settings();  // Persist preference
-}
-
-void Spectrum_toggleVisibility(void) {
-    spectrum_visible = !spectrum_visible;
-    save_settings();  // Persist preference
 }
 
 void Spectrum_cycleNext(void) {
@@ -285,42 +305,24 @@ void Spectrum_cycleNext(void) {
     save_settings();
 }
 
-bool Spectrum_isVisible(void) {
-    return spectrum_visible;
-}
-
-SpectrumStyle Spectrum_getStyle(void) {
-    return current_style;
-}
-
-const char* Spectrum_getStyleName(void) {
-    return style_names[current_style];
-}
-
 // Draw a vertical gradient bar (for SPECTRUM_STYLE_VERTICAL)
-// Uses system theme colors: primary accent (top) to secondary accent (bottom)
 static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y, int w, int h, int bar_index) {
     if (h <= 0 || w <= 0) return;
 
-    uint32_t color1 = CFG_getColor(COLOR_ACCENT);  // Primary accent (top)
-    uint32_t color2 = CFG_getColor(COLOR_ACCENT2);  // Secondary accent (bottom)
-
-    uint8_t top_r = (color1 >> 16) & 0xFF;
-    uint8_t top_g = (color1 >> 8) & 0xFF;
-    uint8_t top_b = color1 & 0xFF;
-
-    uint8_t bot_r = (color2 >> 16) & 0xFF;
-    uint8_t bot_g = (color2 >> 8) & 0xFF;
-    uint8_t bot_b = color2 & 0xFF;
+    // uintToColour() reads the packed form that CFG_getColor() gives. Do not
+    // take the channels by hand: the platform added an alpha byte to that form
+    // and every shift moved by eight bits.
+    SDL_Color top = gradient_top();
+    SDL_Color bottom = uintToColour(CFG_getColor(COLOR_ACCENT2));
 
     for (int row = 0; row < h; row++) {
         // t goes from 0.0 (top) to 1.0 (bottom)
         float t = (h > 1) ? (float)row / (float)(h - 1) : 0.0f;
 
         // Interpolate between top color and bottom color
-        uint8_t r = (uint8_t)(top_r + t * (bot_r - top_r));
-        uint8_t g = (uint8_t)(top_g + t * (bot_g - top_g));
-        uint8_t b = (uint8_t)(top_b + t * (bot_b - top_b));
+        uint8_t r = (uint8_t)(top.r + t * (bottom.r - top.r));
+        uint8_t g = (uint8_t)(top.g + t * (bottom.g - top.g));
+        uint8_t b = (uint8_t)(top.b + t * (bottom.b - top.b));
 
         // Use SDL_MapRGBA for correct pixel format
         uint32_t color = SDL_MapRGBA(surface->format, r, g, b, 255);
