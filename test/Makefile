@@ -35,8 +35,11 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8
 
-.PHONY: all run clean
+.PHONY: all check run clean
 all: run
+
+check:
+	./check_color_calls.sh
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -62,7 +65,7 @@ $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
-run: $(TESTS)
+run: check $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \
 	 if [ $$fail -ne 0 ]; then echo "TESTS FAILED"; exit 1; else echo "ALL TESTS PASSED"; fi
 

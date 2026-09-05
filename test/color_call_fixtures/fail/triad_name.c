@@ -1,0 +1,1 @@
+SDL_MapRGB(format, TRIAD_WHITE);

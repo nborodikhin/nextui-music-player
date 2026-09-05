@@ -1,0 +1,1 @@
+draw(RGB_BLACK);

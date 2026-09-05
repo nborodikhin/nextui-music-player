@@ -1,0 +1,1 @@
+draw(COLOR_WHITE);
