@@ -305,8 +305,20 @@ void Spectrum_cycleNext(void) {
     save_settings();
 }
 
-// Draw a vertical gradient bar (for SPECTRUM_STYLE_VERTICAL)
-static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y, int w, int h, int bar_index) {
+static void interpolate_gradient(SDL_Color top, SDL_Color bottom, float t,
+        uint8_t* r, uint8_t* g, uint8_t* b) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    *r = (uint8_t)(top.r + t * (bottom.r - top.r));
+    *g = (uint8_t)(top.g + t * (bottom.g - top.g));
+    *b = (uint8_t)(top.b + t * (bottom.b - top.b));
+}
+
+// Draw a vertical gradient bar (for SPECTRUM_STYLE_VERTICAL).
+// The gradient is fixed to the spectrum height so equal heights have equal
+// colors across every bar.
+static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y,
+        int w, int h, int gradient_y, int gradient_height) {
     if (h <= 0 || w <= 0) return;
 
     // uintToColour() reads the packed form that CFG_getColor() gives. Do not
@@ -316,13 +328,9 @@ static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y, int w
     SDL_Color bottom = uintToColour(CFG_getColor(COLOR_ACCENT2));
 
     for (int row = 0; row < h; row++) {
-        // t goes from 0.0 (top) to 1.0 (bottom)
-        float t = (h > 1) ? (float)row / (float)(h - 1) : 0.0f;
-
-        // Interpolate between top color and bottom color
-        uint8_t r = (uint8_t)(top.r + t * (bottom.r - top.r));
-        uint8_t g = (uint8_t)(top.g + t * (bottom.g - top.g));
-        uint8_t b = (uint8_t)(top.b + t * (bottom.b - top.b));
+        float t = (float)(y + row - gradient_y) / (float)(gradient_height - 1);
+        uint8_t r, g, b;
+        interpolate_gradient(top, bottom, t, &r, &g, &b);
 
         // Use SDL_MapRGBA for correct pixel format
         uint32_t color = SDL_MapRGBA(surface->format, r, g, b, 255);
@@ -348,6 +356,9 @@ void Spectrum_paint(int layer) {
     int bar_gap = 1;
     int bar_draw_w = (int)bar_width_f - bar_gap;
     if (bar_draw_w < 1) bar_draw_w = 1;
+    int gradient_height = (int)(spec_h * 0.9f);
+    if (gradient_height < 2) gradient_height = 2;
+    int gradient_y = spec_h - gradient_height;
 
     for (int i = 0; i < total_bars; i++) {
         float magnitude = spectrum_data.bars[i];
@@ -359,7 +370,8 @@ void Spectrum_paint(int layer) {
 
         if (current_style == SPECTRUM_STYLE_VERTICAL) {
             // Vertical gradient - draw pixel by pixel
-            draw_vertical_gradient_bar(surface, bar_x_pos, bar_y_pos, bar_draw_w, bar_h, i);
+            draw_vertical_gradient_bar(surface, bar_x_pos, bar_y_pos,
+                bar_draw_w, bar_h, gradient_y, gradient_height);
         } else {
             // Solid color styles
             uint8_t r, g, b;
@@ -374,7 +386,14 @@ void Spectrum_paint(int layer) {
         if (spectrum_data.peaks[i] > magnitude + 0.02f) {
             int peak_y = spec_h - (int)(spectrum_data.peaks[i] * spec_h * 0.9f);
             uint8_t r, g, b;
-            get_bar_color(i, spectrum_data.peaks[i], &r, &g, &b);
+            if (current_style == SPECTRUM_STYLE_VERTICAL) {
+                SDL_Color top = gradient_top();
+                SDL_Color bottom = uintToColour(CFG_getColor(COLOR_ACCENT2));
+                float t = (float)(peak_y - gradient_y) / (float)(gradient_height - 1);
+                interpolate_gradient(top, bottom, t, &r, &g, &b);
+            } else {
+                get_bar_color(i, spectrum_data.peaks[i], &r, &g, &b);
+            }
             uint32_t peak_color = SDL_MapRGBA(surface->format, r, g, b, 255);
             SDL_Rect peak_rect = {bar_x_pos, peak_y, bar_draw_w, 2};
             SDL_FillRect(surface, &peak_rect, peak_color);
