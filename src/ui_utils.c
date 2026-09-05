@@ -2,6 +2,11 @@
 #include <string.h>
 #include <math.h>
 #include "ui_utils.h"
+
+// The form of a chip: the space around its label, and its height with no label.
+#define CHIP_PADDING_X 5
+#define CHIP_PADDING_Y 2
+#define CHIP_MIN_HEIGHT 16
 #include "ui_fonts.h"
 #include "ui_icons.h"
 #include "module_common.h"
@@ -37,7 +42,8 @@ const char* get_format_name(AudioFormat format) {
 #define SCROLL_START_DELAY 1000
 
 // Reset scroll state for new text
-void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, int max_width, bool use_gpu) {
+void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
+                      int max_width, ThemeRole role, bool selected, bool use_gpu) {
     // Clear the scroll layer when text changes to avoid ghost text
     GFX_clearLayers(LAYER_SCROLLTEXT);
 
@@ -52,6 +58,8 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, 
     int text_h = 0;
     TTF_SizeUTF8(font, state->text, &state->text_width, &text_h);
     state->max_width = max_width;
+    state->role = role;
+    state->selected = selected;
     state->start_time = SDL_GetTicks();
     state->scroll_offset = 0;
     state->use_gpu_scroll = use_gpu;
@@ -76,8 +84,8 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, 
             SDL_FillRect(state->cached_scroll_surface, NULL, 0);
 
             // Render text twice for seamless looping
-            SDL_Color white = {255, 255, 255, 255};  // Will be overwritten by actual color
-            SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font, state->text, white);
+            SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font, state->text,
+                                                            Theme_getColor(role, state->selected));
             if (text_surf) {
                 // Important: TTF rendering produces "transparent white" pixels which are not handled well by
                 // LAYER_SCROLLTEXT which expects premultiplied pixels.
@@ -219,12 +227,15 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
 // Unified update: checks for text change, resets if needed, and renders
 // use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
-                       int max_width, SDL_Color color, SDL_Surface* screen, int x, int y, bool use_gpu) {
-    // Check if text changed - use existing state->text for comparison
-    if (strcmp(state->text, text) != 0) {
-        ScrollText_reset(state, text, font, max_width, use_gpu);
+                       int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
+                       int x, int y, bool use_gpu) {
+    // Rebuild the cache when its text, its role or the state of its row changes.
+    // ScrollText_reset() bakes the color into the cached surface.
+    if (strcmp(state->text, text) != 0 || state->role != role
+        || state->selected != selected) {
+        ScrollText_reset(state, text, font, max_width, role, selected, use_gpu);
     }
-    ScrollText_render(state, font, color, screen, x, y);
+    ScrollText_render(state, font, Theme_getColor(role, selected), screen, x, y);
 }
 
 // GPU scroll without background (for player title)
@@ -267,10 +278,11 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     int hw = screen->w;
     char truncated[256];
 
-    int title_width = GFX_truncateText(Fonts_getMedium(), title, truncated, hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-    GFX_blitPill(ASSET_BLACK_PILL, screen, &(SDL_Rect){SCALE1(PADDING), SCALE1(PADDING), title_width, SCALE1(PILL_SIZE)});
+    GFX_truncateText(Fonts_getMedium(), title, truncated,
+                     hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), truncated, COLOR_GRAY);
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (title_text) {
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
         SDL_FreeSurface(title_text);
@@ -343,7 +355,7 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
                            const char* text, TTF_Font* font_param,
                            int text_x, int text_y, int max_text_width,
                            bool selected) {
-    SDL_Color text_color = Fonts_getListTextColor(selected);
+    SDL_Color text_color = Theme_getColor(THEME_ROLE_PRIMARY, selected);
 
     // Set clip rect to prevent any text overflow beyond pill boundary
     // Intersect with existing clip to stay within viewport bounds
@@ -366,7 +378,7 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
     if (selected && scroll_state) {
         // Selected item: use scrolling text (GPU mode with pill bg)
         ScrollText_update(scroll_state, text, font_param, max_text_width,
-                          text_color, screen, text_x, text_y, true);
+                          THEME_ROLE_PRIMARY, true, screen, text_x, text_y, true);
     } else {
         // Non-selected items: static rendering with clipping
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font_param, text, text_color);
@@ -385,17 +397,94 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
 }
 
 // Render a list item's pill background and calculate text position
-ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
-                                   const char* text, char* truncated,
-                                   int y, bool selected, int prefix_width) {
+// A chip: a short label in a rectangular outline with no fill. The player
+// screens use one to name the source of what plays. Gives the rectangle that it
+// drew, thus a caller can place what follows beside it.
+SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y) {
+    SDL_Surface* label = TTF_RenderUTF8_Blended(
+        Fonts_getTiny(), text, Theme_getColor(THEME_ROLE_SECONDARY, false));
+    SDL_Rect box = {x, y, 0, label ? label->h + SCALE1(CHIP_PADDING_Y * 2) : SCALE1(CHIP_MIN_HEIGHT)};
+    if (!label) return box;
+
+    box.w = label->w + SCALE1(CHIP_PADDING_X * 2);
+    uint32_t outline = Theme_getPackedColor(THEME_ROLE_SECONDARY, false);
+    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y, box.w, 1}, outline);
+    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y + box.h - 1, box.w, 1}, outline);
+    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y, 1, box.h}, outline);
+    SDL_FillRect(screen, &(SDL_Rect){box.x + box.w - 1, box.y, 1, box.h}, outline);
+    SDL_BlitSurface(label, NULL, screen,
+                    &(SDL_Rect){box.x + SCALE1(CHIP_PADDING_X), box.y + SCALE1(CHIP_PADDING_Y)});
+    SDL_FreeSurface(label);
+    return box;
+}
+
+// The band behind a whole row, for a row that carries a label at its right edge.
+void draw_list_item_band(SDL_Surface* screen, SDL_Rect* rect) {
+    // The fill argument marks a pill with no separate center color.
+    //noinspection HardcodedColor
+    GFX_blitPillColor(ASSET_WHITE_PILL, screen, rect,
+                      Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false), RGB_WHITE);
+}
+
+void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected) {
+    if (selected) {
+        // The fill argument marks a pill with no separate center color.
+        //noinspection HardcodedColor
+        GFX_blitPillColor(ASSET_WHITE_PILL, screen, rect,
+                          Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true), RGB_WHITE);
+    }
+}
+
+// Get the width of a list row, and the text that fits inside it. The text goes
+// to "truncated". "prefix_width" is the space that something before the text
+// takes, such as an icon or an indicator; give 0 where there is none. A row
+// whose text does not fit takes the whole of max_width.
+static int calc_list_item_width(TTF_Font* font, const char* text, char* truncated,
+                                int max_width, int prefix_width) {
+    int available_width = max_width - prefix_width;
+    int padding = SCALE1(BUTTON_PADDING * 2);
+
+    // Check if text fits without truncation
+    int raw_text_w, raw_text_h;
+    TTF_SizeUTF8(font, text, &raw_text_w, &raw_text_h);
+
+    if (raw_text_w + padding > available_width) {
+        // Text needs truncation - extend pill to full width (no right padding gap)
+        GFX_truncateText(font, text, truncated, available_width, padding);
+        return max_width;
+    }
+
+    // Text fits - use actual text width with padding
+    strncpy(truncated, text, 255);
+    truncated[255] = '\0';
+    return MIN(max_width, prefix_width + raw_text_w + padding);
+}
+
+ListItemPos render_list_item_pill_right(SDL_Surface* screen, ListLayout* layout,
+                                        const char* text, char* truncated,
+                                        int y, bool selected, int prefix_width,
+                                        int right_width) {
     ListItemPos pos;
 
-    // Calculate text width for pill sizing (list items use medium font)
-    pos.pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), text, truncated, layout->max_width, prefix_width);
+    // A label at the right edge keeps its own space. The title truncates before
+    // it, thus the two never overlap whatever the length of the title.
+    // A label wider than the row would leave nothing for the title, thus the
+    // reservation stops where the title still has its padding and its prefix.
+    int title_max_width = layout->max_width;
+    if (right_width > 0) {
+        int floor_width = prefix_width + SCALE1(BUTTON_PADDING * 2);
+        int reserved = right_width + SCALE1(PADDING * 2);
+        if (reserved > title_max_width - floor_width) {
+            reserved = title_max_width - floor_width;
+        }
+        if (reserved > 0) title_max_width -= reserved;
+    }
 
-    // Background pill (sized to text width)
+    // Calculate text width for pill sizing (list items use medium font)
+    pos.pill_width = calc_list_item_width(Fonts_getMedium(), text, truncated, title_max_width, prefix_width);
+
     SDL_Rect pill_rect = {SCALE1(PADDING), y, pos.pill_width, layout->item_h};
-    Fonts_drawListItemBg(screen, &pill_rect, selected);
+    draw_list_item_bg(screen, &pill_rect, selected);
 
     // Calculate text position
     pos.text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
@@ -404,10 +493,17 @@ ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
     return pos;
 }
 
+ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
+                                   const char* text, char* truncated,
+                                   int y, bool selected, int prefix_width) {
+    return render_list_item_pill_right(screen, layout, text, truncated, y,
+                                       selected, prefix_width, 0);
+}
+
 // Render a 2-row list item pill with optional right-side badge area
 // Height is 1.5x PILL_SIZE (same as rich). Title (medium) + subtitle (small) inside pill.
-// When badge_width > 0 and selected: THEME_COLOR2 outer capsule + THEME_COLOR1 inner capsule
-// When badge_width == 0: single THEME_COLOR1 capsule
+// When badge_width > 0 and selected: the band behind the row + the selection pill around the title
+// When badge_width == 0: a single selection pill
 ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* layout,
                                                 const char* text, const char* subtitle,
                                                 char* truncated,
@@ -422,7 +518,7 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
 
     // Calculate title pill width (reduced max to leave room for badge area)
     int title_max_width = layout->max_width - badge_area_w;
-    pos.pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), text, truncated, title_max_width, 0);
+    pos.pill_width = calc_list_item_width(Fonts_getMedium(), text, truncated, title_max_width, 0);
 
     // Expand pill if subtitle is wider than title
     if (subtitle && subtitle[0]) {
@@ -438,38 +534,38 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
         int px = SCALE1(PADDING);
 
         if (badge_area_w > 0) {
-            // Layer 1: THEME_COLOR2 outer capsule covering title + badge area
+            // Layer 1: the band, covering the title and the badge area
             int total_w = pos.pill_width + badge_area_w;
             int r = item_h / 3;
             if (r > total_w / 2) r = total_w / 2;
             if (item_h - 2 * r > 0) {
-                SDL_FillRect(screen, &(SDL_Rect){px, y + r, total_w, item_h - 2 * r}, THEME_COLOR2);
+                SDL_FillRect(screen, &(SDL_Rect){px, y + r, total_w, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
             }
             for (int dy = 0; dy < r; dy++) {
                 int yd = r - dy;
                 int inset = r - (int)sqrtf((float)(r * r - yd * yd));
                 int row_w = total_w - 2 * inset;
                 if (row_w <= 0) continue;
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, THEME_COLOR2);
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, THEME_COLOR2);
+                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
+                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
             }
         }
 
-        // Layer 2 (or only layer): THEME_COLOR1 inner capsule for title area
+        // Layer 2 (or only layer): the selection pill around the title
         {
             int pw = pos.pill_width;
             int r = item_h / 3;
             if (r > pw / 2) r = pw / 2;
             if (item_h - 2 * r > 0) {
-                SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, THEME_COLOR1);
+                SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
             }
             for (int dy = 0; dy < r; dy++) {
                 int yd = r - dy;
                 int inset = r - (int)sqrtf((float)(r * r - yd * yd));
                 int row_w = pw - 2 * inset;
                 if (row_w <= 0) continue;
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, THEME_COLOR1);
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, THEME_COLOR1);
+                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
             }
         }
     }
@@ -527,7 +623,7 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
     }
 
     // Calculate pill width considering both title and subtitle
-    pos.pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), title, truncated, layout->max_width, image_area_w);
+    pos.pill_width = calc_list_item_width(Fonts_getMedium(), title, truncated, layout->max_width, image_area_w);
     if (subtitle && subtitle[0]) {
         int sub_w;
         TTF_SizeUTF8(Fonts_getSmall(), subtitle, &sub_w, NULL);
@@ -545,7 +641,7 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
 
         // Main body between corner rows
         if (item_h - 2 * r > 0) {
-            SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, THEME_COLOR1);
+            SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
         }
         // Top and bottom corner rows with circular inset
         for (int dy = 0; dy < r; dy++) {
@@ -553,8 +649,8 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
             int inset = r - (int)sqrtf((float)(r * r - yd * yd));
             int row_w = pw - 2 * inset;
             if (row_w <= 0) continue;
-            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, THEME_COLOR1);
-            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, THEME_COLOR1);
+            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
         }
     }
 
@@ -588,11 +684,11 @@ MenuItemPos render_menu_item_pill(SDL_Surface* screen, ListLayout* layout,
     pos.item_y = layout->list_y + index * item_h;
 
     // Calculate text width for pill sizing (include prefix_width for icon)
-    pos.pill_width = Fonts_calcListPillWidth(Fonts_getLarge(), text, truncated, layout->max_width - prefix_width, prefix_width);
+    pos.pill_width = calc_list_item_width(Fonts_getLarge(), text, truncated, layout->max_width - prefix_width, prefix_width);
 
     // Background pill (pill height is PILL_SIZE, not item_h)
     SDL_Rect pill_rect = {SCALE1(PADDING), pos.item_y, pos.pill_width, SCALE1(PILL_SIZE)};
-    Fonts_drawListItemBg(screen, &pill_rect, selected);
+    draw_list_item_bg(screen, &pill_rect, selected);
 
     // Calculate text position (centered within PILL_SIZE, not item_h)
     pos.text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
@@ -731,24 +827,29 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
     db.content_x = db.box_x + SCALE1(15);
     db.content_w = box_w - SCALE1(30);
 
-    // Dark background around dialog (covers entire screen)
+    // Paint the page background around the dialog.
     SDL_Rect top_area = {0, 0, hw, db.box_y};
     SDL_Rect bot_area = {0, db.box_y + box_h, hw, hh - db.box_y - box_h};
     SDL_Rect left_area = {0, db.box_y, db.box_x, box_h};
     SDL_Rect right_area = {db.box_x + box_w, db.box_y, hw - db.box_x - box_w, box_h};
-    SDL_FillRect(screen, &top_area, RGB_BLACK);
-    SDL_FillRect(screen, &bot_area, RGB_BLACK);
-    SDL_FillRect(screen, &left_area, RGB_BLACK);
-    SDL_FillRect(screen, &right_area, RGB_BLACK);
+    SDL_FillRect(screen, &top_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+    SDL_FillRect(screen, &bot_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+    SDL_FillRect(screen, &left_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+    SDL_FillRect(screen, &right_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
 
     // Box background
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, box_h}, RGB_BLACK);
+    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, box_h},
+                 Theme_getPackedColor(THEME_ROLE_SURFACE_BACKGROUND, false));
 
     // Box border
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, SCALE1(2)}, RGB_WHITE);
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y + box_h - SCALE1(2), box_w, SCALE1(2)}, RGB_WHITE);
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, SCALE1(2), box_h}, RGB_WHITE);
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x + box_w - SCALE1(2), db.box_y, SCALE1(2), box_h}, RGB_WHITE);
+    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, SCALE1(2)},
+                 Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
+    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y + box_h - SCALE1(2), box_w, SCALE1(2)},
+                 Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
+    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, SCALE1(2), box_h},
+                 Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
+    SDL_FillRect(screen, &(SDL_Rect){db.box_x + box_w - SCALE1(2), db.box_y, SCALE1(2), box_h},
+                 Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
 
     return db;
 }
@@ -759,7 +860,7 @@ void render_empty_state(SDL_Surface* screen, const char* message,
     int hh = screen->h;
     int center_y = hh / 2 - SCALE1(15);
 
-    SDL_Surface* icon = Icons_getEmpty(false);
+    SDL_Surface* icon = Icons_getEmpty(THEME_ROLE_PRIMARY, false);
     if (icon) {
         int icon_size = SCALE1(48);
         SDL_Rect src_rect = {0, 0, icon->w, icon->h};
@@ -768,14 +869,16 @@ void render_empty_state(SDL_Surface* screen, const char* message,
         center_y += icon_size / 2;
     }
 
-    SDL_Surface* text1 = TTF_RenderUTF8_Blended(Fonts_getMedium(), message, COLOR_WHITE);
+    SDL_Surface* text1 = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), message, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (text1) {
         SDL_BlitSurface(text1, NULL, screen, &(SDL_Rect){(hw - text1->w) / 2, center_y - SCALE1(10)});
         SDL_FreeSurface(text1);
     }
 
     if (subtitle) {
-        SDL_Surface* text2 = TTF_RenderUTF8_Blended(Fonts_getSmall(), subtitle, COLOR_GRAY);
+        SDL_Surface* text2 = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), subtitle, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text2) {
             SDL_BlitSurface(text2, NULL, screen, &(SDL_Rect){(hw - text2->w) / 2, center_y + SCALE1(10)});
             SDL_FreeSurface(text2);

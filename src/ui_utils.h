@@ -6,13 +6,13 @@
 #include "defines.h"  // Brings in SDL2 via platform.h -> sdl.h
 #include "api.h"      // For SDL types and TTF
 #include "player.h"   // For AudioFormat
+#include "ui_theme.h"
 
 // Format duration as MM:SS
 void format_time(char* buf, int ms);
 
 // Get format name string
 const char* get_format_name(AudioFormat format);
-
 // Scrolling text state for marquee animation
 typedef struct {
     char text[512];         // Text to display
@@ -25,13 +25,16 @@ typedef struct {
     int last_x, last_y;     // Last render position (for animate-only mode)
     TTF_Font* last_font;    // Last font used (for animate-only mode)
     SDL_Color last_color;   // Last color used (for animate-only mode)
+    ThemeRole role;         // Role of the cached text
+    bool selected;          // True where the text sits on a selection pill
     SDL_Surface* cached_scroll_surface;  // Cached surface for GPU scroll (no bg)
     bool scroll_active;     // True once GPU scroll has actually started (after delay)
 } ScrollTextState;
 
 // Reset scroll state for new text
 // use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
-void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font, int max_width, bool use_gpu);
+void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
+                      int max_width, ThemeRole role, bool selected, bool use_gpu);
 
 // Check if scrolling is active (text needs to scroll)
 bool ScrollText_isScrolling(ScrollTextState* state);
@@ -53,7 +56,8 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
 // Unified update: checks for text change, resets if needed, and renders
 // use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
-                       int max_width, SDL_Color color, SDL_Surface* screen, int x, int y, bool use_gpu);
+                       int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
+                       int x, int y, bool use_gpu);
 
 // Draw the scrolling text at its current offset onto `layer`, and advance it. Does not
 // clear the layer or flip: the caller owns the layer and decides what else goes
@@ -114,8 +118,30 @@ typedef struct {
 } ListItemPos;
 
 // Render a list item's pill background and calculate text position
-// Combines: Fonts_calcListPillWidth + Fonts_drawListItemBg + text position calculation
+// Combines: the row width + draw_list_item_bg + text position calculation
 // prefix_width: extra width to account for (e.g., checkbox, indicator)
+// A chip: a short label in a rectangular outline with no fill, which names the
+// source of what plays. Gives the rectangle that it drew.
+SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y);
+
+// The band behind a whole row, for a row that carries a label at its right edge.
+void draw_list_item_band(SDL_Surface* screen, SDL_Rect* rect);
+
+// The pill behind the row that the cursor is on. Draws nothing for another row.
+void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected);
+
+// A row whose right edge carries a label gives the width of that label, thus
+// the title truncates before it and the two never overlap. Give 0 where a row
+// has no such label.
+//
+// Such a row draws in four steps: the band of draw_list_item_band(), the
+// label at the right edge, this pill, and then the title. The pill thus covers
+// the label if it ever reaches it, and the title covers nothing else.
+ListItemPos render_list_item_pill_right(SDL_Surface* screen, ListLayout* layout,
+                                        const char* text, char* truncated,
+                                        int y, bool selected, int prefix_width,
+                                        int right_width);
+
 ListItemPos render_list_item_pill(SDL_Surface* screen, ListLayout* layout,
                                    const char* text, char* truncated,
                                    int y, bool selected, int prefix_width);
@@ -134,7 +160,7 @@ typedef struct {
 } ListItemBadgedPos;
 
 // Render a list item's pill with optional right-side badge area (settings-style two-layer)
-// When badge_width > 0 and selected: THEME_COLOR2 outer pill + THEME_COLOR1 inner title pill
+// When badge_width > 0 and selected: the band + the selection pill around the title
 // When badge_width == 0: behaves like render_list_item_pill
 // Pill width considers both title and subtitle (whichever is wider)
 // subtitle can be NULL if not needed for pill sizing
