@@ -176,11 +176,9 @@ static uint32_t theme_color_mapped(SDL_Surface* screen, int color_id) {
     return SDL_MapRGB(screen->format, color.r, color.g, color.b);
 }
 
-// A key that carries no character takes a ground between the ground of the
-// other keys and the ground of the selected one, thus TAB, SHIFT, ENTER, CANCEL,
-// CYR, SPACE and the caps key read as a group and none of them reads as
-// selected. This mix belongs to the keyboard and not to the theme roles: no
-// other screen draws such a key.
+// Percetange of color mix that defines the color of a "special key" that carries
+// no character, such as TAB, SHIFT, ENTER, CANCEL, LANG to make it visually
+// distinguishable from a regular key.
 #define SPECIAL_KEY_MIX 20
 
 static uint32_t special_key_bg(SDL_Surface* screen) {
