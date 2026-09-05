@@ -7,6 +7,7 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
+#include "ui_theme.h"
 #include "selfupdate.h"
 #include "module_common.h"
 #include "module_menu.h"
@@ -72,61 +73,20 @@ static const char* main_menu_get_label(int index, const char* default_label,
     return NULL;  // Use default label
 }
 
-// Custom text rendering for first item: fixed prefix + scrolling text
+// Move the whole line of the Resume row and of the Now Playing row, the
+// prefix with the title. The row that the cursor is not on draws by default.
 static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
                                    int text_x, int text_y, int max_text_width) {
     MenuSelection sel = MenuRows_selectionAt(&current_rows, index);
     if (sel != MENU_RESUME && sel != MENU_NOW_PLAYING) return false;
-
-    // Only custom-render when selected (for scrolling); default rendering handles non-selected
     if (!selected) return false;
 
-    const char* track_name;
-    const char* prefix;
+    char buffer[MAX_PATH];
+    const char* line = main_menu_get_label(index, NULL, buffer, sizeof(buffer));
+    if (!line) return false;
 
-    if (sel == MENU_NOW_PLAYING) {
-        prefix = "Now Playing: ";
-        track_name = get_now_playing_label();
-    } else {
-        const ResumeState* rs = Resume_getState();
-        if (!rs) return false;
-        track_name = rs->track_name[0] ? rs->track_name : "Unknown";
-        prefix = "Resume: ";
-    }
-    SDL_Color text_color = Fonts_getListTextColor(true);
-    TTF_Font* font = Fonts_getLarge();
-
-    int prefix_width = 0;
-    TTF_SizeUTF8(font, prefix, &prefix_width, NULL);
-
-    SDL_Surface* prefix_surf = TTF_RenderUTF8_Blended(font, prefix, text_color);
-    if (prefix_surf) {
-        SDL_BlitSurface(prefix_surf, NULL, screen, &(SDL_Rect){text_x, text_y});
-        SDL_FreeSurface(prefix_surf);
-    }
-
-    // Render track name in remaining space with clip rect to prevent overflow
-    int remaining_width = max_text_width - prefix_width;
-    if (remaining_width > 0) {
-        int track_x = text_x + prefix_width;
-
-        // Set clip rect to bound the track name within pill
-        SDL_Rect old_clip;
-        SDL_GetClipRect(screen, &old_clip);
-        SDL_Rect clip = {track_x, text_y, remaining_width, TTF_FontHeight(font)};
-        SDL_SetClipRect(screen, &clip);
-
-        // Use software scroll (use_gpu=false) to respect SDL clip rect
-        ScrollText_update(&resume_scroll, track_name, font, remaining_width,
-                          text_color, screen, track_x, text_y, false);
-
-        // Restore clip rect
-        if (old_clip.w > 0 && old_clip.h > 0)
-            SDL_SetClipRect(screen, &old_clip);
-        else
-            SDL_SetClipRect(screen, NULL);
-    }
-
+    render_list_item_text(screen, &resume_scroll, line, Fonts_getLarge(),
+                          text_x, text_y, max_text_width, true);
     return true;
 }
 
@@ -545,7 +505,8 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     DialogBox db = render_dialog_box(screen, SCALE1(240), box_h);
 
     // Title text (left aligned)
-    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), page_title, COLOR_WHITE);
+    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), page_title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
         SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){db.content_x, db.box_y + SCALE1(10)});
         SDL_FreeSurface(title_surf);
@@ -556,14 +517,16 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
 
     for (int i = 0; i < control_count; i++) {
         // Button name
-        SDL_Surface* btn_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), controls[i].button, COLOR_GRAY);
+        SDL_Surface* btn_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), controls[i].button, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (btn_surf) {
             SDL_BlitSurface(btn_surf, NULL, screen, &(SDL_Rect){db.content_x, y_offset});
             SDL_FreeSurface(btn_surf);
         }
 
         // Action description
-        SDL_Surface* action_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), controls[i].action, COLOR_WHITE);
+        SDL_Surface* action_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), controls[i].action, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (action_surf) {
             SDL_BlitSurface(action_surf, NULL, screen, &(SDL_Rect){right_col, y_offset});
             SDL_FreeSurface(action_surf);
@@ -574,7 +537,8 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
 
     // Button hint at bottom (left aligned, same gap as title from top)
     const char* hint = "Press any button to close";
-    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), hint, COLOR_GRAY);
+    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
         int hint_y = db.box_y + db.box_h - SCALE1(10) - hint_surf->h;
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){db.content_x, hint_y});
@@ -592,7 +556,8 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     // Title text
     if (!title) title = "Delete File?";
     int title_y = has_content ? db.box_y + SCALE1(15) : db.box_y + SCALE1(20);
-    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), title, COLOR_WHITE);
+    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
         SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){(hw - title_surf->w) / 2, title_y});
         SDL_FreeSurface(title_surf);
@@ -602,7 +567,8 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     if (has_content) {
         char truncated[64];
         GFX_truncateText(Fonts_getSmall(), content, truncated, db.box_w - SCALE1(20), 0);
-        SDL_Surface* name_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_GRAY);
+        SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (name_surf) {
             SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){(hw - name_surf->w) / 2, db.box_y + SCALE1(45)});
             SDL_FreeSurface(name_surf);
@@ -612,7 +578,8 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     // Button hints
     int hint_y = has_content ? db.box_y + SCALE1(75) : db.box_y + SCALE1(55);
     const char* hint = "A: Yes   B: No";
-    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), hint, COLOR_GRAY);
+    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(hw - hint_surf->w) / 2, hint_y});
         SDL_FreeSurface(hint_surf);
@@ -631,10 +598,12 @@ void render_screen_off_hint(SDL_Surface* screen) {
     int hh = screen->h;
 
     // Fill entire screen with black
+    //noinspection HardcodedColor
     SDL_FillRect(screen, NULL, RGB_BLACK);
 
     // Render hint message centered
     const char* msg = "Press SELECT + A to wake screen";
+    //noinspection HardcodedColor
     SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
     if (msg_surf) {
         SDL_BlitSurface(msg_surf, NULL, screen, &(SDL_Rect){(hw - msg_surf->w) / 2, (hh - msg_surf->h) / 2});

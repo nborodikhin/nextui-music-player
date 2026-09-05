@@ -6,6 +6,7 @@
 #include "ui_downloader.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "ui_icons.h"
 #include "module_common.h"
 
@@ -85,7 +86,8 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
     // Searching message
     char search_msg[300];
     snprintf(search_msg, sizeof(search_msg), "Searching for: %s", search_query);
-    SDL_Surface* query_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), search_msg, COLOR_GRAY);
+    SDL_Surface* query_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), search_msg, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (query_text) {
         int qx = (hw - query_text->w) / 2;
         if (qx < SCALE1(PADDING)) qx = SCALE1(PADDING);
@@ -95,7 +97,8 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
 
     // Loading indicator
     const char* loading = "Please wait...";
-    SDL_Surface* load_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), loading, COLOR_WHITE);
+    SDL_Surface* load_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), loading, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (load_text) {
         SDL_BlitSurface(load_text, NULL, screen, &(SDL_Rect){(hw - load_text->w) / 2, hh / 2 + SCALE1(10)});
         SDL_FreeSurface(load_text);
@@ -126,12 +129,6 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
         adjust_list_scroll(selected, scroll, layout.items_per_page);
     }
 
-    // Reserve space for duration on the right (format: "99:59" max)
-    int dur_w, dur_h;
-    TTF_SizeUTF8(Fonts_getTiny(), "99:59", &dur_w, &dur_h);
-    int duration_reserved = dur_w + SCALE1(PADDING * 2);  // Duration width + gap
-    int max_width = layout.max_width - duration_reserved;
-
     for (int i = 0; i < layout.items_per_page && *scroll + i < result_count; i++) {
         int idx = *scroll + i;
         DownloaderResult* result = &results[idx];
@@ -148,19 +145,43 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
             indicator_width = ind_w + SCALE1(4);
         }
 
-        // Calculate text width for pill sizing
-        int pill_width = Fonts_calcListPillWidth(Fonts_getMedium(), result->title, truncated, max_width, indicator_width);
+        // Four steps, in this order: the band of a selected row, the label at
+        // the right edge, the pill of the title, then the title. The width of
+        // the label is what the title gives up, thus the two never overlap.
+        char dur[16] = {0};
+        int duration_width = 0;
+        if (result->duration_sec > 0) {
+            int m = result->duration_sec / 60;
+            int s2 = result->duration_sec % 60;
+            snprintf(dur, sizeof(dur), "%d:%02d", m, s2);
+            TTF_SizeUTF8(Fonts_getTiny(), dur, &duration_width, NULL);
+        }
 
-        // Background pill (sized to text width)
-        SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, layout.item_h};
-        Fonts_drawListItemBg(screen, &pill_rect, is_selected);
+        if (is_selected && duration_width > 0) {
+            SDL_Rect band = {SCALE1(PADDING), y, layout.max_width, layout.item_h};
+            draw_list_item_band(screen, &band);
+        }
 
-        int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-        int text_y = y + (layout.item_h - TTF_FontHeight(Fonts_getMedium())) / 2;
+        if (duration_width > 0) {
+            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(
+                Fonts_getTiny(), dur, Theme_getColor(THEME_ROLE_PRIMARY, false));
+            if (dur_text) {
+                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (layout.item_h - dur_text->h) / 2});
+                SDL_FreeSurface(dur_text);
+            }
+        }
+
+        ListItemPos pos = render_list_item_pill_right(screen, &layout, result->title,
+                                                      truncated, y, is_selected,
+                                                      indicator_width, duration_width);
+        int pill_width = pos.pill_width;
+        int title_x = pos.text_x;
+        int text_y = pos.text_y;
 
         // Show indicator if already in queue
         if (in_queue) {
-            SDL_Surface* indicator = TTF_RenderUTF8_Blended(Fonts_getTiny(), "[+]", is_selected ? uintToColour(THEME_COLOR5_255) : COLOR_GRAY);
+            SDL_Surface* indicator = TTF_RenderUTF8_Blended(
+                Fonts_getTiny(), "[+]", Theme_getColor(THEME_ROLE_PRIMARY, is_selected));
             if (indicator) {
                 SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (layout.item_h - indicator->h) / 2});
                 title_x += indicator->w + SCALE1(4);
@@ -170,27 +191,19 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
 
         // Title - use common text rendering with scrolling for selected items
         int title_max_w = pill_width - SCALE1(BUTTON_PADDING * 2) - indicator_width;
-        render_list_item_text(screen, &downloader_results_scroll_text, result->title, Fonts_getMedium(),
+        // A selected row scrolls the whole title. Another row shows the title
+        // that the pill cut, thus its end lands on a character.
+        render_list_item_text(screen, &downloader_results_scroll_text,
+                              is_selected ? result->title : truncated, Fonts_getMedium(),
                               title_x, text_y, title_max_w, is_selected);
 
-        // Duration (always on right, outside pill)
-        if (result->duration_sec > 0) {
-            char dur[16];
-            int m = result->duration_sec / 60;
-            int s = result->duration_sec % 60;
-            snprintf(dur, sizeof(dur), "%d:%02d", m, s);
-            SDL_Surface* dur_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), dur, COLOR_GRAY);
-            if (dur_text) {
-                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (layout.item_h - dur_text->h) / 2});
-                SDL_FreeSurface(dur_text);
-            }
-        }
     }
 
     // Empty results message
     if (result_count == 0) {
         const char* msg = searching ? "Searching..." : "No results found";
-        SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getLarge(), msg, COLOR_GRAY);
+        SDL_Surface* text = TTF_RenderUTF8_Blended(
+            Fonts_getLarge(), msg, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text) {
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
             SDL_FreeSurface(text);
@@ -286,7 +299,7 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
 
         // Title text (row 1)
         render_list_item_text(screen, is_selected ? &downloader_queue_scroll_text : NULL,
-                              item->title, Fonts_getMedium(),
+                              is_selected ? item->title : truncated, Fonts_getMedium(),
                               pos.text_x, pos.text_y,
                               pos.text_max_width, is_selected);
 
@@ -298,15 +311,16 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
             int bar_x = pos.subtitle_x;
             int bar_y = pos.subtitle_y + (TTF_FontHeight(Fonts_getSmall()) - bar_h) / 2;
 
-            // Bar background
             SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
-            SDL_FillRect(screen, &bar_bg, SDL_MapRGB(screen->format, 60, 60, 60));
+            SDL_FillRect(screen, &bar_bg,
+                         Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, is_selected));
 
             // Bar fill
             int fill_w = (bar_w * item->progress_percent) / 100;
             if (fill_w > 0) {
                 SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
-                SDL_FillRect(screen, &bar_fill, THEME_COLOR2);
+                SDL_FillRect(screen, &bar_fill,
+                             Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, is_selected));
             }
 
             // Speed and ETA text
@@ -324,7 +338,9 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
                          item->progress_percent, speed_str);
             }
 
-            SDL_Surface* info_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), info_str, COLOR_GRAY);
+            SDL_Surface* info_surf = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), info_str,
+                Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (info_surf) {
                 int info_x = bar_x + bar_w + SCALE1(6);
                 int avail_w = pos.text_max_width - bar_w - SCALE1(6);
@@ -333,19 +349,23 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
                 SDL_FreeSurface(info_surf);
             }
         } else if (item->status == DOWNLOADER_STATUS_PENDING) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Queued", COLOR_GRAY);
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Queued",
+                Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (s) {
                 SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_FAILED) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Failed", (SDL_Color){200, 80, 80, 255});
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Failed", Theme_getColor(THEME_ROLE_STATUS_ERROR, is_selected));
             if (s) {
                 SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_COMPLETE) {
-            SDL_Surface* s = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Complete", (SDL_Color){80, 200, 80, 255});
+            SDL_Surface* s = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), "Complete", Theme_getColor(THEME_ROLE_STATUS_SUCCESS, is_selected));
             if (s) {
                 SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
                 SDL_FreeSurface(s);
@@ -429,7 +449,8 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     char ver_str[128];
     snprintf(ver_str, sizeof(ver_str), "Current: %s",
              installing ? DOWNLOADER_VERSION_NOT_INSTALLED : status.current_version);
-    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (ver_text) {
         SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
         SDL_FreeSurface(ver_text);
@@ -478,7 +499,8 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
             break;
     }
 
-    SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), status_msg, COLOR_WHITE);
+    SDL_Surface* status_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), status_msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (status_text) {
         SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh / 2});
         SDL_FreeSurface(status_text);
@@ -487,7 +509,8 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     // Latest version (if known)
     if (status.latest_version[0] != '\0') {
         snprintf(ver_str, sizeof(ver_str), "Latest: %s", status.latest_version);
-        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), ver_str, COLOR_GRAY);
+        SDL_Surface* latest_text = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (latest_text) {
             SDL_BlitSurface(latest_text, NULL, screen, &(SDL_Rect){(hw - latest_text->w) / 2, hh / 2 + SCALE1(30)});
             SDL_FreeSurface(latest_text);
@@ -501,20 +524,20 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
         int bar_x = SCALE1(PADDING * 4);
         int bar_y = hh / 2 + SCALE1(55);
 
-        // Background
         SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
-        SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 64, 64, 64));
+        SDL_FillRect(screen, &bg_rect, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
 
         // Progress fill
         int prog_w = (bar_w * status.progress_percent) / 100;
         if (prog_w > 0) {
             SDL_Rect prog_rect = {bar_x, bar_y, prog_w, bar_h};
-            SDL_FillRect(screen, &prog_rect, SDL_MapRGB(screen->format, 100, 200, 100));
+            SDL_FillRect(screen, &prog_rect, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
         }
 
         // Download detail text
         if (status.status_detail[0] != '\0') {
-            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status.status_detail, COLOR_GRAY);
+            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), status.status_detail, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (detail_text) {
                 SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
                 SDL_FreeSurface(detail_text);
@@ -524,7 +547,8 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
         // Percentage text
         char pct_str[16];
         snprintf(pct_str, sizeof(pct_str), "%d%%", status.progress_percent);
-        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), pct_str, COLOR_WHITE);
+        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), pct_str, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (pct_text) {
             int pct_x = bar_x + (bar_w - pct_text->w) / 2;
             int pct_y = bar_y + (bar_h - pct_text->h) / 2;

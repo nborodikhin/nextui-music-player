@@ -233,12 +233,16 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                         last_rendered_artist[0] = '\0';
                         last_rendered_title[0] = '\0';
                         last_art_was_fetching = false;
+                        radio_list_clear_scroll();
+                        GFX_clearLayers(LAYER_SCROLLTEXT);
                         state = RADIO_INTERNAL_PLAYING;
                         dirty = 1;
                     }
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 if (!Radio_isActive()) {
                     Radio_quit();
                 }
@@ -246,6 +250,8 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
             else if (PAD_justPressed(BTN_Y)) {
                 ListNav_scrollToTop(&add_country_nav);
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
@@ -257,6 +263,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 show_confirm = true;
                 dirty = 1;
             }
+
+            if (radio_list_needs_scroll_refresh()) radio_list_animate_scroll();
+            if (radio_list_scroll_needs_render()) dirty = 1;
         }
         // =========================================
         // RADIO PLAYING STATE
@@ -414,19 +423,28 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 add_selected_country_code = countries[add_country_nav.selected].code;
                 ListNav_scrollToTop(&add_station_nav);
                 build_sorted_station_indices(add_selected_country_code);
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_ADD_STATIONS;
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_Y)) {
                 help_return_state = RADIO_INTERNAL_ADD_COUNTRY;
                 help_scroll = 0;
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_HELP;
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_LIST;
                 dirty = 1;
             }
+
+            if (radio_list_needs_scroll_refresh()) radio_list_animate_scroll();
+            if (radio_list_scroll_needs_render()) dirty = 1;
         }
         // =========================================
         // ADD STATIONS STATE
@@ -468,13 +486,20 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             else if (PAD_justPressed(BTN_Y)) {
                 help_return_state = RADIO_INTERNAL_ADD_STATIONS;
                 help_scroll = 0;
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_HELP;
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
+                radio_list_clear_scroll();
+                GFX_clearLayers(LAYER_SCROLLTEXT);
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
+
+            if (radio_list_needs_scroll_refresh()) radio_list_animate_scroll();
+            if (radio_list_scroll_needs_render()) dirty = 1;
         }
         // =========================================
         // HELP STATE

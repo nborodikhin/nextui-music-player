@@ -7,6 +7,7 @@
 #include "ui_fonts.h"
 #include "ui_icons.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "ui_album_art.h"
 #include "spectrum.h"
 #include "lyrics.h"
@@ -31,7 +32,7 @@ static char last_lyric_line[256] = "";
 static char last_next_lyric_line[256] = "";
 
 // Render the file browser
-void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* browser) {
+void render_browser(SDL_Surface *screen, int show_setting, BrowserContext *browser) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -61,7 +62,7 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
     for (int i = 0; i < browser->items_per_page && browser->scroll_offset + i < browser->entry_count; i++) {
         int idx = browser->scroll_offset + i;
-        FileEntry* entry = &browser->entries[idx];
+        FileEntry *entry = &browser->entries[idx];
         bool selected = (idx == browser->selected);
 
         int y = layout.list_y + i * layout.item_h;
@@ -92,13 +93,13 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
 
         // Render icon if available
         if (Icons_isLoaded()) {
-            SDL_Surface* icon = NULL;
+            SDL_Surface *icon = NULL;
             if (entry->is_dir) {
-                icon = Icons_getFolder(selected);
+                icon = Icons_getFolder(THEME_ROLE_PRIMARY, selected);
             } else if (entry->is_play_all) {
-                icon = Icons_getPlayAll(selected);
+                icon = Icons_getPlayAll(THEME_ROLE_PRIMARY, selected);
             } else {
-                icon = Icons_getForFormat(entry->format, selected);
+                icon = Icons_getForFormat(entry->format, THEME_ROLE_PRIMARY, selected);
             }
 
             if (icon) {
@@ -125,18 +126,18 @@ void render_browser(SDL_Surface* screen, int show_setting, BrowserContext* brows
     render_scroll_indicators(screen, browser->scroll_offset, browser->items_per_page, browser->entry_count);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
 }
 
 // Render the now playing screen
-void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* browser,
+void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *browser,
                     bool shuffle_enabled, bool repeat_enabled,
                     int playlist_track_num, int playlist_total) {
     GFX_clear(screen);
 
     // Render album art as triangular background (if available)
-    SDL_Surface* album_art = Player_getAlbumArt();
+    SDL_Surface *album_art = Player_getAlbumArt();
     if (album_art && album_art->w > 0 && album_art->h > 0) {
         render_album_art_background(screen, album_art);
     }
@@ -144,34 +145,19 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int hw = screen->w;
     int hh = screen->h;
 
-    const TrackInfo* info = Player_getTrackInfo();
+    const TrackInfo *info = Player_getTrackInfo();
     PlayerState state = Player_getState();
     AudioFormat format = Player_detectFormat(Player_getCurrentFile());
     int duration = Player_getDuration();
     int position = Player_getPosition();
-    float progress = (duration > 0) ? (float)position / duration : 0.0f;
+    float progress = (duration > 0) ? (float) position / duration : 0.0f;
 
     // === TOP BAR ===
     int top_y = SCALE1(PADDING);
 
-    // Format badge "FLAC" with border (smaller, gray) - render first on the left
-    const char* fmt_name = get_format_name(format);
-    SDL_Surface* fmt_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), fmt_name, COLOR_GRAY);
-    int badge_h = fmt_surf ? fmt_surf->h + SCALE1(4) : SCALE1(16);
-    int badge_x = SCALE1(PADDING);
-    int badge_w = 0;
-
-    // Draw format badge on the left
-    if (fmt_surf) {
-        badge_w = fmt_surf->w + SCALE1(10);
-        // Draw border (gray)
-        SDL_Rect border = {badge_x, top_y, badge_w, badge_h};
-        SDL_FillRect(screen, &border, RGB_GRAY);
-        SDL_Rect inner = {badge_x + 1, top_y + 1, badge_w - 2, badge_h - 2};
-        SDL_FillRect(screen, &inner, RGB_BLACK);
-        SDL_BlitSurface(fmt_surf, NULL, screen, &(SDL_Rect){badge_x + SCALE1(5), top_y + SCALE1(2)});
-        SDL_FreeSurface(fmt_surf);
-    }
+    // Format chip
+    const char *fmt_name = get_format_name(format);
+    SDL_Rect chip = draw_chip(screen, fmt_name, SCALE1(PADDING), top_y);
 
     // Track counter "01 - 03" (smaller, gray) - after the format badge
     // Use playlist counts if available (playlist_total > 0), otherwise use browser counts
@@ -179,10 +165,11 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int total_tracks = (playlist_total > 0) ? playlist_total : Browser_countAudioFiles(browser);
     char track_str[32];
     snprintf(track_str, sizeof(track_str), "%02d - %02d", track_num, total_tracks);
-    SDL_Surface* track_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), track_str, COLOR_GRAY);
+    SDL_Surface *track_surf = TTF_RenderUTF8_Blended(
+        Fonts_getTiny(), track_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (track_surf) {
-        int track_x = badge_x + badge_w + SCALE1(8);
-        int track_y = top_y + (badge_h - track_surf->h) / 2;
+        int track_x = chip.x + chip.w + SCALE1(8);
+        int track_y = top_y + (chip.h - track_surf->h) / 2;
         SDL_BlitSurface(track_surf, NULL, screen, &(SDL_Rect){track_x, track_y});
         SDL_FreeSurface(track_surf);
     }
@@ -199,9 +186,10 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int max_w_text = hw - SCALE1(PADDING * 1);
 
     // Artist name (Medium font, gray)
-    const char* artist = info->artist[0] ? info->artist : "Unknown Artist";
+    const char *artist = info->artist[0] ? info->artist : "Unknown Artist";
     GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_text, 0);
-    SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(Fonts_getArtist(), truncated, COLOR_GRAY);
+    SDL_Surface *artist_surf = TTF_RenderUTF8_Blended(
+        Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (artist_surf) {
         SDL_BlitSurface(artist_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
         info_y += artist_surf->h + SCALE1(2);
@@ -211,13 +199,15 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     }
 
     // Song title (Regular font extra large, white) - with GPU scrolling animation (no background)
-    const char* title = info->title[0] ? info->title : "Unknown Title";
-    int title_y = info_y;  // Save for GPU scroll
+    const char *title = info->title[0] ? info->title : "Unknown Title";
+    int title_y = info_y; // Save for GPU scroll
 
-    // Check if text changed and reset scroll state
+    // Check if text changed and reset scroll state.
     if (strcmp(player_title_scroll.text, title) != 0) {
-        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_text, true);  // true = GPU mode
+        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_text,
+                         THEME_ROLE_PRIMARY, false, true);
     }
+    SDL_Color title_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
 
     // Activate scroll after delay (this render path bypasses ScrollText_render)
     ScrollText_activateAfterDelay(&player_title_scroll);
@@ -225,13 +215,14 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     // If text needs scrolling, use GPU layer (no background)
     if (player_title_scroll.needs_scroll) {
         // Record where the scrolling title sits; the player paints it onto its layer.
-        player_title_scroll.last_x     = SCALE1(PADDING);
-        player_title_scroll.last_y     = title_y;
-        player_title_scroll.last_font  = Fonts_getTitle();
-        player_title_scroll.last_color = COLOR_WHITE;
+        player_title_scroll.last_x = SCALE1(PADDING);
+        player_title_scroll.last_y = title_y;
+        player_title_scroll.last_font = Fonts_getTitle();
+        player_title_scroll.last_color = title_color;
     } else {
         // Static text - render to screen surface
-        SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getTitle(), title, COLOR_WHITE);
+        SDL_Surface *title_surf = TTF_RenderUTF8_Blended(
+            Fonts_getTitle(), title, title_color);
         if (title_surf) {
             SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
             SDL_FreeSurface(title_surf);
@@ -245,10 +236,11 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     } else {
         Lyrics_clearGPU();
         // Show album name when lyrics are off
-        const char* album = info->album[0] ? info->album : "";
+        const char *album = info->album[0] ? info->album : "";
         if (album[0]) {
             GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_text, 0);
-            SDL_Surface* album_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_GRAY);
+            SDL_Surface *album_surf = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (album_surf) {
                 SDL_BlitSurface(album_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
                 SDL_FreeSurface(album_surf);
@@ -278,32 +270,38 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     int label_x = hw - SCALE1(PADDING);
 
     // Repeat label
-    const char* repeat_text = "REPEAT";
-    SDL_Color repeat_color = repeat_enabled ? COLOR_WHITE : COLOR_GRAY;
-    SDL_Surface* repeat_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), repeat_text, repeat_color);
+    const char *repeat_text = "REPEAT";
+    SDL_Color repeat_color = repeat_enabled
+                                 ? Theme_getColor(THEME_ROLE_PRIMARY, false)
+                                 : Theme_getColor(THEME_ROLE_SECONDARY, false);
+    SDL_Surface *repeat_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), repeat_text, repeat_color);
     if (repeat_surf) {
         label_x -= repeat_surf->w;
         SDL_BlitSurface(repeat_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
-        // Draw underline if enabled
+        // The underline takes the color of its label, thus the two cannot drift
         if (repeat_enabled) {
             SDL_Rect underline = {label_x, bottom_y + repeat_surf->h, repeat_surf->w, SCALE1(1)};
-            SDL_FillRect(screen, &underline, RGB_WHITE);
+            SDL_FillRect(screen, &underline,
+                         SDL_MapRGB(screen->format, repeat_color.r, repeat_color.g, repeat_color.b));
         }
         SDL_FreeSurface(repeat_surf);
     }
 
     // Shuffle label (with gap before repeat)
     label_x -= SCALE1(12);
-    const char* shuffle_text = "SHUFFLE";
-    SDL_Color shuffle_color = shuffle_enabled ? COLOR_WHITE : COLOR_GRAY;
-    SDL_Surface* shuffle_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), shuffle_text, shuffle_color);
+    const char *shuffle_text = "SHUFFLE";
+    SDL_Color shuffle_color = shuffle_enabled
+                                  ? Theme_getColor(THEME_ROLE_PRIMARY, false)
+                                  : Theme_getColor(THEME_ROLE_SECONDARY, false);
+    SDL_Surface *shuffle_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), shuffle_text, shuffle_color);
     if (shuffle_surf) {
         label_x -= shuffle_surf->w;
         SDL_BlitSurface(shuffle_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
-        // Draw underline if enabled
+        // The underline takes the color of its label, thus the two cannot drift
         if (shuffle_enabled) {
             SDL_Rect underline = {label_x, bottom_y + shuffle_surf->h, shuffle_surf->w, SCALE1(1)};
-            SDL_FillRect(screen, &underline, RGB_WHITE);
+            SDL_FillRect(screen, &underline,
+                         SDL_MapRGB(screen->format, shuffle_color.r, shuffle_color.g, shuffle_color.b));
         }
         SDL_FreeSurface(shuffle_surf);
     }
@@ -311,8 +309,9 @@ void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* brows
     // Lyric Off label (only shown when lyrics are disabled)
     if (!Settings_getLyricsEnabled()) {
         label_x -= SCALE1(12);
-        const char* lyric_text = "LYRIC OFF";
-        SDL_Surface* lyric_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), lyric_text, COLOR_GRAY);
+        const char *lyric_text = "LYRIC OFF";
+        SDL_Surface *lyric_surf = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), lyric_text, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (lyric_surf) {
             label_x -= lyric_surf->w;
             SDL_BlitSurface(lyric_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
@@ -407,22 +406,24 @@ void PlayTime_renderGPU(void) {
     // Render position text
     char pos_str[16];
     format_time(pos_str, position);
-    SDL_Surface* pos_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), pos_str, COLOR_WHITE);
+    SDL_Surface *pos_surf = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), pos_str, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (!pos_surf) return;
 
     // Render duration text
     char dur_str[16];
     format_time(dur_str, duration);
-    SDL_Surface* dur_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), dur_str, COLOR_GRAY);
+    SDL_Surface *dur_surf = TTF_RenderUTF8_Blended(
+        Fonts_getTiny(), dur_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
 
     // Calculate total width needed
     int total_w = pos_surf->w + SCALE1(6) + (dur_surf ? dur_surf->w : 0);
     int total_h = pos_surf->h;
 
     // Create combined surface
-    SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, total_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *combined = SDL_CreateRGBSurfaceWithFormat(0, total_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (combined) {
-        SDL_FillRect(combined, NULL, 0);  // Transparent background
+        SDL_FillRect(combined, NULL, 0); // Transparent background
 
         // Blit position
         SDL_BlitSurface(pos_surf, NULL, combined, &(SDL_Rect){0, 0, 0, 0});
@@ -470,10 +471,10 @@ bool Lyrics_GPUneedsRefresh(void) {
     if (!lyrics_gpu_position_set || !Settings_getLyricsEnabled()) return false;
     if (Player_getState() != PLAYER_STATE_PLAYING) return false;
 
-    const char* current = Lyrics_getCurrentLine(Player_getPosition());
-    const char* next = Lyrics_getNextLine();
-    const char* cur_str = current ? current : "";
-    const char* next_str = next ? next : "";
+    const char *current = Lyrics_getCurrentLine(Player_getPosition());
+    const char *next = Lyrics_getNextLine();
+    const char *cur_str = current ? current : "";
+    const char *next_str = next ? next : "";
 
     return (strcmp(cur_str, last_lyric_line) != 0 || strcmp(next_str, last_next_lyric_line) != 0);
 }
@@ -481,10 +482,10 @@ bool Lyrics_GPUneedsRefresh(void) {
 void Lyrics_renderGPU(void) {
     if (!lyrics_gpu_position_set || !Settings_getLyricsEnabled()) return;
 
-    const char* current = Lyrics_getCurrentLine(Player_getPosition());
-    const char* next = Lyrics_getNextLine();
-    const char* cur_str = current ? current : "";
-    const char* next_str = next ? next : "";
+    const char *current = Lyrics_getCurrentLine(Player_getPosition());
+    const char *next = Lyrics_getNextLine();
+    const char *cur_str = current ? current : "";
+    const char *next_str = next ? next : "";
 
     // Skip if nothing changed
     if (strcmp(cur_str, last_lyric_line) == 0 && strcmp(next_str, last_next_lyric_line) == 0) return;
@@ -513,23 +514,25 @@ void Lyrics_renderGPU(void) {
     if (has_next) total_h += line_h;
 
     // Render current line
-    SDL_Surface* cur_surf = NULL;
+    SDL_Surface *cur_surf = NULL;
     if (has_cur) {
         GFX_truncateText(Fonts_getSmall(), cur_str, truncated, lyrics_gpu_max_w, 0);
-        cur_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_LIGHT_TEXT);
+        cur_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     }
 
     // Render next line
-    SDL_Surface* next_surf = NULL;
+    SDL_Surface *next_surf = NULL;
     if (has_next) {
         GFX_truncateText(Fonts_getSmall(), next_str, truncated, lyrics_gpu_max_w, 0);
-        next_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_DARK_TEXT);
+        next_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     }
 
     // Create combined surface
-    SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, lyrics_gpu_max_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface *combined = SDL_CreateRGBSurfaceWithFormat(0, lyrics_gpu_max_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (combined) {
-        SDL_FillRect(combined, NULL, 0);  // Transparent background
+        SDL_FillRect(combined, NULL, 0); // Transparent background
 
         int y_offset = 0;
         if (cur_surf) {

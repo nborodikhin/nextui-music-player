@@ -12,8 +12,8 @@
 // Scroll text state for selected item in playlist lists
 static ScrollTextState playlist_scroll = {0};
 
-void render_playlist_list(SDL_Surface* screen, int show_setting,
-                          PlaylistInfo* playlists, int count,
+void render_playlist_list(SDL_Surface *screen, int show_setting,
+                          PlaylistInfo *playlists, int count,
                           int selected, int scroll) {
     GFX_clear(screen);
 
@@ -36,7 +36,7 @@ void render_playlist_list(SDL_Surface* screen, int show_setting,
         bool is_selected = (idx == selected);
         int y = layout.list_y + i * layout.item_h;
 
-        PlaylistInfo* pl = &playlists[idx];
+        PlaylistInfo *pl = &playlists[idx];
         char display[256];
         snprintf(display, sizeof(display), "%s (%d)", pl->name, pl->track_count);
 
@@ -48,13 +48,13 @@ void render_playlist_list(SDL_Surface* screen, int show_setting,
 
     render_scroll_indicators(screen, scroll, layout.items_per_page, count);
 
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
 }
 
-void render_playlist_detail(SDL_Surface* screen, int show_setting,
-                            const char* playlist_name,
-                            PlaylistTrack* tracks, int count,
+void render_playlist_detail(SDL_Surface *screen, int show_setting,
+                            const char *playlist_name,
+                            PlaylistTrack *tracks, int count,
                             int selected, int scroll) {
     GFX_clear(screen);
 
@@ -85,14 +85,14 @@ void render_playlist_detail(SDL_Surface* screen, int show_setting,
         int y = layout.list_y + i * layout.item_h;
 
         char display[256];
-        PlaylistTrack* track = &tracks[idx];
+        PlaylistTrack *track = &tracks[idx];
         snprintf(display, sizeof(display), "%s", track->name);
 
         ListItemPos pos = render_list_item_pill(screen, &layout, display, truncated, y, is_selected, icon_offset);
 
         // Render icon
         if (Icons_isLoaded()) {
-            SDL_Surface* icon = Icons_getForFormat(tracks[idx].format, is_selected);
+            SDL_Surface *icon = Icons_getForFormat(tracks[idx].format, THEME_ROLE_PRIMARY, is_selected);
             if (icon) {
                 int icon_y = y + (layout.item_h - icon_size) / 2;
                 SDL_Rect src_rect = {0, 0, icon->w, icon->h};
@@ -109,8 +109,8 @@ void render_playlist_detail(SDL_Surface* screen, int show_setting,
 
     render_scroll_indicators(screen, scroll, layout.items_per_page, count);
 
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
 }
 
 bool playlist_list_needs_scroll_refresh(void) {

@@ -6,6 +6,7 @@
 #include "toast.h"
 #include "toast_state.h"
 #include "ui_fonts.h"
+#include "ui_theme.h"
 
 // Toast sits on the highest GPU layer, above scroll text and every other overlay.
 #define LAYER_TOAST 5
@@ -26,7 +27,8 @@ static void display_recreated(void) {
 static void draw(void) {
     if (!display || state.current == TOAST_TOKEN_NONE) return;
 
-    SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), state.message, COLOR_WHITE);
+    SDL_Surface* text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), state.message, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (!text) return;
 
     int border   = SCALE1(2);
@@ -45,12 +47,11 @@ static void draw(void) {
         // Disable blending so fills are opaque
         SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
 
-        // Light gray border (outer rect)
-        SDL_FillRect(surface, NULL, SDL_MapRGBA(surface->format, 200, 200, 200, 255));
+        // The screen and layer surfaces use the ARGB8888 format.
+        SDL_FillRect(surface, NULL, Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
 
-        // Dark grey background (inner rect)
         SDL_Rect bg_rect = {border, border, toast_w, toast_h};
-        SDL_FillRect(surface, &bg_rect, SDL_MapRGBA(surface->format, 40, 40, 40, 255));
+        SDL_FillRect(surface, &bg_rect, Theme_getPackedColor(THEME_ROLE_SURFACE_BACKGROUND, false));
 
         // Text centered within the toast
         SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);

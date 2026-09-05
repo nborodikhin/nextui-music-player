@@ -8,6 +8,7 @@
 #include "ui_system.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "selfupdate.h"
 #include "qr_code_data.h"
 
@@ -34,7 +35,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         snprintf(ver_str, sizeof(ver_str), "%s", status.current_version);
     }
     int ver_y = SCALE1(PADDING * 3 + 35);
-    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(Fonts_getMedium(), ver_str, COLOR_GRAY);
+    SDL_Surface* ver_text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (ver_text) {
         SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, ver_y});
         SDL_FreeSurface(ver_text);
@@ -130,7 +132,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         // Render wrapped lines
         for (int i = 0; i < line_count; i++) {
             if (strlen(wrapped_lines[i]) > 0) {
-                SDL_Surface* line_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), wrapped_lines[i], COLOR_WHITE);
+                SDL_Surface* line_text = TTF_RenderUTF8_Blended(
+                    Fonts_getSmall(), wrapped_lines[i], Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (line_text) {
                     SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){notes_x, notes_y + i * line_height});
                     SDL_FreeSurface(line_text);
@@ -139,7 +142,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         }
     } else if (state == SELFUPDATE_STATE_CHECKING) {
         // Show checking message
-        SDL_Surface* check_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Checking for updates...", COLOR_GRAY);
+        SDL_Surface* check_text = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), "Checking for updates...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (check_text) {
             SDL_BlitSurface(check_text, NULL, screen, &(SDL_Rect){(hw - check_text->w) / 2, notes_y});
             SDL_FreeSurface(check_text);
@@ -153,21 +157,21 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         int bar_h = SCALE1(12);
         int bar_x = SCALE1(PADDING * 4);
 
-        // Background
         SDL_Rect bg_rect = {bar_x, bar_y, bar_w, bar_h};
-        SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 64, 64, 64));
+        SDL_FillRect(screen, &bg_rect, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
 
         // Progress fill
         int prog_w = (bar_w * status.progress_percent) / 100;
         if (prog_w > 0) {
             SDL_Rect prog_rect = {bar_x, bar_y, prog_w, bar_h};
-            SDL_FillRect(screen, &prog_rect, SDL_MapRGB(screen->format, 100, 200, 100));
+            SDL_FillRect(screen, &prog_rect, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
         }
 
         // Percentage text inside bar
         char pct_str[16];
         snprintf(pct_str, sizeof(pct_str), "%d%%", status.progress_percent);
-        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), pct_str, COLOR_WHITE);
+        SDL_Surface* pct_text = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), pct_str, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (pct_text) {
             int pct_x = bar_x + (bar_w - pct_text->w) / 2;
             int pct_y = bar_y + (bar_h - pct_text->h) / 2;
@@ -177,7 +181,8 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
         // Download size detail (e.g., "2.5 MB / 5.0 MB") - below progress bar
         if (strlen(status.status_detail) > 0) {
-            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status.status_detail, COLOR_GRAY);
+            SDL_Surface* detail_text = TTF_RenderUTF8_Blended(
+                Fonts_getSmall(), status.status_detail, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (detail_text) {
                 SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
                 SDL_FreeSurface(detail_text);
@@ -194,11 +199,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
             status_msg = status.error_message;
         }
 
-        SDL_Color status_color = COLOR_WHITE;
+        SDL_Color status_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
         if (state == SELFUPDATE_STATE_ERROR) {
-            status_color = (SDL_Color){255, 100, 100, 255};
+            status_color = Theme_getColor(THEME_ROLE_STATUS_ERROR, false);
         } else if (state == SELFUPDATE_STATE_COMPLETED) {
-            status_color = (SDL_Color){100, 255, 100, 255};
+            status_color = Theme_getColor(THEME_ROLE_STATUS_SUCCESS, false);
         }
 
         SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status_msg, status_color);
@@ -232,7 +237,8 @@ void render_about(SDL_Surface* screen, int show_setting) {
     const char* version = SelfUpdate_getVersion();
     char app_name[128];
     snprintf(app_name, sizeof(app_name), "Music Player (%s)", version);
-    SDL_Surface* name_text = TTF_RenderUTF8_Blended(Fonts_getLarge(), app_name, COLOR_WHITE);
+    SDL_Surface* name_text = TTF_RenderUTF8_Blended(
+        Fonts_getLarge(), app_name, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_text) {
         SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){(hw - name_text->w) / 2, SCALE1(PADDING + PILL_SIZE)});
         SDL_FreeSurface(name_text);
@@ -242,12 +248,14 @@ void render_about(SDL_Surface* screen, int show_setting) {
     int info_y = SCALE1(PADDING + PILL_SIZE + 30);
     const char* tagline1 = "Your favorite tunes on the go,";
     const char* tagline2 = "powered by your gaming handheld.";
-    SDL_Surface* tagline_text1 = TTF_RenderUTF8_Blended(Fonts_getSmall(), tagline1, COLOR_WHITE);
+    SDL_Surface* tagline_text1 = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), tagline1, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (tagline_text1) {
         SDL_BlitSurface(tagline_text1, NULL, screen, &(SDL_Rect){(hw - tagline_text1->w) / 2, info_y});
         SDL_FreeSurface(tagline_text1);
     }
-    SDL_Surface* tagline_text2 = TTF_RenderUTF8_Blended(Fonts_getSmall(), tagline2, COLOR_WHITE);
+    SDL_Surface* tagline_text2 = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), tagline2, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (tagline_text2) {
         SDL_BlitSurface(tagline_text2, NULL, screen, &(SDL_Rect){(hw - tagline_text2->w) / 2, info_y + SCALE1(18)});
         SDL_FreeSurface(tagline_text2);
@@ -261,27 +269,27 @@ void render_about(SDL_Surface* screen, int show_setting) {
     int status_y = info_y + SCALE1(40);
 
     char status_msg[128] = "";
-    SDL_Color status_color = COLOR_WHITE;
+    SDL_Color status_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
 
     switch (update_ui) {
         case UPDATE_UI_UNCHECKED:
             break;
         case UPDATE_UI_CHECKING:
             snprintf(status_msg, sizeof(status_msg), "Checking for updates...");
-            status_color = (SDL_Color){200, 200, 200, 255};
+            status_color = Theme_getColor(THEME_ROLE_SECONDARY, false);
             break;
         case UPDATE_UI_AVAILABLE:
             snprintf(status_msg, sizeof(status_msg), "Update available: %s", status.latest_version);
-            status_color = (SDL_Color){100, 255, 100, 255};
+            status_color = Theme_getColor(THEME_ROLE_STATUS_SUCCESS, false);
             break;
         case UPDATE_UI_CURRENT:
             snprintf(status_msg, sizeof(status_msg), "You're up to date");
-            status_color = (SDL_Color){150, 150, 150, 255};
+            status_color = Theme_getColor(THEME_ROLE_SECONDARY, false);
             break;
         case UPDATE_UI_FAILED:
             snprintf(status_msg, sizeof(status_msg), "%s",
                 status.error_message[0] ? status.error_message : "Update check failed");
-            status_color = (SDL_Color){255, 100, 100, 255};
+            status_color = Theme_getColor(THEME_ROLE_STATUS_ERROR, false);
             break;
     }
 

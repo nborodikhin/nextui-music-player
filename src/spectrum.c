@@ -302,10 +302,8 @@ const char* Spectrum_getStyleName(void) {
 static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y, int w, int h, int bar_index) {
     if (h <= 0 || w <= 0) return;
 
-    // Get raw theme colors (format: 0xRRGGBB)
-    // THEME_COLOR1 = main, THEME_COLOR2 = primary accent, THEME_COLOR3 = secondary accent
-    uint32_t color1 = CFG_getColor(2);  // Primary accent (top)
-    uint32_t color2 = CFG_getColor(3);  // Secondary accent (bottom)
+    uint32_t color1 = CFG_getColor(COLOR_ACCENT);  // Primary accent (top)
+    uint32_t color2 = CFG_getColor(COLOR_ACCENT2);  // Secondary accent (bottom)
 
     uint8_t top_r = (color1 >> 16) & 0xFF;
     uint8_t top_g = (color1 >> 8) & 0xFF;

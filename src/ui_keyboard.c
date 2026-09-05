@@ -10,6 +10,7 @@
 #include "utf8.h"
 #include "ui_keyboard.h"
 #include "ui_fonts.h"
+#include "ui_theme.h"
 #include "ui_utils.h"
 
 // Space around every key, taken out of its cell, so two neighbours sit twice
@@ -24,12 +25,16 @@
 // Special keys are set in small caps: uppercase, at this share of the key font
 #define LABEL_FONT_RATIO 78
 
-// Special keys color - distance from COLOR_ACCENT to COLOR_MAIN, percents
-#define KEY_BG_SPECIAL_MIX 20
-
 // The lock LED size as a percentage of the key height, and its inset from the corner
 #define LOCK_LED_HEIGHT_RATIO 15
 #define LOCK_LED_INSET 3
+
+// The two states of the lock LED, packed as 0xRRGGBBAA, which is the form that
+// CFG_getColor() gives and uintToColour() reads. Fixed on purpose, against the
+// rule that a color comes from the theme: an LED reads as on or as off only
+// when its two states never move.
+#define LOCK_LED_ON 0x00DC00FF
+#define LOCK_LED_OFF 0x000000FF
 
 // A pressed key shrunk size, percentage of the unpressed key size
 #define KEY_PRESSED_RATIO 90
@@ -173,19 +178,17 @@ static uint32_t theme_color_mapped(SDL_Surface* screen, int color_id) {
     return SDL_MapRGB(screen->format, color.r, color.g, color.b);
 }
 
-// Blend two mapped colors, percent of the way from the first to the second.
-// Mapped pixels carry no channels of their own, so they are read back out of
-// the format before the mix and mapped again after it.
-static uint32_t mix_mapped_colors(SDL_Surface* screen, uint32_t a, uint32_t b, int percent) {
-    Uint8 ar, ag, ab;
-    Uint8 br, bg, bb;
-    SDL_GetRGB(a, screen->format, &ar, &ag, &ab);
-    SDL_GetRGB(b, screen->format, &br, &bg, &bb);
+// A key that carries no character takes a ground between the ground of the
+// other keys and the ground of the selected one, thus TAB, SHIFT, ENTER, CANCEL,
+// CYR, SPACE and the caps key read as a group and none of them reads as
+// selected. This mix belongs to the keyboard and not to the theme roles: no
+// other screen draws such a key.
+#define SPECIAL_KEY_MIX 20
 
-    return SDL_MapRGB(screen->format,
-                      ar + (br - ar) * percent / 100,
-                      ag + (bg - ag) * percent / 100,
-                      ab + (bb - ab) * percent / 100);
+static uint32_t special_key_bg(SDL_Surface* screen) {
+    SDL_Color color = Theme_mix(theme_color(COLOR_ACCENT2), theme_color(COLOR_MAIN),
+                                SPECIAL_KEY_MIX);
+    return SDL_MapRGB(screen->format, color.r, color.g, color.b);
 }
 
 // Filled circle, drawn as horizontal spans - the lock lamp on a shift key
@@ -370,20 +373,18 @@ void UIKeyboard_render(SDL_Surface* screen, const KeyboardUiState* state) {
             if (selected) {
                 bg = selected_bg;
             } else if (key->action != KEY_TEXT) {
-                bg = mix_mapped_colors(screen, regular_bg, selected_bg, KEY_BG_SPECIAL_MIX);
+                bg = special_key_bg(screen);
             }
             render_rounded_rect_bg(screen, rect.x, rect.y, rect.w, rect.h, bg);
 
             // The caps key carries the lock LED in its top right corner: green
-            // while the shift is locked, dark otherwise. Fixed colors on
-            // purpose, against the rule that colors come from the theme - an
-            // LED reads as on or off only when its two states never move.
+            // while the shift is locked, dark otherwise.
             if (key->action == KEY_CAPS) {
                 int radius = rect.h * LOCK_LED_HEIGHT_RATIO / 100;
                 int led_inset = radius + SCALE1(LOCK_LED_INSET);
-                uint32_t led = (state->shift == SHIFT_LOCKED)
-                                   ? SDL_MapRGB(screen->format, 0, 220, 0)
-                                   : SDL_MapRGB(screen->format, 0, 0, 0);
+                SDL_Color lamp = uintToColour(
+                    state->shift == SHIFT_LOCKED ? LOCK_LED_ON : LOCK_LED_OFF);
+                uint32_t led = SDL_MapRGB(screen->format, lamp.r, lamp.g, lamp.b);
                 fill_circle(screen, rect.x + rect.w - led_inset, rect.y + led_inset,
                             radius, led);
             }

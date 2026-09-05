@@ -6,6 +6,7 @@
 #include "ui_settings.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "settings.h"
 #include "album_art.h"
 #include "selfupdate.h"
@@ -72,8 +73,9 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
                 break;
             }
             case SETTINGS_ITEM_UPDATE_YTDLP:
-                label = Downloader_isAvailable() ? "Update Youtube download helpers"
-                                                : "Install Youtube download helpers";
+                label = Downloader_isAvailable()
+                            ? "Update Youtube download helpers"
+                            : "Install Youtube download helpers";
                 break;
             case SETTINGS_ITEM_ABOUT: {
                 const SelfUpdateStatus status = SelfUpdate_getStatus();
@@ -94,78 +96,45 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
         TTF_SizeUTF8(font, label, &text_w, &text_h);
         int label_pill_width = text_w + SCALE1(BUTTON_PADDING * 2);
 
-        // Text position
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = item_y + (SCALE1(PILL_SIZE) - TTF_FontHeight(font)) / 2;
 
-        if (selected) {
-            // Selected item rendering - use theme colors
-            SDL_Color selected_text_color = Fonts_getListTextColor(true);
+        // draw band
+        if (selected && value_str) {
+            int row_width = hw - SCALE1(PADDING * 2);
+            SDL_Rect row_rect = {SCALE1(PADDING), item_y, row_width, SCALE1(PILL_SIZE)};
+            draw_list_item_band(screen, &row_rect);
+        }
 
-            if (value_str) {
-                // Item with option value: 2-layer approach
-                // Layer 1: Primary accent color for full-width row background (options area)
-                // Layer 2: Main/white pill around just the label on top
-
-                // 1. Draw full-width pill as row background with primary accent color
-                int row_width = hw - SCALE1(PADDING * 2);
-                SDL_Rect row_rect = {SCALE1(PADDING), item_y, row_width, SCALE1(PILL_SIZE)};
-                GFX_blitPillColor(ASSET_WHITE_PILL, screen, &row_rect, THEME_COLOR2, RGB_WHITE);
-
-                // 2. Draw THEME_COLOR2 pill around just the label (on top)
-                SDL_Rect label_pill_rect = {SCALE1(PADDING), item_y, label_pill_width, SCALE1(PILL_SIZE)};
-                GFX_blitPillColor(ASSET_WHITE_PILL, screen, &label_pill_rect, THEME_COLOR1, RGB_WHITE);
-
-                // 3. Render label with selected text color (dark on white pill)
-                SDL_Surface* label_surf = TTF_RenderUTF8_Blended(font, label, selected_text_color);
-                if (label_surf) {
-                    SDL_BlitSurface(label_surf, NULL, screen, &(SDL_Rect){text_x, text_y, 0, 0});
-                    SDL_FreeSurface(label_surf);
-                }
-
-                // 4. Render value with arrows in white (on accent background)
-                int value_x = hw - SCALE1(PADDING) - SCALE1(BUTTON_PADDING);
-                char value_with_arrows[64];
-                snprintf(value_with_arrows, sizeof(value_with_arrows), "< %s >", value_str);
-                SDL_Surface* val_surf = TTF_RenderUTF8_Blended(font, value_with_arrows, COLOR_WHITE);
-                if (val_surf) {
-                    value_x -= val_surf->w;
-                    SDL_BlitSurface(val_surf, NULL, screen, &(SDL_Rect){value_x, text_y, 0, 0});
-                    SDL_FreeSurface(val_surf);
-                }
+        // draw value
+        if (value_str) {
+            char value_to_print[64];
+            if (selected) {
+                snprintf(value_to_print, sizeof(value_to_print), "< %s >", value_str);
             } else {
-                // Item without option: pill with primary accent color
-                SDL_Rect label_pill_rect = {SCALE1(PADDING), item_y, label_pill_width, SCALE1(PILL_SIZE)};
-                GFX_blitPillColor(ASSET_WHITE_PILL, screen, &label_pill_rect, THEME_COLOR1, RGB_WHITE);
-
-                // Render label with selected text color
-                SDL_Surface* label_surf = TTF_RenderUTF8_Blended(font, label, selected_text_color);
-                if (label_surf) {
-                    SDL_BlitSurface(label_surf, NULL, screen, &(SDL_Rect){text_x, text_y, 0, 0});
-                    SDL_FreeSurface(label_surf);
-                }
-            }
-        } else {
-            // Unselected item: no background, theme-aware text color
-            SDL_Color text_color = Fonts_getListTextColor(false);
-
-            // Render label
-            SDL_Surface* label_surf = TTF_RenderUTF8_Blended(font, label, text_color);
-            if (label_surf) {
-                SDL_BlitSurface(label_surf, NULL, screen, &(SDL_Rect){text_x, text_y, 0, 0});
-                SDL_FreeSurface(label_surf);
+                snprintf(value_to_print, sizeof(value_to_print), "%s", value_str);
             }
 
-            // Render value
-            if (value_str) {
-                int value_x = hw - SCALE1(PADDING) - SCALE1(BUTTON_PADDING);
-                SDL_Surface* val_surf = TTF_RenderUTF8_Blended(font, value_str, text_color);
-                if (val_surf) {
-                    value_x -= val_surf->w;
-                    SDL_BlitSurface(val_surf, NULL, screen, &(SDL_Rect){value_x, text_y, 0, 0});
-                    SDL_FreeSurface(val_surf);
-                }
+            // value is always drawn on the non-selected part of the line
+            SDL_Color value_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
+            SDL_Surface* val_surf = TTF_RenderUTF8_Blended(font, value_to_print, value_color);
+            if (val_surf) {
+                int value_x = hw - SCALE1(PADDING) - SCALE1(BUTTON_PADDING) - val_surf->w;
+                SDL_BlitSurface(val_surf, NULL, screen, &(SDL_Rect){value_x, text_y, 0, 0});
+                SDL_FreeSurface(val_surf);
             }
+        }
+
+        // draw label bg
+        SDL_Rect label_pill_rect = {SCALE1(PADDING), item_y, label_pill_width, SCALE1(PILL_SIZE)};
+        draw_list_item_bg(screen, &label_pill_rect, selected);
+
+        // draw label
+        SDL_Color label_color = Theme_getColor(THEME_ROLE_PRIMARY, selected);
+        SDL_Surface* label_surf = TTF_RenderUTF8_Blended(font, label, label_color);
+        if (label_surf) {
+            SDL_BlitSurface(label_surf, NULL, screen, &(SDL_Rect){text_x, text_y, 0, 0});
+            SDL_FreeSurface(label_surf);
         }
     }
 
@@ -173,17 +142,15 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     render_scroll_indicators(screen, menu_scroll, layout.items_per_page, SETTINGS_ITEM_COUNT);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
 
     // Different hints based on selected item
     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF ||
         menu_selected == SETTINGS_ITEM_BASS_FILTER ||
         menu_selected == SETTINGS_ITEM_SOFT_LIMITER ||
         menu_selected == SETTINGS_ITEM_AUTO_UPDATE) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
+        GFX_blitButtonGroup((char *[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
+        GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
     }
 }
-
-

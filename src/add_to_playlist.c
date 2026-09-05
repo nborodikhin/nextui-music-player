@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "toast.h"
 #include "module_common.h"
 
@@ -157,7 +158,8 @@ void AddToPlaylist_render(SDL_Surface* screen) {
     char title[64];
     snprintf(title, sizeof(title), "Add to Playlist: (%d %s)",
              file_count, file_count == 1 ? "file" : "files");
-    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), title, COLOR_WHITE);
+    SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
         SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){db.content_x, db.box_y + SCALE1(10)});
         SDL_FreeSurface(title_surf);
@@ -183,15 +185,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
             label = buf;
         }
 
-        SDL_Color color = is_selected ? COLOR_WHITE : COLOR_GRAY;
+        SDL_Color color = Theme_getColor(THEME_ROLE_SECONDARY, is_selected);
         TTF_Font* font = Fonts_getSmall();
 
-        // Selection indicator
-        if (is_selected) {
-            SDL_Rect sel_bg = {db.content_x - SCALE1(4), y_offset, db.content_w + SCALE1(8), line_height};
-            render_rounded_rect_bg(screen, sel_bg.x, sel_bg.y, sel_bg.w, sel_bg.h,
-                                   SDL_MapRGB(screen->format, 60, 60, 60));
-        }
+        SDL_Rect sel_bg = {db.content_x - SCALE1(4), y_offset, db.content_w + SCALE1(8), line_height};
+        draw_list_item_bg(screen, &sel_bg, is_selected);
 
         // Truncate text if needed
         char truncated[160];
@@ -208,14 +206,16 @@ void AddToPlaylist_render(SDL_Surface* screen) {
 
     // Scroll indicators
     if (scroll > 0) {
-        SDL_Surface* up = TTF_RenderUTF8_Blended(Fonts_getTiny(), "...", COLOR_GRAY);
+        SDL_Surface* up = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), "...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (up) {
             SDL_BlitSurface(up, NULL, screen, &(SDL_Rect){db.box_x + db.box_w - SCALE1(25), db.box_y + SCALE1(32)});
             SDL_FreeSurface(up);
         }
     }
     if (scroll + items_per_page < total_items) {
-        SDL_Surface* dn = TTF_RenderUTF8_Blended(Fonts_getTiny(), "...", COLOR_GRAY);
+        SDL_Surface* dn = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), "...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (dn) {
             SDL_BlitSurface(dn, NULL, screen, &(SDL_Rect){db.box_x + db.box_w - SCALE1(25), db.box_y + db.box_h - SCALE1(18)});
             SDL_FreeSurface(dn);
@@ -223,7 +223,8 @@ void AddToPlaylist_render(SDL_Surface* screen) {
     }
 
     const char* hint = "A: Select   B: Cancel";
-    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), hint, COLOR_GRAY);
+    SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(
+        Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
         int hint_y = db.box_y + db.box_h - SCALE1(10) - hint_surf->h;
         SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(screen->w - hint_surf->w) / 2, hint_y});
