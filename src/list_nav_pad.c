@@ -1,7 +1,7 @@
 #include "defines.h"
 #include "api.h"
 
-#include "list_nav_pad.h"
+#include "list_nav.h"
 
 // Note:
 // - Up/Down use PAD_justRepeated (hold-to-repeat),

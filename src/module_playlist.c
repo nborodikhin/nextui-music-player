@@ -17,7 +17,6 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 
 // Internal states
 typedef enum {

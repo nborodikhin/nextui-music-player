@@ -7,7 +7,8 @@
 # that constraint is what keeps this harness stub-free and sub-second.
 #
 # list_nav.c is the model: pure integer cursor logic, with the pad read split
-# out into list_nav_pad.c so api.h never reaches the tested TU. toast_state.c
+# out into list_nav_pad.c so api.h never reaches the tested TU. Its declaration
+# remains in list_nav.h because ListNavInput is part of that public API. toast_state.c
 # follows it, with the drawing left in toast.c and the clock passed in.
 #
 # keyboard_map.c qualifies the same way: the key tables and the pair lookups are

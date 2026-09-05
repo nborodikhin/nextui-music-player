@@ -15,7 +15,6 @@
 #include "wifi.h"
 #include "album_art.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 
 // Internal states
 typedef enum {

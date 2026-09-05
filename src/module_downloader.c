@@ -17,7 +17,6 @@
 #include "ui_utils.h"
 #include "wifi.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 
 // Menu count
 #define DOWNLOADER_MENU_COUNT 2

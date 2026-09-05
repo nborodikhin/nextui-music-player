@@ -17,6 +17,9 @@ typedef enum {
     LIST_NAV_RIGHT     = 1 << 3
 } ListNavInput;
 
+// Decode this frame's platform D-pad state into navigation intents.
+ListNavInput ListNavPad_read(void);
+
 // Invariant: selected is -1 exactly when count is 0, and a valid row otherwise.
 // A caller may index its items with `selected` after checking `count > 0`.
 typedef struct {

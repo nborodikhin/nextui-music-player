@@ -12,7 +12,6 @@
 #include "resume.h"
 #include "background.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 #include "menu_rows.h"
 #include "toast.h"
 

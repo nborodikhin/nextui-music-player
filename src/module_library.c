@@ -13,7 +13,6 @@
 #include "ui_utils.h"
 #include "ui_fonts.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 #include "display_helper.h"
 
 // Library submenu items

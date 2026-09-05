@@ -18,7 +18,6 @@
 #include "ui_utils.h"
 #include "wifi.h"
 #include "list_nav.h"
-#include "list_nav_pad.h"
 #include "background.h"
 
 // Internal states
