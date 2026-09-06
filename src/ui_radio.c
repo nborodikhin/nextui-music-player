@@ -6,10 +6,15 @@
 #include "ui_radio.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 #include "ui_album_art.h"
 #include "album_art.h"
 #include "radio_curated.h"
 #include "module_common.h"
+
+// One state is sufficient for the three lists of this module. Only one list
+// draws at a time, and only the row that the cursor is on moves its title.
+static ScrollTextState radio_list_scroll = {0};
 
 // Render the radio station list
 void render_radio_list(SDL_Surface* screen, int show_setting,
@@ -43,22 +48,39 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
 
         int y = layout.list_y + i * layout.item_h;
 
-        // Render pill background and get text position
-        ListItemPos pos = render_list_item_pill(screen, &layout, station->name, truncated, y, selected, 0);
-
-        // Station name (no scrolling for radio list)
-        render_list_item_text(screen, NULL, station->name, Fonts_getMedium(),
-                              pos.text_x, pos.text_y, layout.max_width, selected);
-
-        // Genre (if available)
+        // Four steps, in this order: the band of a selected row, the label at
+        // the right edge, the pill of the title, then the title. The pill thus
+        // covers the label if it ever reaches it.
+        int genre_width = 0;
         if (station->genre[0]) {
-            SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
+            TTF_SizeUTF8(Fonts_getTiny(), station->genre, &genre_width, NULL);
+        }
+
+        if (selected && genre_width > 0) {
+            SDL_Rect band = {SCALE1(PADDING), y, layout.max_width, layout.item_h};
+            draw_list_item_band(screen, &band);
+        }
+
+        if (genre_width > 0) {
+            SDL_Color genre_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
             SDL_Surface* genre_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), station->genre, genre_color);
             if (genre_text) {
                 SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
                 SDL_FreeSurface(genre_text);
             }
         }
+
+        ListItemPos pos = render_list_item_pill_right(screen, &layout, station->name,
+                                                      truncated, y, selected, 0,
+                                                      genre_width);
+
+        // The row that the cursor is on moves the whole name. Another row shows
+        // the name that the pill cut, thus its end lands on a character.
+        render_list_item_text(screen, &radio_list_scroll,
+                              selected ? station->name : truncated, Fonts_getMedium(),
+                              pos.text_x, pos.text_y,
+                              pos.pill_width - SCALE1(BUTTON_PADDING * 2), selected);
+
     }
 
     render_scroll_indicators(screen, *radio_scroll, layout.items_per_page, station_count);
@@ -68,14 +90,16 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
         int note_y = hh - SCALE1(BUTTON_SIZE + BUTTON_MARGIN + PADDING + 55);
 
         const char* note1 = "These are default stations";
-        SDL_Surface* note1_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), note1, COLOR_GRAY);
+        SDL_Surface* note1_surf = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), note1, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (note1_surf) {
             SDL_BlitSurface(note1_surf, NULL, screen, &(SDL_Rect){(hw - note1_surf->w) / 2, note_y});
             SDL_FreeSurface(note1_surf);
         }
 
         const char* note2 = "Press Y to manage stations";
-        SDL_Surface* note2_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), note2, COLOR_GRAY);
+        SDL_Surface* note2_surf = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), note2, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (note2_surf) {
             SDL_BlitSurface(note2_surf, NULL, screen, &(SDL_Rect){(hw - note2_surf->w) / 2, note_y + SCALE1(14)});
             SDL_FreeSurface(note2_surf);
@@ -123,31 +147,18 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     // === TOP BAR ===
     int top_y = SCALE1(PADDING);
 
-    // "RADIO" badge with border (like format badge in local player)
-    const char* badge_text = "RADIO";
-    SDL_Surface* badge_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), badge_text, COLOR_GRAY);
-    int badge_h = badge_surf ? badge_surf->h + SCALE1(4) : SCALE1(16);
-    int badge_x = SCALE1(PADDING);
-    int badge_w = 0;
-
-    if (badge_surf) {
-        badge_w = badge_surf->w + SCALE1(10);
-        // Draw border (gray)
-        SDL_Rect border = {badge_x, top_y, badge_w, badge_h};
-        SDL_FillRect(screen, &border, RGB_GRAY);
-        SDL_Rect inner = {badge_x + 1, top_y + 1, badge_w - 2, badge_h - 2};
-        SDL_FillRect(screen, &inner, RGB_BLACK);
-        SDL_BlitSurface(badge_surf, NULL, screen, &(SDL_Rect){badge_x + SCALE1(5), top_y + SCALE1(2)});
-        SDL_FreeSurface(badge_surf);
-    }
+    // Source chip
+    const char* chip_text = "RADIO";
+    SDL_Rect chip = draw_chip(screen, chip_text, SCALE1(PADDING), top_y);
 
     // Station counter "01 - 12" (like track counter in local player)
     char station_str[32];
     snprintf(station_str, sizeof(station_str), "%02d - %02d", radio_selected + 1, station_count);
-    SDL_Surface* station_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), station_str, COLOR_GRAY);
+    SDL_Surface* station_surf = TTF_RenderUTF8_Blended(
+        Fonts_getTiny(), station_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (station_surf) {
-        int station_x = badge_x + badge_w + SCALE1(8);
-        int station_y = top_y + (badge_h - station_surf->h) / 2;
+        int station_x = chip.x + chip.w + SCALE1(8);
+        int station_y = top_y + (chip.h - station_surf->h) / 2;
         SDL_BlitSurface(station_surf, NULL, screen, &(SDL_Rect){station_x, station_y});
         SDL_FreeSurface(station_surf);
     }
@@ -165,7 +176,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     // Genre (like Artist in local player) - gray, medium font
     const char* genre = (current_station && current_station->genre[0]) ? current_station->genre : "Radio";
     GFX_truncateText(Fonts_getArtist(), genre, truncated, max_w_half, 0);
-    SDL_Surface* genre_surf = TTF_RenderUTF8_Blended(Fonts_getArtist(), truncated, COLOR_GRAY);
+    SDL_Surface* genre_surf = TTF_RenderUTF8_Blended(
+        Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (genre_surf) {
         SDL_BlitSurface(genre_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
         info_y += genre_surf->h + SCALE1(2);
@@ -178,7 +190,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     const char* station_name = meta->station_name[0] ? meta->station_name :
                                (current_station ? current_station->name : "Unknown Station");
     GFX_truncateText(Fonts_getXLarge(), station_name, truncated, max_w_full, 0);
-    SDL_Surface* name_surf = TTF_RenderUTF8_Blended(Fonts_getXLarge(), truncated, COLOR_WHITE);
+    SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
+        Fonts_getXLarge(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_surf) {
         SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
         info_y += name_surf->h + SCALE1(2);
@@ -239,7 +252,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
             }
 
             if (strlen(line_buf) > 0) {
-                SDL_Surface* title_surf = TTF_RenderUTF8_Blended(title_font, line_buf, COLOR_WHITE);
+                SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
+                    title_font, line_buf, Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (title_surf) {
                     SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
                     info_y += title_surf->h + SCALE1(2);
@@ -256,7 +270,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     if (meta->artist[0]) {
         // Artist line (smaller font)
         GFX_truncateText(Fonts_getSmall(), meta->artist, truncated, max_w_full, 0);
-        SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(Fonts_getSmall(), truncated, COLOR_GRAY);
+        SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (artist_surf) {
             SDL_BlitSurface(artist_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
             info_y += artist_surf->h + SCALE1(2);
@@ -267,7 +282,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     // Show slogan if no title/artist available
     if (!meta->title[0] && !meta->artist[0] && current_station && current_station->slogan[0]) {
         GFX_truncateText(Fonts_getAlbum(), current_station->slogan, truncated, max_w_full, 0);
-        SDL_Surface* slogan_surf = TTF_RenderUTF8_Blended(Fonts_getAlbum(), truncated, COLOR_GRAY);
+        SDL_Surface* slogan_surf = TTF_RenderUTF8_Blended(
+            Fonts_getAlbum(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (slogan_surf) {
             SDL_BlitSurface(slogan_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
             info_y += slogan_surf->h + SCALE1(2);
@@ -290,7 +306,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     // Error message (displayed prominently if in error state)
     if (state == RADIO_STATE_ERROR) {
-        SDL_Surface* err_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), Radio_getError(), (SDL_Color){255, 100, 100, 255});
+        SDL_Surface* err_text = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), Radio_getError(), Theme_getColor(THEME_ROLE_STATUS_ERROR, false));
         if (err_text) {
             SDL_BlitSurface(err_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING), vis_y - SCALE1(20)});
             SDL_FreeSurface(err_text);
@@ -322,24 +339,36 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
         bool selected = (idx == add_country_selected);
 
         int y = layout.list_y + i * layout.item_h;
-
-        // Render pill background and get text position
-        ListItemPos pos = render_list_item_pill(screen, &layout, country->name, truncated, y, selected, 0);
-
-        // Country name
-        render_list_item_text(screen, NULL, country->name, Fonts_getMedium(),
-                              pos.text_x, pos.text_y, layout.max_width, selected);
-
-        // Station count on right
+        // Four steps, in this order: the band of a selected row, the label at
+        // the right edge, the pill of the title, then the title.
         int curated_station_count = Radio_getCuratedStationCount(country->code);
         char count_str[32];
         snprintf(count_str, sizeof(count_str), "%d stations", curated_station_count);
-        SDL_Color count_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
+        int count_width = 0;
+        TTF_SizeUTF8(Fonts_getTiny(), count_str, &count_width, NULL);
+
+        if (selected) {
+            SDL_Rect band = {SCALE1(PADDING), y, layout.max_width, layout.item_h};
+            draw_list_item_band(screen, &band);
+        }
+
+        SDL_Color count_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
         SDL_Surface* count_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), count_str, count_color);
         if (count_text) {
             SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (layout.item_h - count_text->h) / 2});
             SDL_FreeSurface(count_text);
         }
+
+        ListItemPos pos = render_list_item_pill_right(screen, &layout, country->name,
+                                                      truncated, y, selected, 0,
+                                                      count_width);
+
+        // Country name. The row that the cursor is on moves the whole name.
+        render_list_item_text(screen, &radio_list_scroll,
+                              selected ? country->name : truncated, Fonts_getMedium(),
+                              pos.text_x, pos.text_y,
+                              pos.pill_width - SCALE1(BUTTON_PADDING * 2), selected);
+
     }
 
     render_scroll_indicators(screen, *add_country_scroll, layout.items_per_page, country_count);
@@ -407,21 +436,48 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
             prefix_width = pw + SCALE1(6);
         }
 
-        // Render pill background and get text position
-        int name_max_width = layout.max_width - prefix_width - SCALE1(60);
+        // Four steps, in this order: the band of a selected row, the label at
+        // the right edge, the pill of the title, then the title. The width of
+        // the label is what the title gives up, thus the two never overlap.
+        int genre_width = 0;
+        if (station->genre[0]) {
+            TTF_SizeUTF8(Fonts_getTiny(), station->genre, &genre_width, NULL);
+        }
+
+        int pill_max_width = layout.max_width;
+        if (genre_width > 0) {
+            pill_max_width -= genre_width + SCALE1(PADDING * 2);
+        }
+        int name_max_width = pill_max_width - prefix_width;
         int text_width = GFX_truncateText(Fonts_getMedium(), station->name, truncated, name_max_width, SCALE1(BUTTON_PADDING * 2));
-        int pill_width = MIN(layout.max_width, prefix_width + text_width + SCALE1(BUTTON_PADDING));
+        // GFX_truncateText() gives the width with its padding already in it.
+        int pill_width = MIN(pill_max_width, prefix_width + text_width);
+
+        if (selected && genre_width > 0) {
+            SDL_Rect band = {SCALE1(PADDING), y, layout.max_width, layout.item_h};
+            draw_list_item_band(screen, &band);
+        }
+
+        if (genre_width > 0) {
+            SDL_Color genre_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
+            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), station->genre, genre_color);
+            if (genre_text) {
+                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
+                SDL_FreeSurface(genre_text);
+            }
+        }
 
         // Background pill
         SDL_Rect pill_rect = {SCALE1(PADDING), y, pill_width, layout.item_h};
-        Fonts_drawListItemBg(screen, &pill_rect, selected);
+        draw_list_item_bg(screen, &pill_rect, selected);
 
         int text_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
         int text_y = y + (layout.item_h - TTF_FontHeight(Fonts_getMedium())) / 2;
 
         // Added indicator prefix
         if (added) {
-            SDL_Color prefix_color = Fonts_getListTextColor(selected);
+            SDL_Color prefix_color = Theme_getColor(
+                THEME_ROLE_PRIMARY, selected);
             SDL_Surface* prefix_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "[+]", prefix_color);
             if (prefix_text) {
                 SDL_BlitSurface(prefix_text, NULL, screen, &(SDL_Rect){text_x, y + (layout.item_h - prefix_text->h) / 2});
@@ -429,19 +485,15 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
             }
         }
 
-        // Station name
-        render_list_item_text(screen, NULL, station->name, Fonts_getMedium(),
-                              text_x + prefix_width, text_y, name_max_width, selected);
+        // The row that the cursor is on moves the whole name. Another row shows
+        // the name that GFX_truncateText() cut, thus its end lands on a
+        // character and not in the middle of a glyph.
+        render_list_item_text(screen, &radio_list_scroll,
+                              selected ? station->name : truncated, Fonts_getMedium(),
+                              text_x + prefix_width, text_y,
+                              pill_width - prefix_width - SCALE1(BUTTON_PADDING * 2),
+                              selected);
 
-        // Genre on right
-        if (station->genre[0]) {
-            SDL_Color genre_color = selected ? COLOR_GRAY : COLOR_DARK_TEXT;
-            SDL_Surface* genre_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), station->genre, genre_color);
-            if (genre_text) {
-                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
-                SDL_FreeSurface(genre_text);
-            }
-        }
     }
 
     render_scroll_indicators(screen, *add_station_scroll, layout.items_per_page, sorted_count);
@@ -535,14 +587,14 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
             continue;
         }
 
-        SDL_Color color = COLOR_WHITE;
+        SDL_Color color = Theme_getColor(THEME_ROLE_PRIMARY, false);
         TTF_Font* use_font = Fonts_getSmall();
 
         // Highlight special lines
         if (strstr(lines[i], "Example:") || strstr(lines[i], "Notes:")) {
-            color = COLOR_GRAY;
+            color = Theme_getColor(THEME_ROLE_SECONDARY, false);
         } else if (lines[i][0] == '-') {
-            color = COLOR_GRAY;
+            color = Theme_getColor(THEME_ROLE_SECONDARY, false);
             use_font = Fonts_getTiny();
         }
 
@@ -706,9 +758,8 @@ void RadioStatus_renderGPU(void) {
 
     int x_offset = 0;
 
-    // Draw bitrate on left (white)
     if (bitrate_str[0]) {
-        SDL_Color color = {255, 255, 255, 255};
+        SDL_Color color = Theme_getColor(THEME_ROLE_PRIMARY, false);
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(bitrate_font, bitrate_str, color);
         if (text_surf) {
             int y_pos = (line_h - bitrate_h) / 2;
@@ -721,7 +772,7 @@ void RadioStatus_renderGPU(void) {
 
     // Draw status text next to bitrate (gray)
     if (status_text[0]) {
-        SDL_Color color = {128, 128, 128, 255};
+        SDL_Color color = Theme_getColor(THEME_ROLE_SECONDARY, false);
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(status_font, status_text, color);
         if (text_surf) {
             int y_pos = (line_h - status_h) / 2;
@@ -735,15 +786,14 @@ void RadioStatus_renderGPU(void) {
     int bar_x_in_surface = surface_w - status_bar_w;
     int bar_y_pos = (line_h - status_bar_h) / 2;
 
-    // Buffer bar background (dark gray)
     SDL_Rect bar_bg = {bar_x_in_surface, bar_y_pos, status_bar_w, status_bar_h};
-    SDL_FillRect(surface, &bar_bg, SDL_MapRGBA(surface->format, 60, 60, 60, 255));
+    SDL_FillRect(surface, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
 
     // Buffer fill (white)
     int fill_w = (int)(status_bar_w * buffer_level);
     if (fill_w > 0) {
         SDL_Rect bar_fill = {bar_x_in_surface, bar_y_pos, fill_w, status_bar_h};
-        SDL_FillRect(surface, &bar_fill, SDL_MapRGBA(surface->format, 255, 255, 255, 255));
+        SDL_FillRect(surface, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
     }
 
     // Render to GPU layer
@@ -752,4 +802,24 @@ void RadioStatus_renderGPU(void) {
     SDL_FreeSurface(surface);
 
     PLAT_GPU_Flip();
+}
+
+// True while a title of a list of this module moves.
+bool radio_list_needs_scroll_refresh(void) {
+    return ScrollText_isScrolling(&radio_list_scroll);
+}
+
+// True while the scroll waits to start and needs one more frame.
+bool radio_list_scroll_needs_render(void) {
+    return ScrollText_needsRender(&radio_list_scroll);
+}
+
+// Move the title without a redraw of the screen.
+void radio_list_animate_scroll(void) {
+    ScrollText_animateOnly(&radio_list_scroll);
+}
+
+// Forget the title that moves. Call this on the way out of a list.
+void radio_list_clear_scroll(void) {
+    memset(&radio_list_scroll, 0, sizeof(radio_list_scroll));
 }

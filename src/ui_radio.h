@@ -35,4 +35,16 @@ void RadioStatus_clear(void);
 bool RadioStatus_needsRefresh(void);
 void RadioStatus_renderGPU(void);
 
+// True while a title of a list of this module moves.
+bool radio_list_needs_scroll_refresh(void);
+
+// True while the scroll waits to start and needs one more frame.
+bool radio_list_scroll_needs_render(void);
+
+// Move the title without a redraw of the screen.
+void radio_list_animate_scroll(void);
+
+// Forget the title that moves. Call this on the way out of a list.
+void radio_list_clear_scroll(void);
+
 #endif

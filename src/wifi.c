@@ -6,6 +6,7 @@
 #include "api.h"
 #include "wifi.h"
 #include "ui_fonts.h"
+#include "ui_theme.h"
 #include "ui_podcast.h"  // For Podcast_clearTitleScroll
 
 // WiFi connection timeout (in 500ms intervals)
@@ -22,7 +23,8 @@ static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
 
     // Center the message
     const char* msg = "Connecting to WiFi...";
-    SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
+    SDL_Surface* text = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (text) {
         SDL_BlitSurface(text, NULL, scr, &(SDL_Rect){(hw - text->w) / 2, (hh - text->h) / 2});
         SDL_FreeSurface(text);

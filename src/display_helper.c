@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "display_helper.h"
+#include "ui_theme.h"
 
 #define MAX_RECREATED_CALLBACKS 8
 
@@ -112,6 +113,8 @@ void DisplayHelper_recoverDisplay(void) {
 	context.surface = screen;
 	context.width = screen->w;
 	context.height = screen->h;
+	// PLAT_initVideo() resets the clear color. Set the page background again.
+	GFX_setClearColor(Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
 	GFX_clearAll();
 
 	notify_recreated();

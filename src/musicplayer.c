@@ -20,6 +20,7 @@
 #include "keyboard_map.h"
 #include "ui_keyboard.h"
 #include "ui_icons.h"
+#include "ui_theme.h"
 #include "toast.h"
 
 // Module architecture
@@ -111,6 +112,7 @@ int main(int argc, char* argv[]) {
     }
 
     SDL_Surface* const screen = GFX_init(MODE_MAIN);
+    Theme_init(screen);
     display = DisplayHelper_init(screen);
     Toast_init(display);
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
@@ -124,7 +126,8 @@ int main(int argc, char* argv[]) {
     // Show splash screen immediately while heavy subsystems initialize
     {
         GFX_clear(screen);
-        SDL_Surface* title = TTF_RenderUTF8_Blended(Fonts_getTitle(), "Music Player", COLOR_WHITE);
+        SDL_Surface* title = TTF_RenderUTF8_Blended(
+            Fonts_getTitle(), "Music Player", Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (title) {
             SDL_BlitSurface(title, NULL, screen, &(SDL_Rect){
                 (screen->w - title->w) / 2,
@@ -132,7 +135,8 @@ int main(int argc, char* argv[]) {
             });
             SDL_FreeSurface(title);
         }
-        SDL_Surface* loading = TTF_RenderUTF8_Blended(Fonts_getSmall(), "Loading...", COLOR_GRAY);
+        SDL_Surface* loading = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), "Loading...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (loading) {
             SDL_BlitSurface(loading, NULL, screen, &(SDL_Rect){
                 (screen->w - loading->w) / 2,

@@ -9,6 +9,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Supported Platforms
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
+- **my355** - Miyoo Flip
 
 ![music_player](https://github.com/user-attachments/assets/de4fe612-1c48-4e98-9537-79504e20f299)
 
@@ -38,8 +39,9 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Features
 
 ### General
+- Complete support of NextUI theme and power settings.
 - Support Bluetooth/USB-C devices for output and media controls.
-- Automatic screen off (Follow system screen timeout).
+- Automatic screen off.
 
 ### Library
 - Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `AAC` and `OPUS` formats
