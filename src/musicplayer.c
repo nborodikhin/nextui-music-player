@@ -116,7 +116,7 @@ int main(int argc, char* argv[]) {
     display = DisplayHelper_init(screen);
     Toast_init(display);
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
-    // Load bundled fonts
+    // Load the font that the user selected in the settings of the system
     Fonts_load();
 
     // The keyboard's characters are filtered by what the font can draw, so the
