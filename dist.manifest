@@ -3,7 +3,6 @@ pak.json
 
 # Shared runtime payload
 launch.sh
-res/font.ttf
 res/cacert.pem
 res/icon-*
 state/app_version.txt

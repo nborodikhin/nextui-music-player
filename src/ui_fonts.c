@@ -9,8 +9,9 @@
 #include "ui_fonts.h"
 #include "utf8.h"
 
-// Path to app's bundled font
-#define APP_FONT_PATH "res/font.ttf"
+// The font of NextUI. CFG_getFontFile() gives the name of the file that the
+// user selected, and each font of the system is in RES_PATH.
+static char font_path[MAX_PATH];
 
 // Font sizes
 #define FONT_TITLE_SIZE 28
@@ -28,13 +29,30 @@ typedef struct {
 
 static AppFonts app_font = {0};
 
+// Resolve the font of the system. CFG_getFontFile() cannot give NULL, because
+// it returns an array of the settings struct, and CFG_setFontFile() goes back to
+// the default where the file that the user selected is not there.
+static void resolve_font_path(void) {
+    snprintf(font_path, sizeof(font_path), "%s/%s", RES_PATH, CFG_getFontFile());
+}
+
+// Open the font of the system at one size, in the style that the user
+// selected. NextUI gives each of its own fonts that style, thus a font that
+// misses it draws lighter than every other screen of the device.
+static TTF_Font* open_styled(int pixels) {
+    TTF_Font* font = TTF_OpenFont(font_path, pixels);
+    if (font) TTF_SetFontStyle(font, CFG_getFontStyle());
+    return font;
+}
+
 void Fonts_load(void) {
-    app_font.xlarge = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_XLARGE_SIZE));
-    app_font.title = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_TITLE_SIZE));
-    app_font.large = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_LARGE));
-    app_font.medium = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_MEDIUM));
-    app_font.small = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_SMALL));
-    app_font.tiny = TTF_OpenFont(APP_FONT_PATH, SCALE1(FONT_TINY));
+    resolve_font_path();
+    app_font.xlarge = open_styled(SCALE1(FONT_XLARGE_SIZE));
+    app_font.title = open_styled(SCALE1(FONT_TITLE_SIZE));
+    app_font.large = open_styled(SCALE1(FONT_LARGE));
+    app_font.medium = open_styled(SCALE1(FONT_MEDIUM));
+    app_font.small = open_styled(SCALE1(FONT_SMALL));
+    app_font.tiny = open_styled(SCALE1(FONT_TINY));
 }
 
 bool Fonts_hasGlyph(void* context, const char* c) {
@@ -69,6 +87,6 @@ TTF_Font* Fonts_getTiny(void) { return app_font.tiny; }
 
 TTF_Font* Fonts_open(int pixels) {
     if (pixels < 1) pixels = 1;
-    return TTF_OpenFont(APP_FONT_PATH, pixels);
+    return open_styled(pixels);
 }
 
