@@ -145,7 +145,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     int station_count = Radio_getStations(&stations);
 
     // === TOP BAR ===
-    int top_y = SCALE1(PADDING);
+    int top_y = pill_row_top_center(chip_height());
 
     // Source chip
     const char* chip_text = "RADIO";
@@ -186,12 +186,13 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         info_y += SCALE1(18);
     }
 
-    // Station name (extra large font) - white
+    // Station name - the size that the music player gives a track title, thus the
+    // three playing screens hold one hierarchy.
     const char* station_name = meta->station_name[0] ? meta->station_name :
                                (current_station ? current_station->name : "Unknown Station");
-    GFX_truncateText(Fonts_getXLarge(), station_name, truncated, max_w_full, 0);
+    GFX_truncateText(Fonts_getTitle(), station_name, truncated, max_w_full, 0);
     SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
-        Fonts_getXLarge(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
+        Fonts_getTitle(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_surf) {
         SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
         info_y += name_surf->h + SCALE1(2);
@@ -291,18 +292,20 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         }
     }
 
-    // Position for error message
-    int vis_y = hh - SCALE1(90);
+    // Position for error message, one spectrum height above the bottom pill row
+    int vis_y = hh - SCALE1(PADDING + PILL_SIZE) - SCALE1(50);
 
     // === BOTTOM BAR (GPU layer - position set here, rendering done independently) ===
-    int bottom_y = hh - SCALE1(35);
+    // The height of the row comes from the text that it holds, which the renderer
+    // measures, thus the renderer gets the middle of the bottom pill row and puts
+    // the row on it.
+    int row_center_y = screen->h - SCALE1(PADDING + PILL_SIZE / 2);
     int bar_w = SCALE1(60);
     int bar_h = SCALE1(8);
     int bar_x = hw - SCALE1(PADDING) - bar_w;
-    int bar_y = bottom_y + SCALE1(4);
 
     // Set position for GPU rendering (actual rendering happens in main loop)
-    RadioStatus_setPosition(bar_x, bar_y, bar_w, bar_h, SCALE1(PADDING), bottom_y);
+    RadioStatus_setPosition(bar_x, bar_w, bar_h, SCALE1(PADDING), row_center_y);
 
     // Error message (displayed prominently if in error state)
     if (state == RADIO_STATE_ERROR) {
@@ -627,19 +630,18 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 // - Position is set during main screen render (when dirty)
 // - GPU layer rendering happens independently in main loop
 
-static int status_bar_x = 0, status_bar_y = 0, status_bar_w = 0, status_bar_h = 0;
-static int status_left_x = 0, status_left_y = 0;
+static int status_bar_x = 0, status_bar_w = 0, status_bar_h = 0;
+static int status_left_x = 0, status_row_center_y = 0;
 static bool status_position_set = false;
 
 
-void RadioStatus_setPosition(int bar_x, int bar_y, int bar_w, int bar_h,
-                              int left_x, int left_y) {
+void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
+                              int left_x, int row_center_y) {
     status_bar_x = bar_x;
-    status_bar_y = bar_y;
     status_bar_w = bar_w;
     status_bar_h = bar_h;
     status_left_x = left_x;
-    status_left_y = left_y;
+    status_row_center_y = row_center_y;
     status_position_set = true;
 }
 
@@ -722,8 +724,11 @@ void RadioStatus_renderGPU(void) {
     }
 
     // Measure all elements
+    // The two words of the row take one size, which is the size of the play time of
+    // the music player. The color keeps them apart: the bitrate is a value, and the
+    // state beside it is not.
     TTF_Font* bitrate_font = Fonts_getSmall();
-    TTF_Font* status_font = Fonts_getTiny();
+    TTF_Font* status_font = Fonts_getSmall();
 
     int bitrate_w = 0, bitrate_h = 0;
     if (bitrate_str[0]) {
@@ -744,7 +749,8 @@ void RadioStatus_renderGPU(void) {
     int line_h = bitrate_h;
     if (status_h > line_h) line_h = status_h;
     if (status_bar_h > line_h) line_h = status_bar_h;
-    int base_y = status_left_y;
+    // The row centers on the middle of the bottom pill row, whatever it holds.
+    int base_y = status_row_center_y - line_h / 2;
 
     // Surface covers from left edge to right edge
     int surface_w = right_x - left_x;

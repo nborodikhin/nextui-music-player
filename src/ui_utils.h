@@ -65,6 +65,16 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y, int layer);
 
+// The middle of a pill row of the platform. Each one gives the y of the top of a
+// box `box_h` high that centers on that row. The top row holds the status group,
+// the bottom row holds the button hints, and a screen that draws no pill on a row
+// keeps the same line for the content that takes the place of one.
+int pill_row_top_center(int box_h);
+int pill_row_bottom_center(SDL_Surface* screen, int box_h);
+
+// True where the screen is wide enough for the platform to draw the status group.
+bool screen_has_status_group(SDL_Surface* screen);
+
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);
 
@@ -123,6 +133,10 @@ typedef struct {
 // A chip: a short label in a rectangular outline with no fill, which names the
 // source of what plays. Gives the rectangle that it drew.
 SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y);
+
+// The height of a chip. A caller needs it before it draws, to put the chip on the
+// middle of the top pill row.
+int chip_height(void);
 
 // The band behind a whole row, for a row that carries a label at its right edge.
 void draw_list_item_band(SDL_Surface* screen, SDL_Rect* rect);

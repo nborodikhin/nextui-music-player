@@ -273,10 +273,24 @@ void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
     }
 }
 
+// The platform draws the status group only where the screen has the room for it.
+bool screen_has_status_group(SDL_Surface* screen) {
+    return screen->w >= SCALE1(320);
+}
+
+int pill_row_top_center(int box_h) {
+    return SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2;
+}
+
+int pill_row_bottom_center(SDL_Surface* screen, int box_h) {
+    return screen->h - SCALE1(PADDING + PILL_SIZE) + (SCALE1(PILL_SIZE) - box_h) / 2;
+}
+
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting) {
     int hw = screen->w;
     char truncated[256];
+    bool has_status_group = screen_has_status_group(screen);
 
     GFX_truncateText(Fonts_getMedium(), title, truncated,
                      hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
@@ -284,11 +298,14 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     SDL_Surface* title_text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
+        // Where the platform draws no status group, the pill row that the title
+        // centers on is not on the screen, thus the title takes the top margin.
+        int title_y = has_status_group ? pill_row_top_center(title_text->h) : SCALE1(PADDING);
+        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), title_y});
         SDL_FreeSurface(title_text);
     }
 
-    if (hw >= SCALE1(320)) {
+    if (has_status_group) {
         GFX_blitHardwareGroup(screen, show_setting);
     }
 }
@@ -315,16 +332,21 @@ void render_scroll_indicators(SDL_Surface* screen, int scroll, int items_per_pag
     if (total_count <= items_per_page) return;
 
     int hw = screen->w;
-    int hh = screen->h;
     int ox = (hw - SCALE1(24)) / 2;
+    ListLayout layout = calc_list_layout(screen);
+    // The scroll assets of the platform are 6 units high (`api.c`, `asset_rects`).
+    int arrow_h = SCALE1(6);
 
     if (scroll > 0) {
-        // Position just below header with gap from first item
-        GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE - BUTTON_MARGIN)});
+        // Above the first row, in the gap that the top pill row leaves
+        GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen,
+                      &(SDL_Rect){ox, layout.list_y - arrow_h});
     }
     if (scroll + items_per_page < total_count) {
-        // Position at the end of the list area (just above button hints)
-        GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN)});
+        // Below the last row. The bottom pill row holds it, between the two button
+        // hints, which this change accepts.
+        GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen,
+                      &(SDL_Rect){ox, layout.list_y + layout.list_h});
     }
 }
 
@@ -338,8 +360,10 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
     int hh = screen->h;
 
     ListLayout layout;
-    layout.list_y = SCALE1(PADDING + PILL_SIZE) + 10;
-    layout.list_h = hh - layout.list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
+    // The list starts one margin below the top pill row, and stops at the top of
+    // the bottom pill row, which holds the button hints.
+    layout.list_y = SCALE1(PADDING + PILL_SIZE + PADDING);
+    layout.list_h = hh - layout.list_y - SCALE1(PADDING + PILL_SIZE);
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;
     // "Rich" rows (thumbnail + two text lines) are 1.5x a plain row.
@@ -400,6 +424,10 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
 // A chip: a short label in a rectangular outline with no fill. The player
 // screens use one to name the source of what plays. Gives the rectangle that it
 // drew, thus a caller can place what follows beside it.
+int chip_height(void) {
+    return TTF_FontHeight(Fonts_getTiny()) + SCALE1(CHIP_PADDING_Y * 2);
+}
+
 SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y) {
     SDL_Surface* label = TTF_RenderUTF8_Blended(
         Fonts_getTiny(), text, Theme_getColor(THEME_ROLE_SECONDARY, false));

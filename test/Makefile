@@ -35,6 +35,17 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8
 
+# ui_utils.c draws, thus it includes the platform and this target cannot follow
+# the rule above. The test compiles ui_utils.c itself, thus it always runs the
+# source of the tree, and it takes the rest of the symbols from the objects that
+# the desktop build already made. It joins the list only where those objects
+# exist, thus a checkout with no desktop build runs the other tests and does not
+# fail.
+DESKTOP_OBJ = ../src/build/desktop/obj
+ifneq ($(wildcard $(DESKTOP_OBJ)/ext/desktop/platform/platform.o),)
+TESTS   += $(BIN)/test_ui_utils
+endif
+
 .PHONY: all check run clean
 all: run
 
@@ -61,6 +72,24 @@ $(BIN)/test_ui_theme: test_ui_theme.c $(SRC)/ui_theme_utils.c $(SRC)/ui_theme.h 
 
 $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
+
+DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
+                -Wl,-rpath,/var/tmp/nextui/lib
+DESKTOP_LIBS = $(DESKTOP_RPATH) -L../src/build/desktop -L/var/tmp/nextui/lib \
+               -L../NextUI/workspace/desktop/libmsettings \
+               $(shell pkg-config --libs sdl2) -lSDL2_ttf -lSDL2_image -lsamplerate \
+               -lzip -lopus -lmbedtls -lm -lpthread -ldl -lz -lGL -lmsettings
+DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
+              -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' \
+              -DUSE_SDL2 -DUSE_GL
+# Every object of the desktop build except the two that this test replaces: its
+# own main, and ui_utils.o, which the test compiles from the source instead.
+DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
+                        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+                      | grep -v -e musicplayer.o -e ui_utils.o)
+$(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_utils.c $(SRC)/ui_utils.c \
+	  $(DESKTOP_LINK_OBJ) $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip

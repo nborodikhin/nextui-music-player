@@ -131,6 +131,28 @@ void render_browser(SDL_Surface *screen, int show_setting, BrowserContext *brows
 }
 
 // Render the now playing screen
+// Draw one playback mode indicator with its right edge at `right_x`. The label
+// takes the primary text role and a rule below it where the mode is on, and the
+// secondary text role with no rule where it is off. Gives the width that it drew,
+// thus a caller places the next one beside it.
+static int draw_mode_indicator(SDL_Surface *screen, const char *label, bool on,
+                               int right_x, int y) {
+    SDL_Color color = Theme_getColor(on ? THEME_ROLE_PRIMARY : THEME_ROLE_SECONDARY, false);
+    SDL_Surface *surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), label, color);
+    if (!surf) return 0;
+
+    int x = right_x - surf->w;
+    int w = surf->w;
+    SDL_BlitSurface(surf, NULL, screen, &(SDL_Rect){x, y});
+    // The rule takes the color of its label, thus the two cannot drift
+    if (on) {
+        SDL_Rect rule = {x, y + surf->h, w, SCALE1(1)};
+        SDL_FillRect(screen, &rule, SDL_MapRGB(screen->format, color.r, color.g, color.b));
+    }
+    SDL_FreeSurface(surf);
+    return w;
+}
+
 void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *browser,
                     bool shuffle_enabled, bool repeat_enabled,
                     int playlist_track_num, int playlist_total) {
@@ -153,7 +175,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     float progress = (duration > 0) ? (float) position / duration : 0.0f;
 
     // === TOP BAR ===
-    int top_y = SCALE1(PADDING);
+    int top_y = pill_row_top_center(chip_height());
 
     // Format chip
     const char *fmt_name = get_format_name(format);
@@ -181,13 +203,14 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     int info_y = SCALE1(PADDING + 45);
     char truncated[256];
 
-    // Max width for text.
-    // Only left padding is respected - right edge of scrolling text should be aligned to the right edge of the art.
+    // The title that scrolls comes in from the edge of the screen, thus it keeps the
+    // left margin only. Text that does not scroll keeps both margins.
     int max_w_text = hw - SCALE1(PADDING * 1);
+    int max_w_static = hw - SCALE1(PADDING * 2);
 
     // Artist name (Medium font, gray)
     const char *artist = info->artist[0] ? info->artist : "Unknown Artist";
-    GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_text, 0);
+    GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_static, 0);
     SDL_Surface *artist_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (artist_surf) {
@@ -203,8 +226,10 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     int title_y = info_y; // Save for GPU scroll
 
     // Check if text changed and reset scroll state.
+    // The scroll decision takes the width that the static branch cuts at, thus a
+    // title between the two widths scrolls in place of losing a character.
     if (strcmp(player_title_scroll.text, title) != 0) {
-        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_text,
+        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_static,
                          THEME_ROLE_PRIMARY, false, true);
     }
     SDL_Color title_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
@@ -220,11 +245,13 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         player_title_scroll.last_font = Fonts_getTitle();
         player_title_scroll.last_color = title_color;
     } else {
-        // Static text - render to screen surface
+        // Static text - render to screen surface, cut at the right margin
         SDL_Surface *title_surf = TTF_RenderUTF8_Blended(
             Fonts_getTitle(), title, title_color);
         if (title_surf) {
-            SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
+            SDL_Rect src = {0, 0, title_surf->w > max_w_static ? max_w_static : title_surf->w,
+                            title_surf->h};
+            SDL_BlitSurface(title_surf, &src, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
             SDL_FreeSurface(title_surf);
         }
     }
@@ -238,7 +265,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         // Show album name when lyrics are off
         const char *album = info->album[0] ? info->album : "";
         if (album[0]) {
-            GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_text, 0);
+            GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_static, 0);
             SDL_Surface *album_surf = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (album_surf) {
@@ -249,8 +276,10 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     }
 
     // === SPECTRUM SECTION (GPU rendered) ===
-    int spec_y = hh - SCALE1(90);
+    // The spectrum stops at the top of the bottom pill row, which holds the row of
+    // the play time and the indicators.
     int spec_h = SCALE1(50);
+    int spec_y = hh - SCALE1(PADDING + PILL_SIZE) - spec_h;
     int spec_x = SCALE1(PADDING);
     int spec_w = hw - SCALE1(PADDING * 2);
 
@@ -258,66 +287,23 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     Spectrum_setPosition(spec_x, spec_y, spec_w, spec_h);
 
     // === BOTTOM BAR ===
-    int bottom_y = hh - SCALE1(35);
+    // The row of the play time and the indicators takes the middle of the bottom
+    // pill row, thus it sits on the line of a button hint of another screen.
+    int indicator_h = TTF_FontHeight(Fonts_getTiny()) + SCALE1(1);
+    int bottom_y = pill_row_bottom_center(screen, indicator_h);
+    int time_y = pill_row_bottom_center(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Time display is rendered via GPU layer - just set position here
-    // Calculate position based on font metrics
     int time_x = SCALE1(PADDING);
-    // Duration x position will be calculated in GPU render based on actual position text width
-    PlayTime_setPosition(time_x, bottom_y, 0);
+    PlayTime_setPosition(time_x, time_y, 0);
 
-    // Shuffle and Repeat labels on right side
+    // The indicators fill from the right margin toward the middle.
     int label_x = hw - SCALE1(PADDING);
-
-    // Repeat label
-    const char *repeat_text = "REPEAT";
-    SDL_Color repeat_color = repeat_enabled
-                                 ? Theme_getColor(THEME_ROLE_PRIMARY, false)
-                                 : Theme_getColor(THEME_ROLE_SECONDARY, false);
-    SDL_Surface *repeat_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), repeat_text, repeat_color);
-    if (repeat_surf) {
-        label_x -= repeat_surf->w;
-        SDL_BlitSurface(repeat_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
-        // The underline takes the color of its label, thus the two cannot drift
-        if (repeat_enabled) {
-            SDL_Rect underline = {label_x, bottom_y + repeat_surf->h, repeat_surf->w, SCALE1(1)};
-            SDL_FillRect(screen, &underline,
-                         SDL_MapRGB(screen->format, repeat_color.r, repeat_color.g, repeat_color.b));
-        }
-        SDL_FreeSurface(repeat_surf);
-    }
-
-    // Shuffle label (with gap before repeat)
+    label_x -= draw_mode_indicator(screen, "REPEAT", repeat_enabled, label_x, bottom_y);
     label_x -= SCALE1(12);
-    const char *shuffle_text = "SHUFFLE";
-    SDL_Color shuffle_color = shuffle_enabled
-                                  ? Theme_getColor(THEME_ROLE_PRIMARY, false)
-                                  : Theme_getColor(THEME_ROLE_SECONDARY, false);
-    SDL_Surface *shuffle_surf = TTF_RenderUTF8_Blended(Fonts_getTiny(), shuffle_text, shuffle_color);
-    if (shuffle_surf) {
-        label_x -= shuffle_surf->w;
-        SDL_BlitSurface(shuffle_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
-        // The underline takes the color of its label, thus the two cannot drift
-        if (shuffle_enabled) {
-            SDL_Rect underline = {label_x, bottom_y + shuffle_surf->h, shuffle_surf->w, SCALE1(1)};
-            SDL_FillRect(screen, &underline,
-                         SDL_MapRGB(screen->format, shuffle_color.r, shuffle_color.g, shuffle_color.b));
-        }
-        SDL_FreeSurface(shuffle_surf);
-    }
-
-    // Lyric Off label (only shown when lyrics are disabled)
-    if (!Settings_getLyricsEnabled()) {
-        label_x -= SCALE1(12);
-        const char *lyric_text = "LYRIC OFF";
-        SDL_Surface *lyric_surf = TTF_RenderUTF8_Blended(
-            Fonts_getTiny(), lyric_text, Theme_getColor(THEME_ROLE_SECONDARY, false));
-        if (lyric_surf) {
-            label_x -= lyric_surf->w;
-            SDL_BlitSurface(lyric_surf, NULL, screen, &(SDL_Rect){label_x, bottom_y});
-            SDL_FreeSurface(lyric_surf);
-        }
-    }
+    label_x -= draw_mode_indicator(screen, "SHUFFLE", shuffle_enabled, label_x, bottom_y);
+    label_x -= SCALE1(12);
+    draw_mode_indicator(screen, "LYRICS", Settings_getLyricsEnabled(), label_x, bottom_y);
 }
 
 // Check if browser list has active scrolling (for refresh optimization)
@@ -403,21 +389,24 @@ void PlayTime_renderGPU(void) {
     last_rendered_position = position;
     last_rendered_duration = duration;
 
-    // Render position text
+    // The position and the total take one font, thus the two sit on one baseline
+    // and the pair is one box. The separator gives a relation and is not a value,
+    // thus it goes with the total.
     char pos_str[16];
     format_time(pos_str, position);
     SDL_Surface *pos_surf = TTF_RenderUTF8_Blended(
         Fonts_getSmall(), pos_str, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (!pos_surf) return;
 
-    // Render duration text
+    char total_str[24];
     char dur_str[16];
     format_time(dur_str, duration);
+    snprintf(total_str, sizeof(total_str), "/%s", dur_str);
     SDL_Surface *dur_surf = TTF_RenderUTF8_Blended(
-        Fonts_getTiny(), dur_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        Fonts_getSmall(), total_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
 
     // Calculate total width needed
-    int total_w = pos_surf->w + SCALE1(6) + (dur_surf ? dur_surf->w : 0);
+    int total_w = pos_surf->w + (dur_surf ? dur_surf->w : 0);
     int total_h = pos_surf->h;
 
     // Create combined surface
@@ -428,10 +417,9 @@ void PlayTime_renderGPU(void) {
         // Blit position
         SDL_BlitSurface(pos_surf, NULL, combined, &(SDL_Rect){0, 0, 0, 0});
 
-        // Blit duration (aligned to bottom of position text)
+        // Blit the separator and the total, on the baseline of the position
         if (dur_surf) {
-            int dur_y = pos_surf->h - dur_surf->h;
-            SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){pos_surf->w + SCALE1(6), dur_y, 0, 0});
+            SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){pos_surf->w, 0, 0, 0});
         }
 
         // Clear previous and draw new
