@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Music Player
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install desktop build dependencies
         run: |

@@ -8,13 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Music Player
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build and package
         run: ./dev dist all
 
       - name: Upload the pak
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Music.Player.pak
           path: dist/Music.Player.pak.zip
