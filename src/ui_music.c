@@ -175,7 +175,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     float progress = (duration > 0) ? (float) position / duration : 0.0f;
 
     // === TOP BAR ===
-    int top_y = pill_row_top_center(chip_height());
+    int top_y = top_of_the_chip_box(screen, chip_height());
 
     // Format chip
     const char *fmt_name = get_format_name(format);
@@ -197,20 +197,19 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     }
 
     // Hardware status (clock, battery) on right
-    GFX_blitHardwareGroup(screen, show_setting);
+    if (screen_has_status_group(screen)) GFX_blitHardwareGroup(screen, show_setting);
 
     // === TRACK INFO SECTION ===
-    int info_y = SCALE1(PADDING + 45);
+    int info_y = total_header_height(screen, chip_height());
     char truncated[256];
 
-    // The title that scrolls comes in from the edge of the screen, thus it keeps the
-    // left margin only. Text that does not scroll keeps both margins.
+    // Each line of the block takes the same width, thus a line that fits the screen
+    // never scrolls and a line that does not fit comes in from the edge.
     int max_w_text = hw - SCALE1(PADDING * 1);
-    int max_w_static = hw - SCALE1(PADDING * 2);
 
     // Artist name (Medium font, gray)
     const char *artist = info->artist[0] ? info->artist : "Unknown Artist";
-    GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_static, 0);
+    GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_text, 0);
     SDL_Surface *artist_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (artist_surf) {
@@ -226,10 +225,8 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     int title_y = info_y; // Save for GPU scroll
 
     // Check if text changed and reset scroll state.
-    // The scroll decision takes the width that the static branch cuts at, thus a
-    // title between the two widths scrolls in place of losing a character.
     if (strcmp(player_title_scroll.text, title) != 0) {
-        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_static,
+        ScrollText_reset(&player_title_scroll, title, Fonts_getTitle(), max_w_text,
                          THEME_ROLE_PRIMARY, false, true);
     }
     SDL_Color title_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
@@ -245,11 +242,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         player_title_scroll.last_font = Fonts_getTitle();
         player_title_scroll.last_color = title_color;
     } else {
-        // Static text - render to screen surface, cut at the right margin
+        // Static text - render to screen surface, cut at the width of the block
         SDL_Surface *title_surf = TTF_RenderUTF8_Blended(
             Fonts_getTitle(), title, title_color);
         if (title_surf) {
-            SDL_Rect src = {0, 0, title_surf->w > max_w_static ? max_w_static : title_surf->w,
+            SDL_Rect src = {0, 0, title_surf->w > max_w_text ? max_w_text : title_surf->w,
                             title_surf->h};
             SDL_BlitSurface(title_surf, &src, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
             SDL_FreeSurface(title_surf);
@@ -265,7 +262,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         // Show album name when lyrics are off
         const char *album = info->album[0] ? info->album : "";
         if (album[0]) {
-            GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_static, 0);
+            GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_text, 0);
             SDL_Surface *album_surf = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (album_surf) {
@@ -290,8 +287,8 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     // The screen draws no button hint, thus the row of the play time and the
     // indicators takes the bottom margin of the screen.
     int indicator_h = TTF_FontHeight(Fonts_getTiny()) + SCALE1(1);
-    int bottom_y = bottom_margin_top(screen, indicator_h);
-    int time_y = bottom_margin_top(screen, TTF_FontHeight(Fonts_getSmall()));
+    int bottom_y = top_of_the_bottom_margin_box(screen, indicator_h);
+    int time_y = top_of_the_bottom_margin_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Time display is rendered via GPU layer - just set position here
     int time_x = SCALE1(PADDING);

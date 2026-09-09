@@ -65,12 +65,27 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y, int layer);
 
-// The y of the top of a box `box_h` high, on the line that the platform gives it.
-// `pill_row_top_center()` centers the box on the top pill row, where the platform
-// draws the status group. `bottom_margin_top()` puts the foot of the box on the
-// bottom margin of the screen, for a screen that draws no button hint.
-int pill_row_top_center(int box_h);
-int bottom_margin_top(SDL_Surface* screen, int box_h);
+// The y of the top of a box `box_h` high, centered on the top pill row, which is the
+// row that the platform keeps for the status group. The row is there whether the
+// platform fills it or not, thus a screen title keeps the height of a selected row on
+// each screen, as the menu of the platform does.
+int top_of_the_pill_row_box(SDL_Surface* screen, int box_h);
+
+// The y of the top of a box `box_h` high, placed on the bottom margin,
+// used on the screen that draws no button hint at the foot. The name says
+// the margin and not the button row, because the box does not take the line
+// of a button hint. It sits lower, at the edge of the box of the screen.
+int top_of_the_bottom_margin_box(SDL_Surface* screen, int box_h);
+
+// The y of the top of the chip of a playing screen. The chip shares the line of the
+// status group, thus it takes the top margin where the platform draws none. It then
+// keeps the same gap to the top edge as to the left edge.
+int top_of_the_chip_box(SDL_Surface* screen, int chip_h);
+
+// The height of the whole header of a playing screen: the chip or the pill row that
+// holds it, and the gap below. The block of metadata starts at this y, thus it moves
+// up with the chip where the platform draws no status group.
+int total_header_height(SDL_Surface* screen, int chip_h);
 
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
@@ -127,16 +142,16 @@ typedef struct {
     int text_y;       // Y position for text (vertically centered)
 } ListItemPos;
 
+// The height of a chip. A caller needs it before it draws, to put the chip on the
+// middle of the top pill row.
+int chip_height(void);
+
 // Render a list item's pill background and calculate text position
 // Combines: the row width + draw_list_item_bg + text position calculation
 // prefix_width: extra width to account for (e.g., checkbox, indicator)
 // A chip: a short label in a rectangular outline with no fill, which names the
 // source of what plays. Gives the rectangle that it drew.
 SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y);
-
-// The height of a chip. A caller needs it before it draws, to put the chip on the
-// middle of the top pill row.
-int chip_height(void);
 
 // The band behind a whole row, for a row that carries a label at its right edge.
 void draw_list_item_band(SDL_Surface* screen, SDL_Rect* rect);

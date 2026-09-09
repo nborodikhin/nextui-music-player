@@ -3,6 +3,9 @@
 #include <math.h>
 #include "ui_utils.h"
 
+// The gap below the header of a playing screen, before the block of metadata.
+#define HEADER_TO_BLOCK_GAP 15
+
 // The form of a chip: the space around its label, and its height with no label.
 #define CHIP_PADDING_X 5
 #define CHIP_PADDING_Y 2
@@ -278,11 +281,28 @@ bool screen_has_status_group(SDL_Surface* screen) {
     return screen->w >= SCALE1(320);
 }
 
-int pill_row_top_center(int box_h) {
+int top_of_the_pill_row_box(SDL_Surface* screen, int box_h) {
+    // The row is there whether the platform fills it or not, thus the screen takes
+    // no part in the answer. The parameter keeps one shape for each helper here.
+    (void)screen;
     return SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2;
 }
 
-int bottom_margin_top(SDL_Surface* screen, int box_h) {
+// The chip of a playing screen shares the line of the status group. Where the
+// platform draws no status group, the chip takes the top margin, thus its gap to
+// the top edge and its gap to the left edge are the same.
+int top_of_the_chip_box(SDL_Surface* screen, int chip_h) {
+    return screen_has_status_group(screen) ? top_of_the_pill_row_box(screen, chip_h)
+                                           : SCALE1(PADDING);
+}
+
+int total_header_height(SDL_Surface* screen, int chip_h) {
+    int header_bottom = screen_has_status_group(screen) ? SCALE1(PADDING + PILL_SIZE)
+                                                        : SCALE1(PADDING) + chip_h;
+    return header_bottom + SCALE1(HEADER_TO_BLOCK_GAP);
+}
+
+int top_of_the_bottom_margin_box(SDL_Surface* screen, int box_h) {
     return screen->h - SCALE1(PADDING) - box_h;
 }
 
@@ -300,9 +320,9 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     SDL_Surface* title_text = TTF_RenderUTF8_Blended(
         Fonts_getLarge(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (title_text) {
-        // Where the platform draws no status group, the pill row that the title
-        // centers on is not on the screen, thus the title takes the top margin.
-        int title_y = has_status_group ? pill_row_top_center(title_text->h) : SCALE1(PADDING);
+        // The title keeps a row as high as a selection pill, with the status group
+        // or without it, thus the list below it starts on the same line either way.
+        int title_y = top_of_the_pill_row_box(screen, title_text->h);
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), title_y});
         SDL_FreeSurface(title_text);
     }

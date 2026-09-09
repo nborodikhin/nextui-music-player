@@ -1639,7 +1639,7 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // === TOP BAR ===
-    int top_y = pill_row_top_center(chip_height());
+    int top_y = top_of_the_chip_box(screen, chip_height());
 
     // Source chip
     const char* chip_text = "PODCAST";
@@ -1692,10 +1692,10 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // Hardware status (clock, battery) on right
-    GFX_blitHardwareGroup(screen, show_setting);
+    if (screen_has_status_group(screen)) GFX_blitHardwareGroup(screen, show_setting);
 
     // === PODCAST INFO SECTION (like music player artist/title/album) ===
-    int info_y = SCALE1(PADDING + 45);
+    int info_y = total_header_height(screen, chip_height());
     int max_w_text = hw - SCALE1(PADDING * 2);
 
     // Podcast name (like Artist in music player) - gray, artist font
@@ -1834,7 +1834,7 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     int bar_margin = SCALE1(PADDING);
     int bar_w = hw - bar_margin * 2;
     int bar_y = hh - SCALE1(PADDING + PILL_SIZE) - bar_h;
-    int time_y = bottom_margin_top(screen, TTF_FontHeight(Fonts_getSmall()));
+    int time_y = top_of_the_bottom_margin_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Get duration for GPU rendering
     int duration = Podcast_getDuration();  // Uses episode metadata duration

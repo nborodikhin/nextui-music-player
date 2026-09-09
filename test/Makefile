@@ -38,13 +38,9 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
 # source of the tree, and it takes the rest of the symbols from the objects that
-# the desktop build already made. It joins the list only where those objects
-# exist, thus a checkout with no desktop build runs the other tests and does not
-# fail.
+# the desktop build already made. Run ./dev build desktop first.
 DESKTOP_OBJ = ../src/build/desktop/obj
-ifneq ($(wildcard $(DESKTOP_OBJ)/ext/desktop/platform/platform.o),)
 TESTS   += $(BIN)/test_ui_utils
-endif
 
 .PHONY: all check run clean
 all: run
@@ -88,6 +84,8 @@ DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
                         $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
                       | grep -v -e musicplayer.o -e ui_utils.o)
 $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN)
+	@test -f $(DESKTOP_OBJ)/ext/desktop/platform/platform.o || \
+	  { echo "test_ui_utils needs the objects of the desktop build. Run: ./dev build desktop"; exit 1; }
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_utils.c $(SRC)/ui_utils.c \
 	  $(DESKTOP_LINK_OBJ) $(DESKTOP_LIBS)
 

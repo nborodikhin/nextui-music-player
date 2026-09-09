@@ -26,12 +26,12 @@ TEST(test_top_center) {
     CHECK(screen != NULL);
 
     // A box as high as the pill fills the row, thus it starts at the margin.
-    CHECK_EQ_INT(pill_row_top_center(SCALE1(PILL_SIZE)), SCALE1(PADDING));
+    CHECK_EQ_INT(top_of_the_pill_row_box(screen, SCALE1(PILL_SIZE)), SCALE1(PADDING));
     // A box of no height sits on the middle of the row.
-    CHECK_EQ_INT(pill_row_top_center(0), SCALE1(PADDING) + SCALE1(PILL_SIZE) / 2);
+    CHECK_EQ_INT(top_of_the_pill_row_box(screen, 0), SCALE1(PADDING) + SCALE1(PILL_SIZE) / 2);
     // A box between the two keeps the same middle.
     int box = SCALE1(PILL_SIZE) / 3;
-    CHECK_EQ_INT(pill_row_top_center(box) + box / 2, SCALE1(PADDING) + SCALE1(PILL_SIZE) / 2);
+    CHECK_EQ_INT(top_of_the_pill_row_box(screen, box) + box / 2, SCALE1(PADDING) + SCALE1(PILL_SIZE) / 2);
 
     SDL_FreeSurface(screen);
 }
@@ -44,11 +44,11 @@ TEST(test_bottom_margin) {
         int h = sizes[i][1];
 
         // The foot of the box sits on the bottom margin, whatever the box holds.
-        CHECK_EQ_INT(bottom_margin_top(screen, 0), h - SCALE1(PADDING));
+        CHECK_EQ_INT(top_of_the_bottom_margin_box(screen, 0), h - SCALE1(PADDING));
         int box = SCALE1(PILL_SIZE) / 3;
-        CHECK_EQ_INT(bottom_margin_top(screen, box) + box, h - SCALE1(PADDING));
+        CHECK_EQ_INT(top_of_the_bottom_margin_box(screen, box) + box, h - SCALE1(PADDING));
         // A box as high as the pill reaches the top of the bottom pill row.
-        CHECK_EQ_INT(bottom_margin_top(screen, SCALE1(PILL_SIZE)),
+        CHECK_EQ_INT(top_of_the_bottom_margin_box(screen, SCALE1(PILL_SIZE)),
                      h - SCALE1(PADDING + PILL_SIZE));
 
         SDL_FreeSurface(screen);

@@ -145,7 +145,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     int station_count = Radio_getStations(&stations);
 
     // === TOP BAR ===
-    int top_y = pill_row_top_center(chip_height());
+    int top_y = top_of_the_chip_box(screen, chip_height());
 
     // Source chip
     const char* chip_text = "RADIO";
@@ -164,10 +164,10 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     }
 
     // Hardware status (clock, battery) on right
-    GFX_blitHardwareGroup(screen, show_setting);
+    if (screen_has_status_group(screen)) GFX_blitHardwareGroup(screen, show_setting);
 
     // === STATION INFO SECTION ===
-    int info_y = SCALE1(PADDING + 45);
+    int info_y = total_header_height(screen, chip_height());
 
     // Max widths for text (album art is now only shown as background)
     int max_w_half = (hw - SCALE1(PADDING * 2)) / 2;

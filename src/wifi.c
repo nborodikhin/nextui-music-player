@@ -5,6 +5,7 @@
 #include "defines.h"
 #include "api.h"
 #include "wifi.h"
+#include "ui_utils.h"
 #include "ui_fonts.h"
 #include "ui_theme.h"
 #include "ui_podcast.h"  // For Podcast_clearTitleScroll
@@ -30,7 +31,7 @@ static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
         SDL_FreeSurface(text);
     }
 
-    GFX_blitHardwareGroup(scr, show_setting);
+    if (screen_has_status_group(scr)) GFX_blitHardwareGroup(scr, show_setting);
     GFX_flip(scr);
 }
 
