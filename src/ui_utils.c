@@ -310,12 +310,22 @@ int top_of_the_bottom_margin_box(SDL_Surface* screen, int box_h) {
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting) {
     int hw = screen->w;
     char truncated[256];
-    bool has_status_group = screen_has_status_group(screen);
+
+    // The status group draws first and gives its width, thus the title takes the room
+    // that is left and never runs under the wifi and battery pill. The width changes
+    // with the clock, with Bluetooth and with the signal, thus only the platform knows
+    // it.
+    int status_w = 0;
+    if (screen_has_status_group(screen)) {
+        status_w = GFX_blitHardwareGroup(screen, show_setting);
+    }
+
+    int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
+    int title_max_w = hw - SCALE1(PADDING) - status_w - SCALE1(BUTTON_PADDING) - title_x;
 
     // The title takes the font of a row of the list, as the menu of the platform
     // does. The secondary text role keeps it apart from a row.
-    GFX_truncateText(Fonts_getLarge(), title, truncated,
-                     hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
+    GFX_truncateText(Fonts_getLarge(), title, truncated, title_max_w, 0);
 
     SDL_Surface* title_text = TTF_RenderUTF8_Blended(
         Fonts_getLarge(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
@@ -323,12 +333,8 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
         // The title keeps a row as high as a selection pill, with the status group
         // or without it, thus the list below it starts on the same line either way.
         int title_y = top_of_the_pill_row_box(screen, title_text->h);
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), title_y});
+        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){title_x, title_y});
         SDL_FreeSurface(title_text);
-    }
-
-    if (has_status_group) {
-        GFX_blitHardwareGroup(screen, show_setting);
     }
 }
 
@@ -443,14 +449,14 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
         SDL_SetClipRect(screen, NULL);
 }
 
-// Render a list item's pill background and calculate text position
-// A chip: a short label in a rectangular outline with no fill. The player
-// screens use one to name the source of what plays. Gives the rectangle that it
-// drew, thus a caller can place what follows beside it.
+// The height of a chip, which a caller needs before it draws one.
 int chip_height(void) {
     return TTF_FontHeight(Fonts_getTiny()) + SCALE1(CHIP_PADDING_Y * 2);
 }
 
+// A chip: a short label in a rectangular outline with no fill. The player
+// screens use one to name the source of what plays. Gives the rectangle that it
+// drew, thus a caller can place what follows beside it.
 SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y) {
     SDL_Surface* label = TTF_RenderUTF8_Blended(
         Fonts_getTiny(), text, Theme_getColor(THEME_ROLE_SECONDARY, false));

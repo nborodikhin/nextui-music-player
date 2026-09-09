@@ -1743,11 +1743,22 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
     info_y += TTF_FontHeight(Fonts_getTitle()) + SCALE1(2);
 
+    // The bar stops at the top of the bottom pill row, where the spectrum of the music
+    // player stops, and the time takes the bottom margin, where the play time of the
+    // music player sits. Thus the two playing screens hold one line.
+    int bar_h = SCALE1(4);
+    int bar_y = hh - SCALE1(PADDING + PILL_SIZE) - bar_h;
+
     // Episode description (word-wrapped, up to 4 lines)
     if (ep->description[0]) {
         TTF_Font* desc_font = Fonts_getSmall();
         int desc_line_h = TTF_FontHeight(desc_font);
         int max_lines = 4;
+
+        // The description stops above the bar, thus a long one cannot touch it.
+        int lines_that_fit = (bar_y - info_y) / desc_line_h;
+        if (lines_that_fit < max_lines) max_lines = lines_that_fit;
+        if (max_lines < 0) max_lines = 0;
 
         // Strip HTML tags and newlines from description
         char desc_buf[512];
@@ -1827,13 +1838,8 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // === PROGRESS BAR SECTION (GPU rendered) ===
-    // The bar stops at the top of the bottom pill row, where the spectrum of the
-    // music player stops, and the time takes the bottom margin, where the play time
-    // of the music player sits. Thus the two playing screens hold one line.
-    int bar_h = SCALE1(4);
     int bar_margin = SCALE1(PADDING);
     int bar_w = hw - bar_margin * 2;
-    int bar_y = hh - SCALE1(PADDING + PILL_SIZE) - bar_h;
     int time_y = top_of_the_bottom_margin_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Get duration for GPU rendering

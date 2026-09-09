@@ -20,7 +20,7 @@ static ScrollTextState browser_scroll = {0};
 static ScrollTextState player_title_scroll;
 
 // Playtime GPU state
-static int playtime_x = 0, playtime_y = 0, playtime_dur_x = 0;
+static int playtime_x = 0, playtime_y = 0;
 static int last_rendered_position = -1;
 static int last_rendered_duration = -1;
 static bool playtime_position_set = false;
@@ -292,7 +292,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
 
     // Time display is rendered via GPU layer - just set position here
     int time_x = SCALE1(PADDING);
-    PlayTime_setPosition(time_x, time_y, 0);
+    PlayTime_setPosition(time_x, time_y);
 
     // The indicators fill from the right margin toward the middle.
     int label_x = hw - SCALE1(PADDING);
@@ -343,10 +343,9 @@ void player_title_scroll_paint(int layer) {
 
 // === PLAYTIME GPU FUNCTIONS ===
 
-void PlayTime_setPosition(int x, int y, int duration_x) {
+void PlayTime_setPosition(int x, int y) {
     playtime_x = x;
     playtime_y = y;
-    playtime_dur_x = duration_x;
     playtime_position_set = true;
 }
 
