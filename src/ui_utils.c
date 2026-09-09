@@ -273,23 +273,78 @@ void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
     }
 }
 
+// The platform draws the status group only where the screen has the room for it.
+bool screen_has_status_group(SDL_Surface* screen) {
+    return screen->w >= SCALE1(320);
+}
+
+// The y of the top of a box `box_h` high, centered on the top pill row, which is the
+// row that the platform keeps for the status group. The row is there whether the
+// platform fills it or not, thus a screen title keeps the height of a selected row on
+// each screen, as the menu of the platform does.
+static int top_of_the_pill_row_box(int box_h, bool use_status_group) {
+    return use_status_group ? SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2
+                            : SCALE1(PADDING);
+}
+
+// The chip of a playing screen shares the line of the status group. Where the
+// platform draws no status group, the chip takes the top margin, thus its gap to
+// the top edge and its gap to the left edge are the same.
+int top_of_the_chip_box(SDL_Surface* screen, int chip_h) {
+    return top_of_the_pill_row_box(chip_h, screen_has_status_group(screen));
+}
+
+int total_header_height(SDL_Surface* screen, int chip_h) {
+    // The pill row holds its own room around the pill, thus the content that follows
+    // needs no gap of its own. A chip is snug, thus it takes a margin below it.
+    return screen_has_status_group(screen) ? SCALE1(PADDING + PILL_SIZE)
+                                           : SCALE1(PADDING) + chip_h + SCALE1(PADDING);
+}
+
+// The room that the foot of a screen takes. A screen that draws button hints gives
+// the pill row and a margin on each side of it. A screen that draws none gives the
+// margin, the row of its own, and the margin again.
+int pill_footer_height(void) {
+    return SCALE1(PADDING + PILL_SIZE + PADDING);
+}
+
+int chip_footer_height(int row_h) {
+    return SCALE1(PADDING) + row_h + SCALE1(PADDING);
+}
+
+int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h) {
+    return screen->h - SCALE1(PADDING) - box_h;
+}
+
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting) {
     int hw = screen->w;
     char truncated[256];
 
-    GFX_truncateText(Fonts_getMedium(), title, truncated,
-                     hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
-
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(
-        Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-    if (title_text) {
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING) + SCALE1(BUTTON_PADDING), SCALE1(PADDING + 4)});
-        SDL_FreeSurface(title_text);
+    // The status group draws first and gives its width, thus the title takes the room
+    // that is left and never runs under the wifi and battery pill. The width changes
+    // with the clock, with Bluetooth and with the signal, thus only the platform knows
+    // it.
+    int status_w = 0;
+    if (screen_has_status_group(screen)) {
+        status_w = GFX_blitHardwareGroup(screen, show_setting);
     }
 
-    if (hw >= SCALE1(320)) {
-        GFX_blitHardwareGroup(screen, show_setting);
+    int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
+    int title_max_w = hw - SCALE1(PADDING) - status_w - SCALE1(BUTTON_PADDING) - title_x;
+
+    // The title takes the font of a row of the list, as the menu of the platform
+    // does. The secondary text role keeps it apart from a row.
+    GFX_truncateText(Fonts_getLarge(), title, truncated, title_max_w, 0);
+
+    SDL_Surface* title_text = TTF_RenderUTF8_Blended(
+        Fonts_getLarge(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
+    if (title_text) {
+        // The title keeps a row as high as a selection pill, with the status group
+        // or without it, thus the list below it starts on the same line either way.
+        int title_y = top_of_the_pill_row_box(title_text->h, true);
+        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){title_x, title_y});
+        SDL_FreeSurface(title_text);
     }
 }
 
@@ -315,16 +370,21 @@ void render_scroll_indicators(SDL_Surface* screen, int scroll, int items_per_pag
     if (total_count <= items_per_page) return;
 
     int hw = screen->w;
-    int hh = screen->h;
     int ox = (hw - SCALE1(24)) / 2;
+    ListLayout layout = calc_list_layout(screen);
+    // The scroll assets of the platform are 6 units high (`api.c`, `asset_rects`).
+    int arrow_h = SCALE1(6);
 
     if (scroll > 0) {
-        // Position just below header with gap from first item
-        GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, SCALE1(PADDING + PILL_SIZE - BUTTON_MARGIN)});
+        // Above the first row, in the gap that the top pill row leaves
+        GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen,
+                      &(SDL_Rect){ox, layout.list_y - arrow_h});
     }
     if (scroll + items_per_page < total_count) {
-        // Position at the end of the list area (just above button hints)
-        GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN)});
+        // Below the last row. The bottom pill row holds it, between the two button
+        // hints, which this change accepts.
+        GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen,
+                      &(SDL_Rect){ox, layout.list_y + layout.list_h});
     }
 }
 
@@ -338,8 +398,11 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
     int hh = screen->h;
 
     ListLayout layout;
-    layout.list_y = SCALE1(PADDING + PILL_SIZE) + 10;
-    layout.list_h = hh - layout.list_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN);
+    // The first row starts where the top pill row ends, as a row of the menu of the
+    // platform does, and the list stops at the top of the bottom pill row, which
+    // holds the button hints.
+    layout.list_y = SCALE1(PADDING + PILL_SIZE);
+    layout.list_h = hh - layout.list_y - pill_footer_height();
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;
     // "Rich" rows (thumbnail + two text lines) are 1.5x a plain row.
@@ -396,7 +459,11 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
         SDL_SetClipRect(screen, NULL);
 }
 
-// Render a list item's pill background and calculate text position
+// The height of a chip, which a caller needs before it draws one.
+int chip_height(void) {
+    return TTF_FontHeight(Fonts_getTiny()) + SCALE1(CHIP_PADDING_Y * 2);
+}
+
 // A chip: a short label in a rectangular outline with no fill. The player
 // screens use one to name the source of what plays. Gives the rectangle that it
 // drew, thus a caller can place what follows beside it.

@@ -35,10 +35,10 @@ static char podcast_artwork_url[512] = {0};
 // Podcast progress GPU state
 static int progress_bar_x = 0, progress_bar_y = 0;
 static int progress_bar_w = 0, progress_bar_h = 0;
-static int progress_time_y = 0;
 static int progress_screen_w = 0;
 static int progress_duration_ms = 0;
 static int progress_last_position_sec = -1;
+static int progress_time_y = 0;
 static bool progress_position_set = false;
 
 // Helper to convert surface to ARGB8888 for proper scaling
@@ -1639,7 +1639,7 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // === TOP BAR ===
-    int top_y = SCALE1(PADDING);
+    int top_y = top_of_the_chip_box(screen, chip_height());
 
     // Source chip
     const char* chip_text = "PODCAST";
@@ -1692,10 +1692,10 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // Hardware status (clock, battery) on right
-    GFX_blitHardwareGroup(screen, show_setting);
+    if (screen_has_status_group(screen)) GFX_blitHardwareGroup(screen, show_setting);
 
     // === PODCAST INFO SECTION (like music player artist/title/album) ===
-    int info_y = SCALE1(PADDING + 45);
+    int info_y = total_header_height(screen, chip_height());
     int max_w_text = hw - SCALE1(PADDING * 2);
 
     // Podcast name (like Artist in music player) - gray, artist font
@@ -1743,11 +1743,21 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
     info_y += TTF_FontHeight(Fonts_getTitle()) + SCALE1(2);
 
+    // The row of the play time is the foot of this screen, as it is on the music
+    // player, thus the bar stops above it.
+    int bar_h = SCALE1(4);
+    int bar_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - bar_h;
+
     // Episode description (word-wrapped, up to 4 lines)
     if (ep->description[0]) {
         TTF_Font* desc_font = Fonts_getSmall();
         int desc_line_h = TTF_FontHeight(desc_font);
         int max_lines = 4;
+
+        // The description stops above the bar, thus a long one cannot touch it.
+        int lines_that_fit = (bar_y - info_y) / desc_line_h;
+        if (lines_that_fit < max_lines) max_lines = lines_that_fit;
+        if (max_lines < 0) max_lines = 0;
 
         // Strip HTML tags and newlines from description
         char desc_buf[512];
@@ -1827,11 +1837,9 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
 
     // === PROGRESS BAR SECTION (GPU rendered) ===
-    int bar_y = hh - SCALE1(35);
-    int bar_h = SCALE1(4);
     int bar_margin = SCALE1(PADDING);
     int bar_w = hw - bar_margin * 2;
-    int time_y = bar_y + SCALE1(8);
+    int time_y = top_of_the_footer_chip_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Get duration for GPU rendering
     int duration = Podcast_getDuration();  // Uses episode metadata duration
@@ -1953,11 +1961,12 @@ void PodcastProgress_renderGPU(void) {
         if (fill_w > progress_bar_w) fill_w = progress_bar_w;
     }
 
-    // Create surface for progress bar + time text
-    // Height: bar + gap + time text
-    int time_gap = SCALE1(8);
-    int time_h = TTF_FontHeight(Fonts_getTiny());
-    int total_h = progress_bar_h + time_gap + time_h;
+    // One surface holds the bar and the line of the time below it. The gap between
+    // the two comes from the positions that the screen gave, thus the bar keeps the
+    // top of the bottom pill row and the time keeps the middle of it.
+    int time_h = TTF_FontHeight(Fonts_getSmall());
+    int time_offset = progress_time_y - progress_bar_y;
+    int total_h = time_offset + time_h;
 
     SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, progress_screen_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!combined) return;
@@ -1973,22 +1982,27 @@ void PodcastProgress_renderGPU(void) {
         SDL_FillRect(combined, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
     }
 
-    // Render time texts
-    char time_cur[16], time_dur[16];
+    // The position and the total take one font on one line, as the play time of the
+    // music player does. The separator gives a relation and is not a value, thus it
+    // goes with the total.
+    char time_cur[16], time_dur[16], time_total[24];
     format_duration(time_cur, position_sec);
     format_duration(time_dur, duration_ms / 1000);
+    snprintf(time_total, sizeof(time_total), "/%s", time_dur);
 
+    int time_x = bar_margin;
     SDL_Surface* cur_surf = TTF_RenderUTF8_Blended(
-        Fonts_getTiny(), time_cur, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        Fonts_getSmall(), time_cur, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (cur_surf) {
-        SDL_BlitSurface(cur_surf, NULL, combined, &(SDL_Rect){bar_margin, progress_bar_h + time_gap});
+        SDL_BlitSurface(cur_surf, NULL, combined, &(SDL_Rect){time_x, time_offset});
+        time_x += cur_surf->w;
         SDL_FreeSurface(cur_surf);
     }
 
     SDL_Surface* dur_surf = TTF_RenderUTF8_Blended(
-        Fonts_getTiny(), time_dur, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        Fonts_getSmall(), time_total, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (dur_surf) {
-        SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){progress_screen_w - bar_margin - dur_surf->w, progress_bar_h + time_gap});
+        SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){time_x, time_offset});
         SDL_FreeSurface(dur_surf);
     }
 

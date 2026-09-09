@@ -39,7 +39,7 @@ bool player_title_scroll_showing(void);
 void player_title_scroll_paint(int layer);
 
 // Playtime GPU rendering functions
-void PlayTime_setPosition(int x, int y, int duration_x);
+void PlayTime_setPosition(int x, int y);
 void PlayTime_renderGPU(void);
 bool PlayTime_needsRefresh(void);
 void PlayTime_clear(void);

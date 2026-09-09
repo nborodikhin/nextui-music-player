@@ -65,6 +65,35 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y, int layer);
 
+// The y of the top of the chip of a playing screen. The chip shares the line of the
+// status group, thus it takes the top margin where the platform draws none. It then
+// keeps the same gap to the top edge as to the left edge.
+int top_of_the_chip_box(SDL_Surface* screen, int chip_h);
+
+// The height of the header of a screen (the top pill row) including all
+// applicable paddings. This is the top boundary content may use.
+// If status group is not displayed, the height could be defined by `chip_h`.
+int total_header_height(SDL_Surface* screen, int chip_h);
+
+// The total height of the bottom pill row including all applicable paddings,
+// which defines the bottom of the area usable for content.
+//
+// This function is for when pills are used (normal case).
+// See also: `chip_footer_height`
+int pill_footer_height(void);
+
+// The total height of the bottom chip footer of a screen including
+// all applicable paddings, used when pills are not used (e.g. playing screen).
+// See also: `pill_footer_height`
+int chip_footer_height(int row_h);
+
+// The y of the top of a box `box_h` high, which takes the role of the bottom
+// pill row on the screen that draws no button hint (e.g. playing screen).
+int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
+
+// True where the screen is wide enough for the platform to draw the status group.
+bool screen_has_status_group(SDL_Surface* screen);
+
 // Render standard screen header (title pill + hardware status)
 void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);
 
@@ -116,6 +145,10 @@ typedef struct {
     int text_x;       // X position for text (after padding)
     int text_y;       // Y position for text (vertically centered)
 } ListItemPos;
+
+// The height of a chip. A caller needs it before it draws, to put the chip on the
+// middle of the top pill row.
+int chip_height(void);
 
 // Render a list item's pill background and calculate text position
 // Combines: the row width + draw_list_item_bg + text position calculation

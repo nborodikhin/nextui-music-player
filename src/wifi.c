@@ -30,6 +30,8 @@ static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
         SDL_FreeSurface(text);
     }
 
+    // This screen draws the status group at each width. The wifi indicator in it is
+    // what reports the connection, thus the screen loses its subject without it.
     GFX_blitHardwareGroup(scr, show_setting);
     GFX_flip(scr);
 }
