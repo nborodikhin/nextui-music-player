@@ -1,0 +1,33 @@
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Music Player
+        uses: actions/checkout@v7
+
+      - name: Install desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
+            libsamplerate0-dev libzip-dev libgl1-mesa-dev
+
+      - name: Fetch NextUI
+        run: ./dev deps fetch nextui
+
+      # test_ui_utils links the objects of the desktop build, thus the build
+      # comes before the tests.
+      - name: Build desktop
+        run: ./dev build desktop
+
+      - name: Run the color lint and the unit tests
+        run: ./dev test
