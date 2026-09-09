@@ -292,8 +292,8 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         }
     }
 
-    // Position for error message, one spectrum height above the bottom pill row
-    int vis_y = hh - SCALE1(PADDING + PILL_SIZE) - SCALE1(50);
+    // Position for error message, one spectrum height above the foot of the screen
+    int vis_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - SCALE1(50);
 
     // === BOTTOM BAR (GPU layer - position set here, rendering done independently) ===
     // The height of the row comes from the text that it holds, which the renderer

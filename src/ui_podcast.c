@@ -1743,11 +1743,10 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
     info_y += TTF_FontHeight(Fonts_getTitle()) + SCALE1(2);
 
-    // The bar stops at the top of the bottom pill row, where the spectrum of the music
-    // player stops, and the time takes the bottom margin, where the play time of the
-    // music player sits. Thus the two playing screens hold one line.
+    // The row of the play time is the foot of this screen, as it is on the music
+    // player, thus the bar stops above it.
     int bar_h = SCALE1(4);
-    int bar_y = hh - SCALE1(PADDING + PILL_SIZE) - bar_h;
+    int bar_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - bar_h;
 
     // Episode description (word-wrapped, up to 4 lines)
     if (ep->description[0]) {
@@ -1840,7 +1839,7 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     // === PROGRESS BAR SECTION (GPU rendered) ===
     int bar_margin = SCALE1(PADDING);
     int bar_w = hw - bar_margin * 2;
-    int time_y = top_of_the_bottom_margin_box(screen, TTF_FontHeight(Fonts_getSmall()));
+    int time_y = top_of_the_footer_chip_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Get duration for GPU rendering
     int duration = Podcast_getDuration();  // Uses episode metadata duration

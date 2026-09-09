@@ -273,10 +273,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     }
 
     // === SPECTRUM SECTION (GPU rendered) ===
-    // The spectrum stops at the top of the bottom pill row, which holds the row of
-    // the play time and the indicators.
+    // The row of the play time and the indicators is the foot of this screen, thus the
+    // spectrum stops above it.
+    int indicator_h = TTF_FontHeight(Fonts_getTiny()) + SCALE1(1);
     int spec_h = SCALE1(50);
-    int spec_y = hh - SCALE1(PADDING + PILL_SIZE) - spec_h;
+    int spec_y = hh - chip_footer_height(indicator_h) - spec_h;
     int spec_x = SCALE1(PADDING);
     int spec_w = hw - SCALE1(PADDING * 2);
 
@@ -286,9 +287,8 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     // === BOTTOM BAR ===
     // The screen draws no button hint, thus the row of the play time and the
     // indicators takes the bottom margin of the screen.
-    int indicator_h = TTF_FontHeight(Fonts_getTiny()) + SCALE1(1);
-    int bottom_y = top_of_the_bottom_margin_box(screen, indicator_h);
-    int time_y = top_of_the_bottom_margin_box(screen, TTF_FontHeight(Fonts_getSmall()));
+    int bottom_y = top_of_the_footer_chip_box(screen, indicator_h);
+    int time_y = top_of_the_footer_chip_box(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Time display is rendered via GPU layer - just set position here
     int time_x = SCALE1(PADDING);

@@ -3,9 +3,6 @@
 #include <math.h>
 #include "ui_utils.h"
 
-// The gap below the header of a playing screen, before the block of metadata.
-#define HEADER_TO_BLOCK_GAP 15
-
 // The form of a chip: the space around its label, and its height with no label.
 #define CHIP_PADDING_X 5
 #define CHIP_PADDING_Y 2
@@ -281,28 +278,41 @@ bool screen_has_status_group(SDL_Surface* screen) {
     return screen->w >= SCALE1(320);
 }
 
-int top_of_the_pill_row_box(SDL_Surface* screen, int box_h) {
-    // The row is there whether the platform fills it or not, thus the screen takes
-    // no part in the answer. The parameter keeps one shape for each helper here.
-    (void)screen;
-    return SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2;
+// The y of the top of a box `box_h` high, centered on the top pill row, which is the
+// row that the platform keeps for the status group. The row is there whether the
+// platform fills it or not, thus a screen title keeps the height of a selected row on
+// each screen, as the menu of the platform does.
+static int top_of_the_pill_row_box(int box_h, bool use_status_group) {
+    return use_status_group ? SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2
+                            : SCALE1(PADDING);
 }
 
 // The chip of a playing screen shares the line of the status group. Where the
 // platform draws no status group, the chip takes the top margin, thus its gap to
 // the top edge and its gap to the left edge are the same.
 int top_of_the_chip_box(SDL_Surface* screen, int chip_h) {
-    return screen_has_status_group(screen) ? top_of_the_pill_row_box(screen, chip_h)
-                                           : SCALE1(PADDING);
+    return top_of_the_pill_row_box(chip_h, screen_has_status_group(screen));
 }
 
 int total_header_height(SDL_Surface* screen, int chip_h) {
-    int header_bottom = screen_has_status_group(screen) ? SCALE1(PADDING + PILL_SIZE)
-                                                        : SCALE1(PADDING) + chip_h;
-    return header_bottom + SCALE1(HEADER_TO_BLOCK_GAP);
+    // The pill row holds its own room around the pill, thus the content that follows
+    // needs no gap of its own. A chip is snug, thus it takes a margin below it.
+    return screen_has_status_group(screen) ? SCALE1(PADDING + PILL_SIZE)
+                                           : SCALE1(PADDING) + chip_h + SCALE1(PADDING);
 }
 
-int top_of_the_bottom_margin_box(SDL_Surface* screen, int box_h) {
+// The room that the foot of a screen takes. A screen that draws button hints gives
+// the pill row and a margin on each side of it. A screen that draws none gives the
+// margin, the row of its own, and the margin again.
+int pill_footer_height(void) {
+    return SCALE1(PADDING + PILL_SIZE + PADDING);
+}
+
+int chip_footer_height(int row_h) {
+    return SCALE1(PADDING) + row_h + SCALE1(PADDING);
+}
+
+int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h) {
     return screen->h - SCALE1(PADDING) - box_h;
 }
 
@@ -332,7 +342,7 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     if (title_text) {
         // The title keeps a row as high as a selection pill, with the status group
         // or without it, thus the list below it starts on the same line either way.
-        int title_y = top_of_the_pill_row_box(screen, title_text->h);
+        int title_y = top_of_the_pill_row_box(title_text->h, true);
         SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){title_x, title_y});
         SDL_FreeSurface(title_text);
     }
@@ -392,7 +402,7 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
     // platform does, and the list stops at the top of the bottom pill row, which
     // holds the button hints.
     layout.list_y = SCALE1(PADDING + PILL_SIZE);
-    layout.list_h = hh - layout.list_y - SCALE1(PADDING + PILL_SIZE);
+    layout.list_h = hh - layout.list_y - pill_footer_height();
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;
     // "Rich" rows (thumbnail + two text lines) are 1.5x a plain row.

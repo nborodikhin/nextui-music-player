@@ -83,9 +83,17 @@ DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/pla
 DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
                         $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
                       | grep -v -e musicplayer.o -e ui_utils.o)
-$(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN)
-	@test -f $(DESKTOP_OBJ)/ext/desktop/platform/platform.o || \
-	  { echo "test_ui_utils needs the objects of the desktop build. Run: ./dev build desktop"; exit 1; }
+# The objects come from the desktop build, thus they must be as new as the sources.
+# src/Makefile tracks each header with -MMD and -include, thus this delegation
+# rebuilds what changed and nothing else.
+.PHONY: desktop-objs
+desktop-objs:
+	@test -d $(DESKTOP_OBJ) || \
+	  { echo "test_ui_utils needs the desktop build. Run: ./dev build desktop"; exit 1; }
+	@$(MAKE) --no-print-directory -C ../src PLATFORM=desktop \
+	  NEXTUI_ROOT=$(abspath ../NextUI/workspace)
+
+$(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_utils.c $(SRC)/ui_utils.c \
 	  $(DESKTOP_LINK_OBJ) $(DESKTOP_LIBS)
 

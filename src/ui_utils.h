@@ -65,27 +65,31 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y, int layer);
 
-// The y of the top of a box `box_h` high, centered on the top pill row, which is the
-// row that the platform keeps for the status group. The row is there whether the
-// platform fills it or not, thus a screen title keeps the height of a selected row on
-// each screen, as the menu of the platform does.
-int top_of_the_pill_row_box(SDL_Surface* screen, int box_h);
-
-// The y of the top of a box `box_h` high, placed on the bottom margin,
-// used on the screen that draws no button hint at the foot. The name says
-// the margin and not the button row, because the box does not take the line
-// of a button hint. It sits lower, at the edge of the box of the screen.
-int top_of_the_bottom_margin_box(SDL_Surface* screen, int box_h);
-
 // The y of the top of the chip of a playing screen. The chip shares the line of the
 // status group, thus it takes the top margin where the platform draws none. It then
 // keeps the same gap to the top edge as to the left edge.
 int top_of_the_chip_box(SDL_Surface* screen, int chip_h);
 
-// The height of the whole header of a playing screen: the chip or the pill row that
-// holds it, and the gap below. The block of metadata starts at this y, thus it moves
-// up with the chip where the platform draws no status group.
+// The height of the header of a screen (the top pill row) including all
+// applicable paddings. This is the top boundary content may use.
+// If status group is not displayed, the height could be defined by `chip_h`.
 int total_header_height(SDL_Surface* screen, int chip_h);
+
+// The total height of the bottom pill row including all applicable paddings,
+// which defines the bottom of the area usable for content.
+//
+// This function is for when pills are used (normal case).
+// See also: `chip_footer_height`
+int pill_footer_height(void);
+
+// The total height of the bottom chip footer of a screen including
+// all applicable paddings, used when pills are not used (e.g. playing screen).
+// See also: `pill_footer_height`
+int chip_footer_height(int row_h);
+
+// The y of the top of a box `box_h` high, which takes the role of the bottom
+// pill row on the screen that draws no button hint (e.g. playing screen).
+int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
 
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
