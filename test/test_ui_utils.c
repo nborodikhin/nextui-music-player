@@ -36,21 +36,20 @@ TEST(test_top_center) {
     SDL_FreeSurface(screen);
 }
 
-TEST(test_bottom_center) {
+TEST(test_bottom_margin) {
     const int sizes[][2] = {{1024, 768}, {1280, 720}, {640, 480}, {320, 240}};
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
         SDL_Surface *screen = make_screen(sizes[i][0], sizes[i][1]);
         CHECK(screen != NULL);
         int h = sizes[i][1];
 
-        // A box as high as the pill fills the bottom row.
-        CHECK_EQ_INT(pill_row_bottom_center(screen, SCALE1(PILL_SIZE)),
-                  h - SCALE1(PADDING + PILL_SIZE));
-        // The middle of the bottom row is the mirror of the middle of the top row.
-        CHECK_EQ_INT(pill_row_bottom_center(screen, 0),
-                  h - SCALE1(PADDING + PILL_SIZE) + SCALE1(PILL_SIZE) / 2);
-        CHECK_EQ_INT(h - pill_row_bottom_center(screen, 0),
-                  pill_row_top_center(0) + (h - h));
+        // The foot of the box sits on the bottom margin, whatever the box holds.
+        CHECK_EQ_INT(bottom_margin_top(screen, 0), h - SCALE1(PADDING));
+        int box = SCALE1(PILL_SIZE) / 3;
+        CHECK_EQ_INT(bottom_margin_top(screen, box) + box, h - SCALE1(PADDING));
+        // A box as high as the pill reaches the top of the bottom pill row.
+        CHECK_EQ_INT(bottom_margin_top(screen, SCALE1(PILL_SIZE)),
+                     h - SCALE1(PADDING + PILL_SIZE));
 
         SDL_FreeSurface(screen);
     }
@@ -78,7 +77,7 @@ TEST(test_list_keeps_out_of_the_bottom_pill_row) {
         int h = sizes[i][1];
         ListLayout layout = calc_list_layout(screen);
 
-        CHECK_EQ_INT(layout.list_y, SCALE1(PADDING + PILL_SIZE + PADDING));
+        CHECK_EQ_INT(layout.list_y, SCALE1(PADDING + PILL_SIZE));
         CHECK_EQ_INT(layout.list_y + layout.list_h, h - SCALE1(PADDING + PILL_SIZE));
         CHECK(layout.list_y + layout.items_per_page * layout.item_h
                <= h - SCALE1(PADDING + PILL_SIZE));
@@ -97,7 +96,7 @@ TEST(test_rows_of_a_page) {
     struct { int w, h, rows, rich; } cases[] = {
         {1024, 768, 6, 4},
         {1280, 720, 5, 3},
-        {640, 480, 2, 1},
+        {640, 480, 3, 2},
     };
     for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         SDL_Surface *screen = make_screen(cases[i].w, cases[i].h);
@@ -111,7 +110,7 @@ TEST(test_rows_of_a_page) {
 
 int main(void) {
     RUN(test_top_center);
-    RUN(test_bottom_center);
+    RUN(test_bottom_margin);
     RUN(test_status_group_threshold);
     RUN(test_list_keeps_out_of_the_bottom_pill_row);
     RUN(test_rows_of_a_page);

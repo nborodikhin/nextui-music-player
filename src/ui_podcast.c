@@ -1828,13 +1828,13 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
 
     // === PROGRESS BAR SECTION (GPU rendered) ===
     // The bar stops at the top of the bottom pill row, where the spectrum of the
-    // music player stops, and the time takes the middle of that row, where the play
-    // time of the music player sits. Thus the two playing screens hold one line.
+    // music player stops, and the time takes the bottom margin, where the play time
+    // of the music player sits. Thus the two playing screens hold one line.
     int bar_h = SCALE1(4);
     int bar_margin = SCALE1(PADDING);
     int bar_w = hw - bar_margin * 2;
     int bar_y = hh - SCALE1(PADDING + PILL_SIZE) - bar_h;
-    int time_y = pill_row_bottom_center(screen, TTF_FontHeight(Fonts_getSmall()));
+    int time_y = bottom_margin_top(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Get duration for GPU rendering
     int duration = Podcast_getDuration();  // Uses episode metadata duration

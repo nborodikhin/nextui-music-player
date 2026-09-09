@@ -282,8 +282,8 @@ int pill_row_top_center(int box_h) {
     return SCALE1(PADDING) + (SCALE1(PILL_SIZE) - box_h) / 2;
 }
 
-int pill_row_bottom_center(SDL_Surface* screen, int box_h) {
-    return screen->h - SCALE1(PADDING + PILL_SIZE) + (SCALE1(PILL_SIZE) - box_h) / 2;
+int bottom_margin_top(SDL_Surface* screen, int box_h) {
+    return screen->h - SCALE1(PADDING) - box_h;
 }
 
 // Render standard screen header (title pill + hardware status)
@@ -292,11 +292,13 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
     char truncated[256];
     bool has_status_group = screen_has_status_group(screen);
 
-    GFX_truncateText(Fonts_getMedium(), title, truncated,
+    // The title takes the font of a row of the list, as the menu of the platform
+    // does. The secondary text role keeps it apart from a row.
+    GFX_truncateText(Fonts_getLarge(), title, truncated,
                      hw - SCALE1(PADDING * 4), SCALE1(BUTTON_PADDING * 2));
 
     SDL_Surface* title_text = TTF_RenderUTF8_Blended(
-        Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        Fonts_getLarge(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (title_text) {
         // Where the platform draws no status group, the pill row that the title
         // centers on is not on the screen, thus the title takes the top margin.
@@ -360,9 +362,10 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
     int hh = screen->h;
 
     ListLayout layout;
-    // The list starts one margin below the top pill row, and stops at the top of
-    // the bottom pill row, which holds the button hints.
-    layout.list_y = SCALE1(PADDING + PILL_SIZE + PADDING);
+    // The first row starts where the top pill row ends, as a row of the menu of the
+    // platform does, and the list stops at the top of the bottom pill row, which
+    // holds the button hints.
+    layout.list_y = SCALE1(PADDING + PILL_SIZE);
     layout.list_h = hh - layout.list_y - SCALE1(PADDING + PILL_SIZE);
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;

@@ -297,15 +297,15 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     // === BOTTOM BAR (GPU layer - position set here, rendering done independently) ===
     // The height of the row comes from the text that it holds, which the renderer
-    // measures, thus the renderer gets the middle of the bottom pill row and puts
-    // the row on it.
-    int row_center_y = screen->h - SCALE1(PADDING + PILL_SIZE / 2);
+    // measures, thus the renderer gets the bottom margin of the screen and puts the
+    // foot of the row on it.
+    int row_bottom_y = screen->h - SCALE1(PADDING);
     int bar_w = SCALE1(60);
     int bar_h = SCALE1(8);
     int bar_x = hw - SCALE1(PADDING) - bar_w;
 
     // Set position for GPU rendering (actual rendering happens in main loop)
-    RadioStatus_setPosition(bar_x, bar_w, bar_h, SCALE1(PADDING), row_center_y);
+    RadioStatus_setPosition(bar_x, bar_w, bar_h, SCALE1(PADDING), row_bottom_y);
 
     // Error message (displayed prominently if in error state)
     if (state == RADIO_STATE_ERROR) {
@@ -631,17 +631,17 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 // - GPU layer rendering happens independently in main loop
 
 static int status_bar_x = 0, status_bar_w = 0, status_bar_h = 0;
-static int status_left_x = 0, status_row_center_y = 0;
+static int status_left_x = 0, status_row_bottom_y = 0;
 static bool status_position_set = false;
 
 
 void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
-                              int left_x, int row_center_y) {
+                              int left_x, int row_bottom_y) {
     status_bar_x = bar_x;
     status_bar_w = bar_w;
     status_bar_h = bar_h;
     status_left_x = left_x;
-    status_row_center_y = row_center_y;
+    status_row_bottom_y = row_bottom_y;
     status_position_set = true;
 }
 
@@ -749,8 +749,8 @@ void RadioStatus_renderGPU(void) {
     int line_h = bitrate_h;
     if (status_h > line_h) line_h = status_h;
     if (status_bar_h > line_h) line_h = status_bar_h;
-    // The row centers on the middle of the bottom pill row, whatever it holds.
-    int base_y = status_row_center_y - line_h / 2;
+    // The foot of the row sits on the bottom margin, whatever the row holds.
+    int base_y = status_row_bottom_y - line_h;
 
     // Surface covers from left edge to right edge
     int surface_w = right_x - left_x;

@@ -29,10 +29,10 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
 void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll);
 
 // GPU buffer indicator and status functions (rendered independently like Spectrum/PlayTime)
-// `row_center_y` is the middle of the bottom pill row. The renderer measures the
-// text that the row holds and puts the row on that line.
+// `row_bottom_y` is the bottom margin of the screen. The renderer measures the text
+// that the row holds and puts the foot of the row on that line.
 void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
-                              int left_x, int row_center_y);
+                              int left_x, int row_bottom_y);
 void RadioStatus_clear(void);
 bool RadioStatus_needsRefresh(void);
 void RadioStatus_renderGPU(void);

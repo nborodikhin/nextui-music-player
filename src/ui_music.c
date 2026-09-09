@@ -287,11 +287,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     Spectrum_setPosition(spec_x, spec_y, spec_w, spec_h);
 
     // === BOTTOM BAR ===
-    // The row of the play time and the indicators takes the middle of the bottom
-    // pill row, thus it sits on the line of a button hint of another screen.
+    // The screen draws no button hint, thus the row of the play time and the
+    // indicators takes the bottom margin of the screen.
     int indicator_h = TTF_FontHeight(Fonts_getTiny()) + SCALE1(1);
-    int bottom_y = pill_row_bottom_center(screen, indicator_h);
-    int time_y = pill_row_bottom_center(screen, TTF_FontHeight(Fonts_getSmall()));
+    int bottom_y = bottom_margin_top(screen, indicator_h);
+    int time_y = bottom_margin_top(screen, TTF_FontHeight(Fonts_getSmall()));
 
     // Time display is rendered via GPU layer - just set position here
     int time_x = SCALE1(PADDING);

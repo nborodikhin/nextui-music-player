@@ -65,12 +65,12 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y, int layer);
 
-// The middle of a pill row of the platform. Each one gives the y of the top of a
-// box `box_h` high that centers on that row. The top row holds the status group,
-// the bottom row holds the button hints, and a screen that draws no pill on a row
-// keeps the same line for the content that takes the place of one.
+// The y of the top of a box `box_h` high, on the line that the platform gives it.
+// `pill_row_top_center()` centers the box on the top pill row, where the platform
+// draws the status group. `bottom_margin_top()` puts the foot of the box on the
+// bottom margin of the screen, for a screen that draws no button hint.
 int pill_row_top_center(int box_h);
-int pill_row_bottom_center(SDL_Surface* screen, int box_h);
+int bottom_margin_top(SDL_Surface* screen, int box_h);
 
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
