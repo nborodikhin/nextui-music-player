@@ -155,6 +155,7 @@ LOCAL_SRC = \
     ui_playlist.c ui_system.c ui_settings.c ui_keyboard.c ui_theme.c \
     ui_theme_utils.c keyboard_map.c utf8.c \
     spectrum.c \
+    spectrum_ceiling.c \
     audio/kiss_fft.c audio/kiss_fftr.c \
     include/yxml/yxml.c \
     include/parson/parson.c

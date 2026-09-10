@@ -312,6 +312,64 @@ int chip_footer_height(int row_h) {
     return SCALE1(PADDING) + row_h + SCALE1(PADDING);
 }
 
+// A letter takes about this much of the ascent, where the font gives no usable
+// metrics for it.
+#define X_HEIGHT_OF_ASCENT 0.52f
+#define DIGIT_HEIGHT_OF_ASCENT 0.72f
+
+// The top of the band of `sample`, and the baseline, inside the box of one line.
+// Gives false where the font has no ascent to work from.
+static bool optical_band(TTF_Font* font, char sample, float fallback_ratio,
+                         int* top, int* baseline) {
+    if (!font) return false;
+
+    int ascent = TTF_FontAscent(font);
+    if (ascent <= 0) return false;
+
+    *baseline = ascent;
+
+    int minx, maxx, miny, maxy, advance;
+    if (TTF_GlyphMetrics(font, sample, &minx, &maxx, &miny, &maxy, &advance) == 0) {
+        // maxy is above the baseline, thus the top of the band is that far up.
+        int band_top = ascent - maxy;
+
+        // A face where the sample reaches the ascender line gives a band as tall
+        // as the whole ascent, which is not the band of that character. Some
+        // fonts of the platform report exactly that. Take the metrics only where
+        // they give a band of a size that a face can have.
+        if (band_top >= ascent / 5 && band_top < ascent) {
+            *top = band_top;
+            return true;
+        }
+    }
+
+    *top = ascent - (int)(ascent * fallback_ratio);
+    return true;
+}
+
+int optical_mark_height(TTF_Font* font) {
+    int top, baseline;
+    if (!optical_band(font, 'x', X_HEIGHT_OF_ASCENT, &top, &baseline)) {
+        int line_h = font ? TTF_FontHeight(font) : 0;
+        return line_h / 2;
+    }
+    return baseline - top;
+}
+
+int optical_mark_y(TTF_Font* font, int mark_h, TextBand band) {
+    char sample = (band == TEXT_BAND_DIGITS) ? '0' : 'x';
+    float ratio = (band == TEXT_BAND_DIGITS) ? DIGIT_HEIGHT_OF_ASCENT : X_HEIGHT_OF_ASCENT;
+
+    int top, baseline;
+    if (!optical_band(font, sample, ratio, &top, &baseline)) {
+        // No ascent to work from. The middle of the line is the best that is left.
+        int line_h = font ? TTF_FontHeight(font) : mark_h;
+        return (line_h - mark_h) / 2;
+    }
+
+    return top + (baseline - top - mark_h) / 2;
+}
+
 int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h) {
     return screen->h - SCALE1(PADDING) - box_h;
 }

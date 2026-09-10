@@ -62,6 +62,12 @@ void Podcast_animateTitleScroll(void);
 // Clear podcast title scroll state (call when selection changes)
 void Podcast_clearTitleScroll(void);
 
+// The title of the playing screen, as painted onto the overlay layer of that
+// screen. The painter of the layer calls these, and it draws the spectrum first.
+bool Podcast_playingTitleNeedsRefresh(void);
+bool Podcast_playingTitleShowing(void);
+void Podcast_paintPlayingTitle(int layer);
+
 // Clear podcast artwork and playing title scroll (call when leaving playing screen)
 void Podcast_clearArtwork(void);
 
@@ -70,14 +76,18 @@ void Podcast_clearArtwork(void);
 #define LAYER_PODCAST_PROGRESS 3
 
 // Set position for GPU rendering (call once during initial render)
-void PodcastProgress_setPosition(int bar_x, int bar_y, int bar_w, int bar_h,
-                                  int time_y, int screen_w, int duration_ms);
+void PodcastProgress_setPosition(int left_x, int right_x, int row_y, int bar_h,
+                                 int screen_w, int duration_ms);
 
 // Clear progress state (call when leaving playing screen)
 void PodcastProgress_clear(void);
 
 // Check if progress needs refresh (position changed by 1 second)
 bool PodcastProgress_needsRefresh(void);
+
+// Say that the layer no longer holds the row, thus the next render of it draws
+// whatever the position is. A screen that clears its layers needs this.
+void PodcastProgress_markStale(void);
 
 // Render progress bar and time to GPU layer (call from main loop)
 void PodcastProgress_renderGPU(void);

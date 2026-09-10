@@ -20,6 +20,9 @@
 # plain C, with the font probe passed in as a callback so SDL_ttf stays in
 # ui_keyboard.c.
 #
+# spectrum_ceiling.c is the same shape as list_nav.c: the rise and the fall of the
+# ceiling are float arithmetic, with the FFT and the paint left in spectrum.c.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -33,7 +36,7 @@ BIN      = bin
 
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
-           $(BIN)/test_utf8
+           $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -68,6 +71,10 @@ $(BIN)/test_ui_theme: test_ui_theme.c $(SRC)/ui_theme_utils.c $(SRC)/ui_theme.h 
 
 $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
+
+$(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c \
+                              $(SRC)/spectrum_ceiling.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib

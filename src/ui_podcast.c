@@ -11,6 +11,7 @@
 #include "podcast.h"
 #include "player.h"
 #include "ui_podcast.h"
+#include "spectrum.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_theme.h"
@@ -33,12 +34,14 @@ static SDL_Surface* podcast_artwork = NULL;
 static char podcast_artwork_url[512] = {0};
 
 // Podcast progress GPU state
-static int progress_bar_x = 0, progress_bar_y = 0;
-static int progress_bar_w = 0, progress_bar_h = 0;
+// The play time and the bar of progress take one row at the foot of the screen.
+// The time is at the left margin and the bar fills the room that is left, to the
+// right margin.
+static int progress_left_x = 0, progress_right_x = 0;
+static int progress_row_y = 0, progress_bar_h = 0;
 static int progress_screen_w = 0;
 static int progress_duration_ms = 0;
 static int progress_last_position_sec = -1;
-static int progress_time_y = 0;
 static bool progress_position_set = false;
 
 // Helper to convert surface to ARGB8888 for proper scaling
@@ -1724,16 +1727,14 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     // Activate scroll after delay (this render path bypasses ScrollText_render)
     ScrollText_activateAfterDelay(&podcast_playing_title_scroll);
 
-    // If text needs scrolling, use GPU layer
+    // A title that scrolls goes to the GPU layer, and the painter of that layer
+    // draws it. A title that fits goes on the surface of this screen.
     if (podcast_playing_title_scroll.needs_scroll) {
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
-        ScrollText_paintGPU(&podcast_playing_title_scroll, Fonts_getTitle(),
-                            Theme_getColor(THEME_ROLE_PRIMARY, false),
-                            SCALE1(PADDING), title_y, LAYER_SCROLLTEXT);
-        PLAT_GPU_Flip();
+        podcast_playing_title_scroll.last_x     = SCALE1(PADDING);
+        podcast_playing_title_scroll.last_y     = title_y;
+        podcast_playing_title_scroll.last_font  = Fonts_getTitle();
+        podcast_playing_title_scroll.last_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
     } else {
-        // Static text - render to screen surface
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
         SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
             Fonts_getTitle(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (title_surf) {
@@ -1743,20 +1744,24 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     }
     info_y += TTF_FontHeight(Fonts_getTitle()) + SCALE1(2);
 
-    // The row of the play time is the foot of this screen, as it is on the music
-    // player, thus the bar stops above it.
-    int bar_h = SCALE1(4);
-    int bar_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - bar_h;
+    // The row of the play time and the bar of progress is the foot of this screen,
+    // as it is on the music player. The spectrum takes its box above that row, and
+    // the description takes the room that is left.
+    int row_h = TTF_FontHeight(Fonts_getSmall());
+    int spec_h = SCALE1(50);
+    int spec_y = hh - chip_footer_height(row_h) - spec_h;
+    int spec_x = SCALE1(PADDING);
+    int spec_w = hw - SCALE1(PADDING * 2);
 
-    // Episode description (word-wrapped, up to 4 lines)
+    Spectrum_setPosition(spec_x, spec_y, spec_w, spec_h);
+
+    // Episode description. The count of lines comes from the room between the
+    // title and the box of the spectrum, thus a screen with more room shows more.
     if (ep->description[0]) {
         TTF_Font* desc_font = Fonts_getSmall();
         int desc_line_h = TTF_FontHeight(desc_font);
-        int max_lines = 4;
 
-        // The description stops above the bar, thus a long one cannot touch it.
-        int lines_that_fit = (bar_y - info_y) / desc_line_h;
-        if (lines_that_fit < max_lines) max_lines = lines_that_fit;
+        int max_lines = (spec_y - info_y) / desc_line_h;
         if (max_lines < 0) max_lines = 0;
 
         // Strip HTML tags and newlines from description
@@ -1836,17 +1841,14 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
         }
     }
 
-    // === PROGRESS BAR SECTION (GPU rendered) ===
-    int bar_margin = SCALE1(PADDING);
-    int bar_w = hw - bar_margin * 2;
-    int time_y = top_of_the_footer_chip_box(screen, TTF_FontHeight(Fonts_getSmall()));
-
-    // Get duration for GPU rendering
+    // === PROGRESS ROW SECTION (GPU rendered) ===
+    // The time and the bar share the bottom row. The renderer puts the time at the
+    // left margin and gives the bar the room that is left.
+    int row_y = top_of_the_footer_chip_box(screen, row_h);
     int duration = Podcast_getDuration();  // Uses episode metadata duration
 
-    // Set position for GPU rendering (actual rendering happens in main loop)
-    PodcastProgress_setPosition(bar_margin, bar_y, bar_w, bar_h, time_y, hw, duration);
-
+    PodcastProgress_setPosition(SCALE1(PADDING), hw - SCALE1(PADDING), row_y,
+                                SCALE1(4), hw, duration);
 }
 
 // Render loading screen
@@ -1881,22 +1883,45 @@ bool Podcast_titleScrollNeedsRender(void) {
     return false;
 }
 
-// Animate podcast title scroll only (GPU mode, no screen redraw needed)
+// Animate the title of a list of this module. `ScrollText_animateOnly()` paints
+// the layer of the scrolling text itself, thus it serves a screen where nothing
+// else is on that layer.
+//
+// The title of the playing screen is not here. That screen shares its layer with
+// the spectrum, thus one painter draws both and that painter moves the text.
 void Podcast_animateTitleScroll(void) {
     if (ScrollText_isScrolling(&podcast_title_scroll)) {
         ScrollText_animateOnly(&podcast_title_scroll);
     }
-    // Only scroll playing title when playing, not when paused
-    if (Player_getState() != PLAYER_STATE_PLAYING) return;
-    if (ScrollText_isScrolling(&podcast_playing_title_scroll)) {
-        PLAT_clearLayers(LAYER_SCROLLTEXT);
-        ScrollText_paintGPU(&podcast_playing_title_scroll,
-                            podcast_playing_title_scroll.last_font,
-                            podcast_playing_title_scroll.last_color,
-                            podcast_playing_title_scroll.last_x,
-                            podcast_playing_title_scroll.last_y,
-                            LAYER_SCROLLTEXT);
-        PLAT_GPU_Flip();
+}
+
+bool Podcast_playingTitleNeedsRefresh(void) {
+    // The title moves only while the sound plays, thus a still title needs no
+    // frame of its own.
+    if (Player_getState() != PLAYER_STATE_PLAYING) return false;
+    return ScrollText_isScrolling(&podcast_playing_title_scroll);
+}
+
+bool Podcast_playingTitleShowing(void) {
+    return podcast_playing_title_scroll.text[0] &&
+           podcast_playing_title_scroll.needs_scroll &&
+           podcast_playing_title_scroll.last_font != NULL;
+}
+
+void Podcast_paintPlayingTitle(int layer) {
+    // The paint moves the text as it draws it. The title of a sound that does
+    // not play must stand still and stay on the screen, thus the paint keeps its
+    // place on that frame.
+    int offset = podcast_playing_title_scroll.scroll_offset;
+
+    ScrollText_paintGPU(&podcast_playing_title_scroll,
+                        podcast_playing_title_scroll.last_font,
+                        podcast_playing_title_scroll.last_color,
+                        podcast_playing_title_scroll.last_x,
+                        podcast_playing_title_scroll.last_y, layer);
+
+    if (Player_getState() != PLAYER_STATE_PLAYING) {
+        podcast_playing_title_scroll.scroll_offset = offset;
     }
 }
 
@@ -1910,16 +1935,19 @@ void Podcast_clearTitleScroll(void) {
 
 // === PODCAST PROGRESS GPU FUNCTIONS ===
 
-void PodcastProgress_setPosition(int bar_x, int bar_y, int bar_w, int bar_h,
-                                  int time_y, int screen_w, int duration_ms) {
-    progress_bar_x = bar_x;
-    progress_bar_y = bar_y;
-    progress_bar_w = bar_w;
+void PodcastProgress_setPosition(int left_x, int right_x, int row_y, int bar_h,
+                                 int screen_w, int duration_ms) {
+    progress_left_x = left_x;
+    progress_right_x = right_x;
+    progress_row_y = row_y;
     progress_bar_h = bar_h;
-    progress_time_y = time_y;
     progress_screen_w = screen_w;
     progress_duration_ms = duration_ms;
     progress_position_set = true;
+}
+
+void PodcastProgress_markStale(void) {
+    progress_last_position_sec = -1;
 }
 
 void PodcastProgress_clear(void) {
@@ -1952,35 +1980,6 @@ void PodcastProgress_renderGPU(void) {
     progress_last_position_sec = position_sec;
 
     int duration_ms = progress_duration_ms > 0 ? progress_duration_ms : Podcast_getDuration();
-    int bar_margin = progress_bar_x;
-
-    // Calculate progress bar fill width
-    int fill_w = 0;
-    if (duration_ms > 0) {
-        fill_w = (progress_bar_w * position_ms) / duration_ms;
-        if (fill_w > progress_bar_w) fill_w = progress_bar_w;
-    }
-
-    // One surface holds the bar and the line of the time below it. The gap between
-    // the two comes from the positions that the screen gave, thus the bar keeps the
-    // top of the bottom pill row and the time keeps the middle of it.
-    int time_h = TTF_FontHeight(Fonts_getSmall());
-    int time_offset = progress_time_y - progress_bar_y;
-    int total_h = time_offset + time_h;
-
-    SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, progress_screen_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!combined) return;
-
-    SDL_FillRect(combined, NULL, 0);  // Transparent background
-
-    SDL_Rect bar_bg = {bar_margin, 0, progress_bar_w, progress_bar_h};
-    SDL_FillRect(combined, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
-
-    // Draw progress bar fill
-    if (fill_w > 0) {
-        SDL_Rect bar_fill = {bar_margin, 0, fill_w, progress_bar_h};
-        SDL_FillRect(combined, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
-    }
 
     // The position and the total take one font on one line, as the play time of the
     // music player does. The separator gives a relation and is not a value, thus it
@@ -1990,25 +1989,60 @@ void PodcastProgress_renderGPU(void) {
     format_duration(time_dur, duration_ms / 1000);
     snprintf(time_total, sizeof(time_total), "/%s", time_dur);
 
-    int time_x = bar_margin;
+    TTF_Font* time_font = Fonts_getSmall();
+    int time_h = TTF_FontHeight(time_font);
+    int cur_w = 0, total_w = 0;
+    TTF_SizeUTF8(time_font, time_cur, &cur_w, NULL);
+    TTF_SizeUTF8(time_font, time_total, &total_w, NULL);
+
+    int row_h = time_h > progress_bar_h ? time_h : progress_bar_h;
+
+    SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, progress_screen_w, row_h, 32,
+                                                           SDL_PIXELFORMAT_ARGB8888);
+    if (!combined) return;
+
+    SDL_FillRect(combined, NULL, 0);  // Transparent background
+
+    int time_x = progress_left_x;
     SDL_Surface* cur_surf = TTF_RenderUTF8_Blended(
-        Fonts_getSmall(), time_cur, Theme_getColor(THEME_ROLE_PRIMARY, false));
+        time_font, time_cur, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (cur_surf) {
-        SDL_BlitSurface(cur_surf, NULL, combined, &(SDL_Rect){time_x, time_offset});
-        time_x += cur_surf->w;
+        SDL_BlitSurface(cur_surf, NULL, combined, &(SDL_Rect){time_x, 0});
         SDL_FreeSurface(cur_surf);
     }
-
     SDL_Surface* dur_surf = TTF_RenderUTF8_Blended(
-        Fonts_getSmall(), time_total, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        time_font, time_total, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (dur_surf) {
-        SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){time_x, time_offset});
+        SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){time_x + cur_w, 0});
         SDL_FreeSurface(dur_surf);
+    }
+
+    // The bar takes the room that is left of the row, after the time and a gap.
+    int bar_x = progress_left_x + cur_w + total_w + SCALE1(12);
+    int bar_w = progress_right_x - bar_x;
+    if (bar_w > 0) {
+        // The play time is figures, thus the bar centers on the band of the
+        // digits and not on the band of a lowercase letter.
+        int bar_h = optical_mark_height(time_font);
+        int bar_y = optical_mark_y(time_font, bar_h, TEXT_BAND_DIGITS);
+
+        SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
+        SDL_FillRect(combined, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
+
+        if (duration_ms > 0) {
+            int fill_w = (int)((int64_t)bar_w * position_ms / duration_ms);
+            if (fill_w > bar_w) fill_w = bar_w;
+            if (fill_w > 0) {
+                SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
+                SDL_FillRect(combined, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
+            }
+        }
     }
 
     // Clear previous and draw new
     PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-    PLAT_drawOnLayer(combined, 0, progress_bar_y, progress_screen_w, total_h, 1.0f, false, LAYER_PODCAST_PROGRESS);
+    PLAT_drawOnLayer(combined, 0, progress_row_y, progress_screen_w, row_h, 1.0f, false,
+                     LAYER_PODCAST_PROGRESS);
     SDL_FreeSurface(combined);
 
     PLAT_GPU_Flip();

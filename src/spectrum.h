@@ -18,6 +18,11 @@ void Spectrum_init(void);
 void Spectrum_quit(void);
 void Spectrum_update(void);
 
+// Take the bars and the ceiling to nothing, and keep the position of the box.
+// A source that starts - a station that the user selects - calls this, thus the
+// sound that went does not fall on the screen of the sound that comes.
+void Spectrum_reset(void);
+
 void Spectrum_setPosition(int x, int y, int w, int h);
 bool Spectrum_needsRefresh(void);
 

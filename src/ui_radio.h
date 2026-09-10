@@ -12,6 +12,11 @@
 void render_radio_list(SDL_Surface* screen, int show_setting,
                        int radio_selected, int* radio_scroll);
 
+// Say that a station waits for its screen, before its stream starts. The playing
+// screen then says that it connects, in place of the metadata of the station that
+// played before.
+void RadioUI_setWaitingToStart(bool waiting);
+
 // Render the radio playing screen
 void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selected);
 
@@ -35,7 +40,12 @@ void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
                               int left_x, int row_bottom_y);
 void RadioStatus_clear(void);
 bool RadioStatus_needsRefresh(void);
-void RadioStatus_renderGPU(void);
+bool RadioStatus_renderGPU(void);
+
+// The row of the state, as painted onto the overlay layer of the playing screen.
+// The painter of that layer calls these, and it draws the spectrum first.
+bool RadioStatus_isShowing(void);
+void RadioStatus_paint(int layer);
 
 // True while a title of a list of this module moves.
 bool radio_list_needs_scroll_refresh(void);

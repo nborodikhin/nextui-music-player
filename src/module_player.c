@@ -83,6 +83,10 @@ static void clear_gpu_layers(void) {
     PLAT_clearLayers(LAYER_PLAYTIME);
     PLAT_clearLayers(LAYER_LYRICS);
     PLAT_GPU_Flip();
+
+    // The layer holds the play time no more, thus the next render of the screen
+    // draws it again whatever the position says.
+    PlayTime_invalidate();
 }
 
 // The playing screen draws its spectrum and its scrolling title onto one GPU
@@ -224,10 +228,22 @@ static void refresh_gpu_layers(int* dirty) {
     if (player_title_scroll_needs_render()) *dirty = 1;
     if (Spectrum_needsRefresh()) {
         Spectrum_update();
-        repaint_layer = true;
+
+        // The bars move on each frame while they draw, and the frame after the
+        // last one takes them away. A spectrum that draws nothing needs neither.
+        static bool was_showing = false;
+        bool showing = Spectrum_isShowing();
+        if (showing || was_showing) repaint_layer = true;
+        was_showing = showing;
     }
-    if (repaint_layer) paint_player_layer();
-    if (PlayTime_needsRefresh()) PlayTime_renderGPU();
+    // A frame that redraws the screen paints the layer after that redraw, thus
+    // the bars and the title do not reach the display before the rest of the
+    // screen. This frame therefore leaves the layer to the render block.
+    if (repaint_layer && !*dirty) paint_player_layer();
+
+    // The play time gives its layer to the display as soon as it draws, thus a
+    // frame that redraws the screen leaves it to the render block as well.
+    if (!*dirty && PlayTime_needsRefresh()) PlayTime_renderGPU();
     if (Lyrics_GPUneedsRefresh()) Lyrics_renderGPU();
 }
 
@@ -692,6 +708,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
                 int pl_total = playlist_active ? Playlist_getCount(&playlist) : 0;
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
                 paint_player_layer();
+                PlayTime_renderGPU();
             }
 
             GFX_flip(screen);
@@ -983,6 +1000,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 int pl_total = Playlist_getCount(&playlist);
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
                 paint_player_layer();
+                PlayTime_renderGPU();
             }
 
             GFX_flip(screen);
@@ -1104,6 +1122,7 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
                     int pl_total = Playlist_getCount(&playlist);
                     render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
                     paint_player_layer();
+                    PlayTime_renderGPU();
                 }
 
                 GFX_flip(screen);
