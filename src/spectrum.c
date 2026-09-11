@@ -1,5 +1,4 @@
 #include "spectrum.h"
-#include "spectrum_ceiling.h"
 #include "ui_theme.h"
 #include "player.h"
 #include "defines.h"
@@ -309,15 +308,13 @@ void Spectrum_update(void) {
 
     // The control that turns the spectrum off says the same as a sound that
     // stops, and it says it at once.
-    bool sound_is_there = spectrum_visible && (now - last_samples_ms) < SOUND_GONE_MS;
+    bool sound_is_playing = (now - last_samples_ms) < SOUND_GONE_MS;
     bool feeding = samples_arrived && spectrum_visible;
 
-    // The rise takes the time that the sound is there. The loop draws more often
-    // than the audio gives samples, thus a rise that counts only the frames with
-    // samples drops about a third of its time and takes that much longer.
-    SpectrumCeiling_step(&ceiling, sound_is_there, now);
+    // Drive the rising of the spectrum during opening
+    SpectrumCeiling_tick(&ceiling, spectrum_visible && sound_is_playing, now);
 
-    if (!feeding && sound_is_there) {
+    if (!samples_arrived && spectrum_visible && sound_is_playing) {
         // A frame between two callbacks of the audio. The bars keep the height
         // that the last frame of samples gave them.
         bars_fall_last_ms = now;
@@ -404,7 +401,7 @@ bool Spectrum_needsRefresh(void) {
     // spectrum cannot see a sound that starts again. A style that is off still
     // carries the fall to its end. Neither says that the layer must paint: ask
     // `Spectrum_isShowing()` for that.
-    return spectrum_visible || SpectrumCeiling_isOpen(&ceiling);
+    return spectrum_visible || (SpectrumCeiling_value(&ceiling) > 0.0f);
 }
 
 void Spectrum_cycleNext(void) {
@@ -460,7 +457,8 @@ static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y,
 }
 
 bool Spectrum_isShowing(void) {
-    return position_set && SpectrumCeiling_isOpen(&ceiling) && spectrum_data.valid;
+    return position_set && (SpectrumCeiling_value(&ceiling) > 0.0f) &&
+            spectrum_data.valid;
 }
 
 void Spectrum_paint(int layer) {

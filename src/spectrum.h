@@ -2,6 +2,7 @@
 #define __SPECTRUM_H__
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #define SPECTRUM_FFT_SIZE 512
 #define SPECTRUM_BARS 64
@@ -32,5 +33,32 @@ void Spectrum_paint(int layer);
 
 // Rotate through each style and then off. The only control of the spectrum.
 void Spectrum_cycleNext(void);
+
+// --- Internal: spectrum_ceiling.c ---
+
+// The ceiling logic of the spectrum.
+//
+// It is used to implement opening animation, where spectrogram gradually rises
+// (on the bar level) over a short period of time.
+//
+// The ceiling has no fall of its own - on sound stop spectrum bars fall
+// at their natural fall rate, and the owner clears the ceiling after that.
+
+typedef struct {
+    float    value;
+    uint32_t last_ms;
+    bool     started;
+} SpectrumCeiling;
+
+// Reset the ceiling animation.
+void SpectrumCeiling_clear(SpectrumCeiling* ceiling);
+
+// Advance the ceiling animation to the time `now_ms`.
+// Pass `sound_is_playing` if the period from the last tick should be considered
+// as part of rising flow (for example buffering time should not).
+void SpectrumCeiling_tick(SpectrumCeiling* ceiling, bool sound_is_playing, uint32_t now_ms);
+
+// Current value of the ceiling, 0..1. At 0, spectrogram should not be drawn.
+float SpectrumCeiling_value(const SpectrumCeiling* ceiling);
 
 #endif

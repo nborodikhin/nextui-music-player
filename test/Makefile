@@ -20,8 +20,9 @@
 # plain C, with the font probe passed in as a callback so SDL_ttf stays in
 # ui_keyboard.c.
 #
-# spectrum_ceiling.c is the same shape as list_nav.c: the rise and the fall of the
-# ceiling are float arithmetic, with the FFT and the paint left in spectrum.c.
+# spectrum_ceiling.c is the same shape as list_nav.c: the rise of the ceiling is
+# float arithmetic, with the FFT and the paint left in spectrum.c. It declares
+# itself in spectrum.h, which holds no platform include.
 #
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
@@ -73,7 +74,7 @@ $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
 
 $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c \
-                              $(SRC)/spectrum_ceiling.h test.h | $(BIN)
+                              $(SRC)/spectrum.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
