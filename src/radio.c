@@ -1817,6 +1817,10 @@ connect_attempt:
     return 0;
 }
 
+void Radio_clearMetadata(void) {
+    memset(&radio.metadata, 0, sizeof(RadioMetadata));
+}
+
 void Radio_stop(void) {
     radio.should_stop = true;
 

@@ -13,6 +13,7 @@
 #include "keyboard.h"
 #include "display_helper.h"
 #include "ui_podcast.h"
+#include "spectrum.h"
 #include "ui_radio.h"
 #include "ui_main.h"
 #include "ui_utils.h"
@@ -128,11 +129,54 @@ static void handle_hid_events(void) {
     }
 }
 
+// The playing screen draws its spectrum and its scrolling title onto one GPU
+// layer, so both are painted together after a single clear - neither can wipe
+// the other. Call order is z order: the scrolling title sits on top.
+static void paint_podcast_layer(void) {
+    PLAT_clearLayers(LAYER_SCROLLTEXT);
+    if (Spectrum_isShowing())         Spectrum_paint(LAYER_SCROLLTEXT);
+    if (Podcast_playingTitleShowing()) Podcast_paintPlayingTitle(LAYER_SCROLLTEXT);
+    PLAT_GPU_Flip();
+}
+
+// The layers of the playing screen, once for each frame of the loop.
+static void refresh_gpu_layers(int* dirty) {
+    if (ModuleCommon_isScreenOffHintActive()) return;
+
+    bool repaint_layer = false;
+
+    if (Podcast_playingTitleNeedsRefresh()) repaint_layer = true;
+    if (Podcast_titleScrollNeedsRender()) *dirty = 1;
+    if (Spectrum_needsRefresh()) {
+        Spectrum_update();
+
+        // The bars move on each frame while they draw, and the frame after the
+        // last one takes them away. A spectrum that draws nothing needs neither.
+        static bool was_showing = false;
+        bool showing = Spectrum_isShowing();
+        if (showing || was_showing) repaint_layer = true;
+        was_showing = showing;
+    }
+    // A frame that redraws the screen paints the layer after that redraw, thus
+    // the bars and the title do not reach the display before the rest of the
+    // screen. This frame therefore leaves the layer to the render block.
+    if (repaint_layer && !*dirty) paint_podcast_layer();
+
+    // The row of the play time gives its layer to the display as soon as it
+    // draws, thus a frame that redraws the screen leaves it to the render block
+    // as well.
+    if (!*dirty && PodcastProgress_needsRefresh()) PodcastProgress_renderGPU();
+}
+
 static void clear_and_show_screen_off_hint(SDL_Surface *screen) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
     PLAT_clearLayers(LAYER_BUFFER);
     PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
     PLAT_GPU_Flip();
+
+    // The layer holds the row no more, thus the next render draws it again
+    // whatever the position says.
+    PodcastProgress_markStale();
     GFX_clear(screen);
     render_screen_off_hint(screen);
     GFX_flip(screen);
@@ -146,6 +190,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     PLAT_clearLayers(LAYER_BUFFER);
     PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
     PLAT_GPU_Flip();
+    PodcastProgress_markStale();
     ModuleCommon_setAutosleepDisabled(false);
     podcast_episodes_nav.selected = podcast_current_episode_index;
     *state = PODCAST_INTERNAL_EPISODES;
@@ -181,8 +226,19 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
         state = PODCAST_INTERNAL_PLAYING;
     }
 
+    // The spectrum belongs to the playing screen alone. One check of the state
+    // covers each way into that screen and each way out of it.
+    PodcastInternalState spectrum_state = state;
+    if (state == PODCAST_INTERNAL_PLAYING) Spectrum_init();
+
     while (1) {
         ModuleCommon_frameBegin();
+
+        if (state != spectrum_state) {
+            if (state == PODCAST_INTERNAL_PLAYING)          Spectrum_init();
+            else if (spectrum_state == PODCAST_INTERNAL_PLAYING) Spectrum_quit();
+            spectrum_state = state;
+        }
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
@@ -227,6 +283,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
 
             GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
+                Spectrum_quit();
                 Podcast_cleanup();
                 return MODULE_EXIT_QUIT;
             }
@@ -373,6 +430,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 } else {
                     Podcast_cleanup();
                 }
+                Spectrum_quit();
                 return MODULE_EXIT_TO_MENU;
             }
         }
@@ -851,6 +909,11 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     ModuleCommon_recordInputTime();
                     dirty = 1;
                 }
+                else if (PAD_justPressed(BTN_L3) || PAD_justPressed(BTN_L2)) {
+                    Spectrum_cycleNext();
+                    ModuleCommon_recordInputTime();
+                    dirty = 1;
+                }
                 else if (PAD_justPressed(BTN_B)) {
                     if (Player_getState() == PLAYER_STATE_PLAYING) {
                         // Playing — let audio continue in background
@@ -860,6 +923,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                         PLAT_clearLayers(LAYER_BUFFER);
                         PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
                         PLAT_GPU_Flip();
+                        PodcastProgress_markStale();
                         podcast_episodes_nav.selected = podcast_current_episode_index;
                         state = PODCAST_INTERNAL_EPISODES;
                         dirty = 1;
@@ -912,8 +976,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 }
 
                 Podcast_update();
-                if (Podcast_isTitleScrolling()) Podcast_animateTitleScroll();
-                if (Podcast_titleScrollNeedsRender()) dirty = 1;
+                refresh_gpu_layers(&dirty);
 
                 // Periodic progress saving (every 30 seconds)
                 {
@@ -958,11 +1021,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     continue;
                 }
 
-                // GPU progress bar update (updates every second without full redraw)
-                if (PodcastProgress_needsRefresh()) {
-                    PodcastProgress_renderGPU();
-                }
-
                 // Auto screen-off
                 if (Podcast_isActive() && ModuleCommon_checkAutoScreenOffTimeout()) {
                     clear_and_show_screen_off_hint(screen);
@@ -1000,11 +1058,15 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                         render_podcast_episodes(screen, show_setting, podcast_current_feed_index, podcast_episodes_nav.selected,
                                                 &podcast_episodes_scroll_px);
                         break;
+                    // The seeking screen is the playing screen, thus it paints
+                    // the same layers. The title of the episode lives on the
+                    // layer, and a seek of a long episode holds this state for
+                    // several seconds.
                     case PODCAST_INTERNAL_SEEKING:
-                        render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
-                        break;
                     case PODCAST_INTERNAL_PLAYING:
                         render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
+                        paint_podcast_layer();
+                        PodcastProgress_renderGPU();
                         break;
                     case PODCAST_INTERNAL_DOWNLOAD_QUEUE:
                         render_podcast_download_queue(screen, show_setting, podcast_queue_nav.selected, &podcast_queue_nav.scroll);

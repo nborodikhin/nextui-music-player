@@ -312,6 +312,10 @@ void ModuleCommon_quit(void) {
     GFX_clearLayers(LAYER_SCROLLTEXT);
     PLAT_clearLayers(LAYER_PLAYTIME);
     PLAT_clearLayers(LAYER_BUFFER);
+
+    // The layer holds the play time no more, thus the next render of a playing
+    // screen draws it again whatever the position says.
+    PlayTime_invalidate();
 }
 
 void ModuleCommon_PWR_update(int* dirty, int* show_setting) {

@@ -336,9 +336,18 @@ bool player_title_scroll_showing(void) {
 }
 
 void player_title_scroll_paint(int layer) {
+    // The paint moves the text as it draws it. The title of a sound that does
+    // not play must stand still and stay on the screen, thus the paint keeps its
+    // place on that frame.
+    int offset = player_title_scroll.scroll_offset;
+
     ScrollText_paintGPU(&player_title_scroll, player_title_scroll.last_font,
                         player_title_scroll.last_color,
                         player_title_scroll.last_x, player_title_scroll.last_y, layer);
+
+    if (Player_getState() != PLAYER_STATE_PLAYING) {
+        player_title_scroll.scroll_offset = offset;
+    }
 }
 
 // === PLAYTIME GPU FUNCTIONS ===

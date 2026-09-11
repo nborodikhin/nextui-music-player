@@ -16,6 +16,7 @@
 #include "radio_curated.h"
 #include "album_art.h"
 #include "ui_radio.h"
+#include "spectrum.h"
 #include "ui_album_art.h"
 #include "ui_main.h"
 #include "ui_utils.h"
@@ -66,6 +67,38 @@ static char confirm_station_url[RADIO_MAX_URL] = "";
 // Help screen back-navigation
 static RadioInternalState help_return_state = RADIO_INTERNAL_ADD_COUNTRY;
 
+// A station that waits for the playing screen. `Radio_play()` stops the stream
+// that runs, and that stop joins the thread of the stream, thus a start on the
+// list screen holds the list until the old station is down. The select stops the
+// old station itself, and the playing screen starts the new one, thus the screen
+// that the user waits on is the screen of the station that they chose.
+static char radio_pending_url[RADIO_MAX_URL] = "";
+static bool radio_screen_drawn = false;
+
+// Take the old station down and give the new one to the playing screen. The
+// screen starts it once it has drawn a frame and the bars of the old station have
+// fallen, thus the wait for the stream happens on the screen of the station that
+// the user chose.
+//
+// Pass true in `keep_bars` where the screen stays, thus the bars of the old
+// station fall on it. Pass false where the screen changes and that fall would not
+// be seen.
+// Give up a station that waits, thus a screen that the user leaves does not hold
+// a station that never starts.
+static void cancel_pending_station(void) {
+    radio_pending_url[0] = '\0';
+    RadioUI_setWaitingToStart(false);
+}
+
+static void hand_station_to_screen(const char* url, bool keep_bars) {
+    Radio_stop();
+    Radio_clearMetadata();
+    if (!keep_bars) Spectrum_reset();
+
+    snprintf(radio_pending_url, sizeof(radio_pending_url), "%s", url);
+    RadioUI_setWaitingToStart(true);
+}
+
 // Sorted station index mapping for alphabetical display
 static int sorted_station_indices[256];
 static int sorted_station_count = 0;
@@ -86,10 +119,9 @@ static void handle_hid_events(void) {
             if (Radio_isActive()) {
                 Radio_stop();
             } else {
-                const char* url = Radio_getCurrentUrl();
-                if (url && url[0] != '\0') {
-                    Radio_play(url);
-                }
+                char url[RADIO_MAX_URL];
+                snprintf(url, sizeof(url), "%s", Radio_getCurrentUrl() ? Radio_getCurrentUrl() : "");
+                if (url[0]) hand_station_to_screen(url, true);
             }
         } else if (hid_event == USB_HID_EVENT_NEXT_TRACK || hid_event == USB_HID_EVENT_PREV_TRACK) {
             RadioStation* stations;
@@ -100,8 +132,7 @@ static void handle_hid_events(void) {
                 int new_idx = (hid_event == USB_HID_EVENT_NEXT_TRACK)
                     ? (current_idx + 1) % station_count
                     : (current_idx - 1 + station_count) % station_count;
-                Radio_stop();
-                Radio_play(stations[new_idx].url);
+                hand_station_to_screen(stations[new_idx].url, true);
             }
         } else {
             ModuleCommon_handleHIDVolume(hid_event);
@@ -126,6 +157,41 @@ static void build_sorted_station_indices(const char* country_code) {
     }
 }
 
+// The playing screen draws its spectrum and the row of the state onto one GPU
+// layer, so both are painted together after a single clear - neither can wipe
+// the other. Call order is z order: the row of the state sits on top.
+static void paint_radio_layer(void) {
+    PLAT_clearLayers(LAYER_BUFFER);
+    if (Spectrum_isShowing())    Spectrum_paint(LAYER_BUFFER);
+    if (RadioStatus_isShowing()) RadioStatus_paint(LAYER_BUFFER);
+    PLAT_GPU_Flip();
+}
+
+// The layers of the playing screen, once for each frame of the loop.
+static void refresh_gpu_layers(int dirty) {
+    if (ModuleCommon_isScreenOffHintActive()) return;
+
+    bool repaint_layer = false;
+
+    if (RadioStatus_needsRefresh() && RadioStatus_renderGPU()) repaint_layer = true;
+
+    if (Spectrum_needsRefresh()) {
+        Spectrum_update();
+
+        // The bars move on each frame while they draw, and the frame after the
+        // last one takes them away. A spectrum that draws nothing needs neither.
+        static bool was_showing = false;
+        bool showing = Spectrum_isShowing();
+        if (showing || was_showing) repaint_layer = true;
+        was_showing = showing;
+    }
+
+    // A frame that redraws the screen paints the layer after that redraw, thus
+    // the bars and the row of the state do not reach the display before the rest
+    // of the screen. This frame therefore leaves the layer to the render block.
+    if (repaint_layer && !dirty) paint_radio_layer();
+}
+
 ModuleExitReason RadioModule_run(DisplayContext* display) {
     Radio_init();
 
@@ -148,9 +214,20 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
         state = RADIO_INTERNAL_PLAYING;
     }
 
+    // The spectrum belongs to the playing screen alone. One check of the state
+    // covers each way into that screen and each way out of it.
+    RadioInternalState spectrum_state = state;
+    if (state == RADIO_INTERNAL_PLAYING) Spectrum_init();
+
     while (1) {
         ModuleCommon_frameBegin();
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
+
+        if (state != spectrum_state) {
+            if (state == RADIO_INTERNAL_PLAYING)               Spectrum_init();
+            else if (spectrum_state == RADIO_INTERNAL_PLAYING) Spectrum_quit();
+            spectrum_state = state;
+        }
 
         // Handle confirmation dialog
         if (show_confirm) {
@@ -200,6 +277,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
 
             GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
+                cancel_pending_station();
+                Spectrum_quit();
+                RadioStatus_clear();
                 Radio_quit();
                 return MODULE_EXIT_QUIT;
             }
@@ -227,17 +307,30 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                     Toast_show("Internet connection required", TOAST_DURATION);
                     dirty = 1;
                 } else {
-                    Background_stopAll();
-                    if (Radio_play(stations[radio_nav.selected].url) == 0) {
-                        ModuleCommon_recordInputTime();
-                        last_rendered_artist[0] = '\0';
-                        last_rendered_title[0] = '\0';
-                        last_art_was_fetching = false;
-                        radio_list_clear_scroll();
-                        GFX_clearLayers(LAYER_SCROLLTEXT);
-                        state = RADIO_INTERNAL_PLAYING;
-                        dirty = 1;
+                    const char* chosen = stations[radio_nav.selected].url;
+                    const char* current = Radio_getCurrentUrl();
+                    bool same_station = Radio_isActive() && current &&
+                                        strcmp(current, chosen) == 0;
+
+                    if (same_station) {
+                        // The station of the row already plays, in the background
+                        // where B left it. Take it back, and do not stop it:
+                        // `Background_stopAll()` would stop this very station.
+                        Background_setActive(BG_NONE);
+                    } else {
+                        Background_stopAll();
+                        hand_station_to_screen(chosen, false);
+                        radio_screen_drawn = false;
                     }
+
+                    ModuleCommon_recordInputTime();
+                    last_rendered_artist[0] = '\0';
+                    last_rendered_title[0] = '\0';
+                    last_art_was_fetching = false;
+                    radio_list_clear_scroll();
+                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    state = RADIO_INTERNAL_PLAYING;
+                    dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
@@ -246,6 +339,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 if (!Radio_isActive()) {
                     Radio_quit();
                 }
+                cancel_pending_station();
+                Spectrum_quit();
+                RadioStatus_clear();
                 return MODULE_EXIT_TO_MENU;
             }
             else if (PAD_justPressed(BTN_Y)) {
@@ -271,6 +367,27 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
         // RADIO PLAYING STATE
         // =========================================
         else if (state == RADIO_INTERNAL_PLAYING) {
+            // The screen is up, thus the wait for the station happens on it. A
+            // screen that draws nothing - off, or under the hint - has no bars to
+            // fall and no frame to wait for, thus the station starts at once.
+            bool screen_draws = !screen_off && !ModuleCommon_isScreenOffHintActive();
+            bool bars_are_gone = !screen_draws ||
+                                 (radio_screen_drawn && !Spectrum_isShowing());
+
+            if (radio_pending_url[0] && bars_are_gone) {
+                // `Radio_play()` holds this thread for the whole of the
+                // connection, thus no frame draws while it runs. Put the row of
+                // the state on the display first, so the screen says that it
+                // connects for that time.
+                RadioStatus_renderGPU();
+                paint_radio_layer();
+
+                Radio_play(radio_pending_url);
+                radio_pending_url[0] = '\0';
+                RadioUI_setWaitingToStart(false);
+                dirty = 1;
+            }
+
             ModuleCommon_setAutosleepDisabled(true);
 
             // Handle screen off hint
@@ -331,21 +448,20 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             if (PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_R1)) {
                 if (station_count > 1) {
                     radio_nav.selected = (radio_nav.selected + 1) % station_count;
-                    Radio_stop();
-                    Radio_play(stations[radio_nav.selected].url);
+                    hand_station_to_screen(stations[radio_nav.selected].url, true);
                     dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_DOWN) || PAD_justPressed(BTN_L1)) {
                 if (station_count > 1) {
                     radio_nav.selected = (radio_nav.selected - 1 + station_count) % station_count;
-                    Radio_stop();
-                    Radio_play(stations[radio_nav.selected].url);
+                    hand_station_to_screen(stations[radio_nav.selected].url, true);
                     dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
                 cleanup_album_art_background();
+                cancel_pending_station();
                 RadioStatus_clear();
                 if (Radio_isActive()) {
                     Background_setActive(BG_RADIO);
@@ -357,18 +473,31 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
             else if (PAD_justPressed(BTN_A)) {
                 // A toggles play/pause
-                if (Radio_isActive()) {
+                if (radio_pending_url[0]) {
+                    // A station waits for its stream. The radio is not active
+                    // yet, thus the branch below would read the station that went
+                    // and start that one. Give up the wait instead.
+                    cancel_pending_station();
+                    Radio_clearMetadata();
+                    dirty = 1;
+                }
+                else if (Radio_isActive()) {
                     // Playing - stop it
                     Radio_stop();
                     dirty = 1;
                 } else {
                     // Stopped - resume playing
-                    const char* url = Radio_getCurrentUrl();
-                    if (url && url[0] != '\0') {
-                        Radio_play(url);
+                    char url[RADIO_MAX_URL];
+                    snprintf(url, sizeof(url), "%s", Radio_getCurrentUrl() ? Radio_getCurrentUrl() : "");
+                    if (url[0]) {
+                        hand_station_to_screen(url, true);
                         dirty = 1;
                     }
                 }
+            }
+            else if (PAD_justPressed(BTN_L3) || PAD_justPressed(BTN_L2)) {
+                Spectrum_cycleNext();
+                dirty = 1;
             }
             else if (PAD_tappedSelect(SDL_GetTicks())) {
                 ModuleCommon_startScreenOffHint();
@@ -401,10 +530,8 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
 
             // Animate radio GPU layer
-            if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
-                if (RadioStatus_needsRefresh()) {
-                    RadioStatus_renderGPU();
-                }
+            if (!screen_off) {
+                refresh_gpu_layers(dirty);
             }
         }
         // =========================================
@@ -542,6 +669,8 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                         break;
                     case RADIO_INTERNAL_PLAYING: {
                         render_radio_playing(screen, show_setting, radio_nav.selected);
+                        paint_radio_layer();
+                        radio_screen_drawn = true;
                         const RadioMetadata* meta = Radio_getMetadata();
                         strncpy(last_rendered_artist, meta->artist, sizeof(last_rendered_artist) - 1);
                         last_rendered_artist[sizeof(last_rendered_artist) - 1] = '\0';

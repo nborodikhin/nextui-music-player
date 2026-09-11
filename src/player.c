@@ -1304,6 +1304,17 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
                         out[i] = speaker_soft_limit(out[i], limiter_thresh);
                 }
             }
+
+            // Copy to visualization buffer (non-blocking), as the branch of a
+            // file does. The spectrum reads this buffer and asks nothing about
+            // what made the samples.
+            if (samples_got > 0 && pthread_mutex_trylock(&ctx->vis_mutex) == 0) {
+                int vis_samples = samples_got;
+                if (vis_samples > 2048) vis_samples = 2048;
+                memcpy(ctx->vis_buffer, out, vis_samples * sizeof(int16_t));
+                ctx->vis_buffer_pos = vis_samples;
+                pthread_mutex_unlock(&ctx->vis_mutex);
+            }
         } else {
             // CONNECTING or other states - output silence
             memset(stream, 0, len);
@@ -2406,6 +2417,10 @@ int Player_getVisBuffer(int16_t* buffer, int max_samples) {
     if (samples_to_copy > 0) {
         memcpy(buffer, player.vis_buffer, samples_to_copy * sizeof(int16_t));
     }
+    // The read takes the samples. A caller that gets nothing thus knows that the
+    // audio callback wrote nothing since the last read, whatever the reason: a
+    // pause, a stop, an empty buffer or the end of a track.
+    player.vis_buffer_pos = 0;
     pthread_mutex_unlock(&player.vis_mutex);
 
     return samples_to_copy;

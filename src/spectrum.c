@@ -11,6 +11,25 @@
 #define SPECTRUM_SETTINGS_FILE SHARED_USERDATA_PATH "/spectrum_settings.txt"
 
 #define SMOOTHING_FACTOR 0.7f
+
+// The fall of a bar where no sound feeds it. It is the rate that SMOOTHING_FACTOR
+// gives while the sound plays - 0.7 of the height each frame of 60 - expressed as
+// a time, thus a slow loop and a screen that stops drawing both give the same
+// fall. A bar of the whole height reaches BAR_MIN in about 0.2 seconds.
+#define BAR_FALL_TAU_MS 47.0f
+
+// Below this a bar has no height to draw.
+#define BAR_MIN 0.01f
+
+// The loop draws more often than the audio callback fills the buffer, thus a
+// frame with no new samples is normal and says nothing. The sound has stopped
+// only where no frame of samples arrives for this long.
+//
+// The device takes 2048 frames each callback (`AUDIO_SAMPLES` of `player.c`),
+// which is about 46 ms at 44100. A read must also give a whole frame of the
+// window, thus a callback that runs short gives nothing at all. This holds five
+// callbacks, and a fall that starts after them is still quick to the eye.
+#define SOUND_GONE_MS 250u
 #define PEAK_DECAY 0.97f
 #define MIN_DB -60.0f
 #define MAX_DB 0.0f
@@ -39,6 +58,17 @@ static bool position_set = false;
 
 static SpectrumStyle current_style = SPECTRUM_STYLE_VERTICAL;
 static bool spectrum_visible = true;
+
+static SpectrumCeiling ceiling;
+
+// The clock of the last fall of the bars. The fall is of the time and not of the
+// frame, thus a screen that stops drawing comes back to the height that the time
+// gives.
+static uint32_t bars_fall_last_ms = 0;
+
+// The clock of the last whole frame of samples. It says whether the sound is
+// still there between two callbacks of the audio.
+static uint32_t last_samples_ms = 0;
 
 // Save spectrum settings to file
 static void save_settings(void) {
@@ -189,6 +219,15 @@ static void init_bin_ranges(void) {
 }
 
 void Spectrum_init(void) {
+    // The bars rise from nothing on each visit
+    SpectrumCeiling_clear(&ceiling);
+    last_samples_ms = 0;
+    bars_fall_last_ms = 0;
+
+    // The position stays as the render of the screen set it. `Spectrum_quit()`
+    // clears it on the way out, thus a stale position cannot reach the next
+    // screen, and a screen that renders one time keeps the position that it gave.
+
     if (fft_cfg) return;  // Already initialized
 
     fft_cfg = kiss_fftr_alloc(SPECTRUM_FFT_SIZE, 0, NULL, NULL);
@@ -200,30 +239,101 @@ void Spectrum_init(void) {
 }
 
 void Spectrum_quit(void) {
+    // The layer must wait for the position of the next visit
+    position_set = false;
+
+    // The way out of a playing screen is the one exit with no fall
+    SpectrumCeiling_clear(&ceiling);
+
     if (fft_cfg) {
         kiss_fftr_free(fft_cfg);
         fft_cfg = NULL;
     }
 }
 
+static bool bars_have_height(void) {
+    for (int i = 0; i < SPECTRUM_BARS; i++) {
+        if (prev_bars[i] > BAR_MIN) return true;
+    }
+    return false;
+}
+
+// Take each bar down to the height that the elapsed time gives, and take the peak
+// markers away.
+static void fall_bars(uint32_t now_ms) {
+    uint32_t dt = now_ms - bars_fall_last_ms;
+    bars_fall_last_ms = now_ms;
+    if (dt == 0) return;
+    if (dt > 60000u) dt = 60000u;
+
+    float factor = expf(-(float)dt / BAR_FALL_TAU_MS);
+
+    for (int i = 0; i < SPECTRUM_BARS; i++) {
+        prev_bars[i] *= factor;
+        if (prev_bars[i] < BAR_MIN) prev_bars[i] = 0.0f;
+        spectrum_data.bars[i] = prev_bars[i];
+        spectrum_data.peaks[i] = 0.0f;
+    }
+}
+
+void Spectrum_reset(void) {
+    SpectrumCeiling_clear(&ceiling);
+    last_samples_ms = 0;
+    bars_fall_last_ms = 0;
+
+    memset(prev_bars, 0, sizeof(prev_bars));
+    memset(&spectrum_data, 0, sizeof(spectrum_data));
+
+    // The buffer can hold what the sound that went wrote into it. A read takes
+    // those samples away, thus they do not read as the sound of the new source.
+    Player_getVisBuffer(sample_buffer, SPECTRUM_FFT_SIZE * 2);
+}
+
 void Spectrum_update(void) {
     if (!fft_cfg) return;
 
-    if (Player_getState() != PLAYER_STATE_PLAYING) {
-        for (int i = 0; i < SPECTRUM_BARS; i++) {
-            prev_bars[i] *= 0.9f;
-            spectrum_data.bars[i] = prev_bars[i];
-            spectrum_data.peaks[i] *= PEAK_DECAY;
-        }
-        spectrum_data.valid = true;
+    // A read takes the samples, thus a read that gives less than a whole frame
+    // says that the sound stopped. The reason does not matter: a pause, a stop,
+    // an empty buffer or the end of a track each give the same answer.
+    //
+    // The window reads two values for each sample of the frame, thus a whole
+    // frame is SPECTRUM_FFT_SIZE * 2 values. A read that gives less holds the
+    // values of the last frame in its upper part, thus it is not a frame.
+    int samples = Player_getVisBuffer(sample_buffer, SPECTRUM_FFT_SIZE * 2);
+    bool samples_arrived = samples >= SPECTRUM_FFT_SIZE * 2;
+
+    uint32_t now = SDL_GetTicks();
+
+    if (samples_arrived) last_samples_ms = now;
+
+    // The control that turns the spectrum off says the same as a sound that
+    // stops, and it says it at once.
+    bool sound_is_playing = (now - last_samples_ms) < SOUND_GONE_MS;
+    bool feeding = samples_arrived && spectrum_visible;
+
+    // Drive the rising of the spectrum during opening
+    SpectrumCeiling_tick(&ceiling, spectrum_visible && sound_is_playing, now);
+
+    if (!samples_arrived && spectrum_visible && sound_is_playing) {
+        // A frame between two callbacks of the audio. The bars keep the height
+        // that the last frame of samples gave them.
+        bars_fall_last_ms = now;
         return;
     }
 
-    int samples = Player_getVisBuffer(sample_buffer, SPECTRUM_FFT_SIZE * 2);
-    if (samples < SPECTRUM_FFT_SIZE) {
-        spectrum_data.valid = false;
+    if (!feeding) {
+        // Each bar falls at its own rate, as it does in a quiet passage of the
+        // sound. The peak markers go at once: a mark of a peak that no bar can
+        // reach again reads as a fault of the screen.
+        fall_bars(now);
+        spectrum_data.valid = bars_have_height();
+
+        // Nothing is left, thus the next sound inflates from nothing again.
+        if (!spectrum_data.valid) SpectrumCeiling_clear(&ceiling);
         return;
     }
+
+    bars_fall_last_ms = now;
 
     for (int i = 0; i < SPECTRUM_FFT_SIZE; i++) {
         float left = sample_buffer[i * 2];
@@ -285,7 +395,13 @@ void Spectrum_setPosition(int x, int y, int w, int h) {
 }
 
 bool Spectrum_needsRefresh(void) {
-    return position_set && spectrum_visible && (Player_getState() == PLAYER_STATE_PLAYING);
+    if (!position_set) return false;
+
+    // A style that is on must read the samples on each frame, otherwise the
+    // spectrum cannot see a sound that starts again. A style that is off still
+    // carries the fall to its end. Neither says that the layer must paint: ask
+    // `Spectrum_isShowing()` for that.
+    return spectrum_visible || (SpectrumCeiling_value(&ceiling) > 0.0f);
 }
 
 void Spectrum_cycleNext(void) {
@@ -341,7 +457,8 @@ static void draw_vertical_gradient_bar(SDL_Surface* surface, int x, int y,
 }
 
 bool Spectrum_isShowing(void) {
-    return Spectrum_needsRefresh() && spectrum_data.valid;
+    return position_set && (SpectrumCeiling_value(&ceiling) > 0.0f) &&
+            spectrum_data.valid;
 }
 
 void Spectrum_paint(int layer) {
@@ -360,10 +477,19 @@ void Spectrum_paint(int layer) {
     if (gradient_height < 2) gradient_height = 2;
     int gradient_y = spec_h - gradient_height;
 
+    // The ceiling is a lid on each bar and each peak marker. A bar under it keeps
+    // its own height, thus the shape of the sound stays while the lid moves.
+    float lid = SpectrumCeiling_value(&ceiling);
+
+    // The base line of a bar goes with the lid on the way up, thus the block that
+    // inflates has one edge. A bar that has fallen to nothing keeps no base line,
+    // otherwise the fall ends with a row of marks that goes in one frame.
+    int base_h = (int)(lid * 2.0f + 0.5f);
+
     for (int i = 0; i < total_bars; i++) {
-        float magnitude = spectrum_data.bars[i];
+        float magnitude = fminf(spectrum_data.bars[i], lid);
         int bar_h = (int)(magnitude * spec_h * 0.9f);
-        if (bar_h < 2) bar_h = 2;
+        if (magnitude > BAR_MIN && bar_h < base_h) bar_h = base_h;
 
         int bar_x_pos = (int)(i * bar_width_f);
         int bar_y_pos = spec_h - bar_h;
@@ -383,8 +509,9 @@ void Spectrum_paint(int layer) {
         }
 
         // Draw peak indicator
-        if (spectrum_data.peaks[i] > magnitude + 0.02f) {
-            int peak_y = spec_h - (int)(spectrum_data.peaks[i] * spec_h * 0.9f);
+        float peak = fminf(spectrum_data.peaks[i], lid);
+        if (peak > magnitude + 0.02f) {
+            int peak_y = spec_h - (int)(peak * spec_h * 0.9f);
             uint8_t r, g, b;
             if (current_style == SPECTRUM_STYLE_VERTICAL) {
                 SDL_Color top = gradient_top();
@@ -392,7 +519,7 @@ void Spectrum_paint(int layer) {
                 float t = (float)(peak_y - gradient_y) / (float)(gradient_height - 1);
                 interpolate_gradient(top, bottom, t, &r, &g, &b);
             } else {
-                get_bar_color(i, spectrum_data.peaks[i], &r, &g, &b);
+                get_bar_color(i, peak, &r, &g, &b);
             }
             uint32_t peak_color = SDL_MapRGBA(surface->format, r, g, b, 255);
             SDL_Rect peak_rect = {bar_x_pos, peak_y, bar_draw_w, 2};

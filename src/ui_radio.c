@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "ui_radio.h"
+#include "spectrum.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_theme.h"
@@ -292,8 +293,12 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         }
     }
 
-    // Position for error message, one spectrum height above the foot of the screen
-    int vis_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - SCALE1(50);
+    // The spectrum takes its box from the foot of the screen upward, above the row
+    // of the state. The error message takes the same line.
+    int spec_h = SCALE1(50);
+    int vis_y = hh - chip_footer_height(TTF_FontHeight(Fonts_getSmall())) - spec_h;
+
+    Spectrum_setPosition(SCALE1(PADDING), vis_y, hw - SCALE1(PADDING * 2), spec_h);
 
     // === BOTTOM BAR (GPU layer - position set here, rendering done independently) ===
     // The height of the row comes from the text that it holds, which the renderer
@@ -625,6 +630,14 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
     GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
 }
 
+// True while a station waits for its screen, before `Radio_play()` runs. The
+// module of the radio sets it, because only the module knows.
+static bool radio_ui_waiting_to_start = false;
+
+void RadioUI_setWaitingToStart(bool waiting) {
+    radio_ui_waiting_to_start = waiting;
+}
+
 // === GPU STATUS AND BUFFER INDICATOR ===
 // Following the same pattern as Spectrum and PlayTime in player.c:
 // - Position is set during main screen render (when dirty)
@@ -633,6 +646,30 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 static int status_bar_x = 0, status_bar_w = 0, status_bar_h = 0;
 static int status_left_x = 0, status_row_bottom_y = 0;
 static bool status_position_set = false;
+
+// The row of the state, ready to draw. The painter of the layer blits it on each
+// frame, thus the build of it happens only where a value of the row changes.
+static SDL_Surface* status_surface = NULL;
+static int status_surface_x = 0, status_surface_y = 0;
+
+// What the cached surface holds. The build of the surface skips its work where
+// each of the three is the same as the last time, thus these go with the surface
+// and never outlive it.
+static RadioState status_last_state = RADIO_STATE_STOPPED;
+static int status_last_bitrate = 0;
+static int status_last_buf_pct = -1;
+static bool status_last_waiting = false;
+
+static void free_status_surface(void) {
+    if (status_surface) {
+        SDL_FreeSurface(status_surface);
+        status_surface = NULL;
+    }
+    status_last_state = RADIO_STATE_STOPPED;
+    status_last_bitrate = 0;
+    status_last_buf_pct = -1;
+    status_last_waiting = false;
+}
 
 
 void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
@@ -647,12 +684,19 @@ void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
 
 void RadioStatus_clear(void) {
     status_position_set = false;
+    free_status_surface();
     PLAT_clearLayers(LAYER_BUFFER);
     PLAT_GPU_Flip();
 }
 
 bool RadioStatus_needsRefresh(void) {
     if (!status_position_set) return false;
+
+    // A station that waits for its stream has a row to draw, whatever the state
+    // of the radio says. The row of the wait does not change while it waits, thus
+    // one build of it is enough.
+    if (radio_ui_waiting_to_start) return !status_last_waiting;
+
     RadioState state = Radio_getState();
     // Also refresh once when transitioning to STOPPED, to clear the layer
     static RadioState prev_state = RADIO_STATE_STOPPED;
@@ -667,26 +711,15 @@ bool RadioStatus_needsRefresh(void) {
     return true;
 }
 
-void RadioStatus_renderGPU(void) {
-    if (!status_position_set) return;
+// Build the row of the state into the cached surface. The painter of the layer
+// draws that surface, thus this holds no clear and no flip.
+//
+// Returns true where the surface changed, thus the caller knows that the layer
+// must paint again.
+bool RadioStatus_renderGPU(void) {
+    if (!status_position_set) return false;
 
     RadioState state = Radio_getState();
-
-    // When stopped, clear the status layer and reset cache
-    static RadioState last_state = RADIO_STATE_STOPPED;
-    static int last_bitrate = 0;
-    static int last_buf_pct = -1;
-
-    if (state == RADIO_STATE_STOPPED) {
-        if (last_state != RADIO_STATE_STOPPED) {
-            PLAT_clearLayers(LAYER_BUFFER);
-            PLAT_GPU_Flip();
-            last_state = RADIO_STATE_STOPPED;
-            last_bitrate = 0;
-            last_buf_pct = -1;
-        }
-        return;
-    }
 
     float buffer_level = Radio_getBufferLevel();
 
@@ -694,15 +727,31 @@ void RadioStatus_renderGPU(void) {
     const RadioMetadata* meta = Radio_getMetadata();
     int current_bitrate = meta ? meta->bitrate : 0;
 
+    // A station that waits for its stream connects, whatever the state of the
+    // radio says: the stream of the station that went is down, and the stream of
+    // this one has not started.
+    bool waiting_to_start = radio_ui_waiting_to_start;
+    if (waiting_to_start) buffer_level = 0.0f;
+
+    // A station that the user stopped keeps its row, thus the screen still says
+    // which station waits and at what rate. A stop with no bitrate has nothing to
+    // say, thus the row goes.
+    if (!waiting_to_start && state == RADIO_STATE_STOPPED) {
+        if (current_bitrate <= 0) {
+            if (status_last_state == RADIO_STATE_STOPPED) return false;
+            free_status_surface();
+            return true;
+        }
+        buffer_level = 0.0f;
+    }
+
     // Skip expensive surface recreation if nothing changed
     int buf_pct = (int)(buffer_level * 100);
-    if (state == last_state && current_bitrate == last_bitrate && buf_pct == last_buf_pct) {
-        return;
+    if (status_surface && waiting_to_start == status_last_waiting &&
+        state == status_last_state && current_bitrate == status_last_bitrate &&
+        buf_pct == status_last_buf_pct) {
+        return false;
     }
-    last_state = state;
-    last_bitrate = current_bitrate;
-    last_buf_pct = buf_pct;
-
     // Get status text
     // Show "buffering" only during initial connect or actual rebuffer (low buffer).
     // Once buffer is healthy, show "streaming" even if state is still BUFFERING.
@@ -714,8 +763,11 @@ void RadioStatus_renderGPU(void) {
             break;
         case RADIO_STATE_PLAYING: status_text = "streaming"; break;
         case RADIO_STATE_ERROR: status_text = "error"; break;
+        case RADIO_STATE_STOPPED: status_text = "paused"; break;
         default: break;
     }
+
+    if (waiting_to_start) status_text = "connecting";
 
     // Prepare bitrate string
     char bitrate_str[32] = "";
@@ -745,8 +797,11 @@ void RadioStatus_renderGPU(void) {
     int left_x = status_left_x;
     int right_x = status_bar_x + status_bar_w;
 
-    // Calculate line height for vertical centering
-    int line_h = bitrate_h;
+    // The row holds one line of text, whatever text it holds. A row with no
+    // bitrate and no state still keeps that height, otherwise the box of the row
+    // collapses onto the bar and the bar falls outside it.
+    int line_h = TTF_FontHeight(bitrate_font);
+    if (bitrate_h > line_h) line_h = bitrate_h;
     if (status_h > line_h) line_h = status_h;
     if (status_bar_h > line_h) line_h = status_bar_h;
     // The foot of the row sits on the bottom margin, whatever the row holds.
@@ -758,7 +813,7 @@ void RadioStatus_renderGPU(void) {
 
     SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0,
         surface_w, surface_h, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!surface) return;
+    if (!surface) return false;
 
     SDL_FillRect(surface, NULL, 0);  // Transparent background
 
@@ -788,26 +843,51 @@ void RadioStatus_renderGPU(void) {
         }
     }
 
-    // Draw buffer bar on right side
-    int bar_x_in_surface = surface_w - status_bar_w;
-    int bar_y_pos = (line_h - status_bar_h) / 2;
+    // The bar of the buffer says how much sound is ready to play. A station that
+    // does not play has no such sound: a station that connects has not started,
+    // and one that the user stopped keeps nothing. The bar therefore draws while
+    // the sound plays, and while it stalls with the state that says so.
+    bool sound_is_running = !waiting_to_start &&
+                            (state == RADIO_STATE_PLAYING || state == RADIO_STATE_BUFFERING);
 
-    SDL_Rect bar_bg = {bar_x_in_surface, bar_y_pos, status_bar_w, status_bar_h};
-    SDL_FillRect(surface, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
+    if (sound_is_running) {
+        // The row holds words, thus the bar takes the x-height of them: it has
+        // their top and it sits on their baseline.
+        int bar_x_in_surface = surface_w - status_bar_w;
+        int bar_h_drawn = Fonts_getMetric(status_font, FONT_METRIC_X_HEIGHT);
+        int bar_y_pos = Fonts_getMetric(status_font, FONT_METRIC_ASCENT) - bar_h_drawn;
 
-    // Buffer fill (white)
-    int fill_w = (int)(status_bar_w * buffer_level);
-    if (fill_w > 0) {
-        SDL_Rect bar_fill = {bar_x_in_surface, bar_y_pos, fill_w, status_bar_h};
-        SDL_FillRect(surface, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
+        SDL_Rect bar_bg = {bar_x_in_surface, bar_y_pos, status_bar_w, bar_h_drawn};
+        SDL_FillRect(surface, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
+
+        // Buffer fill (white)
+        int fill_w = (int)(status_bar_w * buffer_level);
+        if (fill_w > 0) {
+            SDL_Rect bar_fill = {bar_x_in_surface, bar_y_pos, fill_w, bar_h_drawn};
+            SDL_FillRect(surface, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
+        }
     }
 
-    // Render to GPU layer
-    PLAT_clearLayers(LAYER_BUFFER);
-    PLAT_drawOnLayer(surface, left_x, base_y, surface_w, surface_h, 1.0f, false, LAYER_BUFFER);
-    SDL_FreeSurface(surface);
+    free_status_surface();
+    status_surface = surface;
+    status_surface_x = left_x;
+    status_surface_y = base_y;
 
-    PLAT_GPU_Flip();
+    status_last_state = state;
+    status_last_bitrate = current_bitrate;
+    status_last_buf_pct = buf_pct;
+    status_last_waiting = waiting_to_start;
+    return true;
+}
+
+bool RadioStatus_isShowing(void) {
+    return status_position_set && status_surface != NULL;
+}
+
+void RadioStatus_paint(int layer) {
+    if (!status_surface) return;
+    PLAT_drawOnLayer(status_surface, status_surface_x, status_surface_y,
+                     status_surface->w, status_surface->h, 1.0f, false, layer);
 }
 
 // True while a title of a list of this module moves.
