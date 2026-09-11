@@ -37,6 +37,16 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
 // returns MODULE_EXIT_QUIT and the app stops with its usual cleanup.
 void ModuleCommon_requestQuit(void);
 
+// Record that a signal asked the app to stop. Safe to call from a signal
+// handler: it writes one flag and calls nothing. The next call of
+// ModuleCommon_handleGlobalInput() turns it into the quit above, thus the
+// module that is in operation returns and the app runs its cleanup.
+void ModuleCommon_signalStop(void);
+
+// Returns true once a signal asked the app to stop. The loop between the
+// modules reads it, because no module is in operation there to see the quit.
+bool ModuleCommon_stopSignalled(void);
+
 // Disable/enable autosleep (for modules with active playback)
 void ModuleCommon_setAutosleepDisabled(bool disabled);
 

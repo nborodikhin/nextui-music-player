@@ -74,7 +74,9 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle confirmation dialog
-        if (show_confirm) {
+        // A pending stop skips the dialog, thus the global input below reports the
+        // quit and the module leaves through the path that it already has.
+        if (show_confirm && !ModuleCommon_stopSignalled()) {
             if (PAD_justPressed(BTN_A)) {
                 if (confirm_action == 0) {
                     // Delete playlist

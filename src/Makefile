@@ -27,11 +27,41 @@ endif
 endif
 
 ###########################################################
+# Build kinds
+#   debug   : optimized, with debug information and with the control channel.
+#             The default, because a local build is for a person who examines it.
+#   release : the same optimized code, with no symbol table and with no control
+#             channel. The pak receives this kind.
+#
+# The two kinds optimize the same, thus a fault that the optimizer causes is in
+# both and the debug kind shows the behavior of the release kind.
+#
+# Each kind writes its objects to its own directory, thus a change of the kind
+# does not compile the tree again. Both kinds write the same binary path, thus
+# the last build is the one that runs and the one that a pak receives.
+SUPPORTED_KINDS = debug release
+DEFAULT_KIND = debug
+
+ifeq (,$(KIND))
+KIND = $(DEFAULT_KIND)
+endif
+ifeq (,$(filter $(KIND),$(SUPPORTED_KINDS)))
+$(error Invalid KIND '$(KIND)'. Supported: $(SUPPORTED_KINDS))
+endif
+
+###########################################################
 
 TARGET   = musicplayer
 PRODUCT  = ../bin/$(PLATFORM)/$(TARGET).elf
 
-BUILD_DIR        = build/$(PLATFORM)
+# Both kinds write the same binary, thus a change of the kind must link again.
+# The objects alone do not say so: each kind keeps its own, and the objects of
+# the kind that the caller asks for can be older than the binary that the other
+# kind left. This marker holds the kind of the binary that is in place, and the
+# link depends on it.
+PRODUCT_KIND = ../bin/$(PLATFORM)/.kind
+
+BUILD_DIR        = build/$(KIND)/$(PLATFORM)
 OBJ_DIR          = $(BUILD_DIR)/obj
 OPUS_OBJ_DIR     = $(BUILD_DIR)/opus_obj
 MBEDTLS_OBJ_DIR  = $(BUILD_DIR)/mbedtls_obj
@@ -112,6 +142,9 @@ OPUS_INCDIR = \
     -I./include/libopus/silk \
     -I./include/libopus/silk/float
 
+# The third-party libraries keep the optimized flags for every kind. A debug
+# kind that decodes at -O0 cannot hold the audio on the device, and a fault in
+# this app is not a fault in opus or in mbedTLS.
 OPUS_CFLAGS = \
     -O2 -fomit-frame-pointer \
     -DOPUS_BUILD -DVAR_ARRAYS -DHAVE_LRINTF \
@@ -149,7 +182,6 @@ LOCAL_SRC = \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_settings.c \
     list_nav.c list_nav_pad.c menu_rows.c toast.c toast_state.c \
-    test_control.c \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
     ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
     ui_playlist.c ui_system.c ui_settings.c ui_keyboard.c ui_theme.c \
@@ -164,6 +196,13 @@ LOCAL_SRC = \
 # API unconditionally) links, with AAC/M4A decode failing gracefully at runtime.
 ifeq ($(PLATFORM), desktop)
 LOCAL_SRC += fdk_aac_desktop_stub.c
+endif
+
+# A release binary has no interface that puts synthetic buttons into the pad.
+# TEST_CONTROL also selects the declarations in test_control.h; without it each
+# call site gets a stub that does nothing.
+ifeq ($(KIND), debug)
+LOCAL_SRC += test_control.c
 endif
 
 # Sources that live outside src/ (shared NextUI code + per-platform code).
@@ -187,7 +226,12 @@ APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
 ###########################################################
 # Compiler / linker flags
 
-MY_CFLAGS  = -O2 -fomit-frame-pointer
+KIND_CFLAGS = -O2 -fomit-frame-pointer
+ifeq ($(KIND), debug)
+KIND_CFLAGS += -g -DTEST_CONTROL
+endif
+
+MY_CFLAGS  = $(KIND_CFLAGS)
 MY_CFLAGS += -DMBEDTLS_CONFIG_FILE='<mbedtls_config.h>'
 MY_CFLAGS += -DOPUS_BUILD -DHAVE_LRINTF -DOP_DISABLE_HTTP -DOP_DISABLE_FLOAT_API
 MY_CFLAGS += $(INCDIR) -DPLATFORM=\"$(PLATFORM)\" -std=gnu99
@@ -204,7 +248,14 @@ else
 MY_CFLAGS += -DUSE_GLES
 endif
 
-MY_LDFLAGS  = -L$(BUILD_DIR)
+# A release binary carries no symbol table. Strip at the link, thus there is no
+# step after it that can be forgotten.
+ifeq ($(KIND), release)
+MY_LDFLAGS  = -s
+else
+MY_LDFLAGS  =
+endif
+MY_LDFLAGS += -L$(BUILD_DIR)
 MY_LDFLAGS += -L$(PREFIX)/lib -L$(PREFIX_LOCAL)/lib
 MY_LDFLAGS += -L$(PREFIX)/lib/$(CROSS_TRIPLE)
 MY_LDFLAGS += -L$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
@@ -243,11 +294,24 @@ endif
 
 ###########################################################
 
-.PHONY: all clean
+.PHONY: all objs clean
 
 all: $(PRODUCT)
 
-$(PRODUCT): $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS)
+# The objects and the libraries, and no binary. The unit tests link against them,
+# thus they must not replace the binary that the last build of the app left.
+objs: $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS)
+
+# The recipe writes the marker only where the kind is different, thus the time of
+# the file changes on a change of the kind and on nothing else.
+.PHONY: FORCE
+FORCE:
+
+$(PRODUCT_KIND): FORCE
+	@mkdir -p $(@D)
+	@test "$$(cat $@ 2>/dev/null)" = "$(KIND)" || printf '%s' "$(KIND)" > $@
+
+$(PRODUCT): $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS) $(PRODUCT_KIND)
 	@mkdir -p $(@D)
 	$(CC) $(APP_OBJS) $(MY_LDFLAGS) -o $@ $(LDLIBS)
 
@@ -286,7 +350,7 @@ $(MBEDTLS_OBJ_DIR)/%.o: %.c
 	$(CC) -c $(MBEDTLS_CFLAGS) -o $@ $<
 
 clean:
-	rm -f $(PRODUCT)
+	rm -f $(PRODUCT) $(PRODUCT_KIND)
 	rm -rf $(BUILD_DIR)
 	rm -rf opus_obj
 

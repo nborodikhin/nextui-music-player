@@ -8,6 +8,7 @@
 
 import argparse
 import glob
+import hashlib
 import http.client
 import json
 import os
@@ -29,6 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DEVICE_PLATFORMS = ("tg5040", "tg5050", "my355")
 ALL_PLATFORMS = DEVICE_PLATFORMS + ("desktop",)
+BUILD_KINDS = ("debug", "release")
 PAK_NAME = "Music Player.pak"
 REMOTE_ROOT = "/mnt/SDCARD/Tools"
 RESTART_FLAG = "/tmp/nextui-music-player.restart"
@@ -157,10 +159,18 @@ class Dependency:
     path: str
     git_url: str
     ref: str
+    patches: str = ""
 
     @property
     def root(self):
         return ROOT / self.path
+
+    @property
+    def patch_files(self):
+        """Every patch to apply after the checkout, in name order."""
+        if not self.patches:
+            return []
+        return sorted((ROOT / self.patches).glob("*.patch"))
 
     @property
     def pin_file(self):
@@ -212,7 +222,13 @@ def load_dependencies():
                 )
             )
         dependencies.append(
-            Dependency(entry["name"], entry["path"], entry["git_url"], entry["ref"])
+            Dependency(
+                entry["name"],
+                entry["path"],
+                entry["git_url"],
+                entry["ref"],
+                entry.get("patches", ""),
+            )
         )
 
     if not dependencies:
@@ -266,13 +282,191 @@ def read_pin(dependency):
     return values
 
 
+def patch_set_digest(dependency):
+    """Identify the patch set by its content, thus an edited patch is a new set."""
+    digest = hashlib.sha256()
+    for path in dependency.patch_files:
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def patched_paths(dependency):
+    """Every file in the checkout that the patch set touches. Both sides of
+    each header, thus a patch that deletes a file also names it."""
+    paths = set()
+    for path in dependency.patch_files:
+        for line in path.read_text(errors="replace").splitlines():
+            if line.startswith("--- a/") or line.startswith("+++ b/"):
+                paths.add(line[6:].split("\t")[0])
+    return sorted(paths)
+
+
+def worktree_digest(dependency):
+    """Identify the content of the patched files. A hand edit to one of them
+    gives another value, thus it does not pass as the patch set."""
+    paths = patched_paths(dependency)
+    if not paths:
+        return ""
+    digest = hashlib.sha256()
+    for path in paths:
+        blob = git(dependency.root, "hash-object", "--", path, check=False)
+        full = dependency.root / path
+        # The mode goes in as well. A patch can set the bit that makes a file
+        # executable, and a person can set it by hand, thus the content alone
+        # does not say that the checkout holds the patch set.
+        mode = "x" if full.is_file() and os.access(str(full), os.X_OK) else "-"
+        digest.update("{} {} {}\n".format(path, blob or "missing", mode).encode())
+    return digest.hexdigest()
+
+
+def is_patched(dependency, pin):
+    """True where the local changes in the checkout are exactly the patch set
+    that the pin marker recorded, and nothing else."""
+    if not dependency.patch_files:
+        return False
+    if pin.get("patches") != patch_set_digest(dependency):
+        return False
+    if pin.get("worktree") != worktree_digest(dependency):
+        return False
+    changed = {
+        line[3:]
+        for line in git(
+            dependency.root, "status", "--porcelain", "--untracked-files=no",
+            check=False,
+        ).splitlines()
+    }
+    expected = set(patched_paths(dependency))
+    # A patch that creates a file leaves that file untracked, thus the scan above
+    # does not show it. Ask about the paths of the patch set only, so that build
+    # output elsewhere in the checkout does not count as a change.
+    for path in expected - changed:
+        if not (dependency.root / path).is_file():
+            continue
+        if not git_succeeds(dependency.root, "ls-files", "--error-unmatch", "--", path):
+            changed.add(path)
+    return changed == expected
+
+
+def recorded_paths(pin):
+    """The paths that the patch set wrote when the marker was written. An older
+    marker has no such line, thus the caller gets an empty list."""
+    try:
+        value = json.loads(pin.get("paths", "[]"))
+    except ValueError:
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def holds_recorded_patches(dependency, pin):
+    """True where the checkout still holds exactly what the marker recorded,
+    whatever the patch set says now. This is how a patch that went away is told
+    from a hand edit."""
+    paths = recorded_paths(pin)
+    if not paths or not pin.get("worktree"):
+        return False
+    digest = hashlib.sha256()
+    for path in paths:
+        blob = git(dependency.root, "hash-object", "--", path, check=False)
+        full = dependency.root / path
+        mode = "x" if full.is_file() and os.access(str(full), os.X_OK) else "-"
+        digest.update("{} {} {}\n".format(path, blob or "missing", mode).encode())
+    return digest.hexdigest() == pin.get("worktree")
+
+
+def drop_recorded_patches(dependency, pin):
+    """Put the files that the recorded patch set wrote back to the revision that
+    the checkout sits on. The patch files that made those changes can be gone,
+    thus a reverse of the current set cannot do this."""
+    paths = recorded_paths(pin)
+    if not paths:
+        return
+    # A path that git does not track is a file that the patch created, thus to
+    # put it back is to remove it. git checkout takes the rest. The two go apart,
+    # because git checkout fails for the whole list where one path is not in the
+    # index, and it then restores nothing.
+    tracked = []
+    for path in paths:
+        if git_succeeds(dependency.root, "ls-files", "--error-unmatch", "--", path):
+            tracked.append(path)
+            continue
+        created = dependency.root / path
+        if created.is_file():
+            created.unlink()
+    if tracked:
+        run_command(
+            ["git", "-C", str(dependency.root), "checkout", "--"] + tracked,
+            capture=True,
+            check=False,
+        )
+
+
+def apply_patches(dependency):
+    """Put the patch set on a clean checkout. A patch that does not apply takes
+    back the patches that applied before it, thus the checkout stays on the
+    pinned revision and the next build does not compile a half-patched tree."""
+    applied = []
+    for path in dependency.patch_files:
+        print(
+            "Applying {} to {}".format(path.name, dependency.name), flush=True
+        )
+        result = run_command(
+            ["git", "-C", str(dependency.root), "apply", str(path)],
+            capture=True,
+            check=False,
+        )
+        if result.returncode:
+            for done in reversed(applied):
+                run_command(
+                    ["git", "-C", str(dependency.root), "apply", "--reverse", str(done)],
+                    capture=True,
+                    check=False,
+                )
+            raise DevError(
+                "{}: {} does not apply - refresh it from the pull request "
+                "that it comes from\n{}".format(
+                    dependency.name,
+                    path.name,
+                    result.stderr.decode(errors="replace").strip(),
+                )
+            )
+        applied.append(path)
+
+
+def remove_patches(dependency):
+    """Take the patch set back out, thus a move to another commit starts clean."""
+    for path in reversed(dependency.patch_files):
+        run_command(
+            ["git", "-C", str(dependency.root), "apply", "--reverse", str(path)],
+            capture=True,
+            check=False,
+        )
+
+
+def describe_patches(dependency):
+    """Name the patch set for a status line, or an empty string where the
+    dependency takes no patches."""
+    count = len(dependency.patch_files)
+    if not count:
+        return ""
+    return " + {} patch{}".format(count, "" if count == 1 else "es")
+
+
 def write_pin(dependency, ref, commit):
-    """Record how the checkout was fetched and exactly what it sits on."""
+    """Record how the checkout was fetched, exactly what it sits on, and what
+    the patch set left in the working tree."""
     dependency.pin_file.write_text(
         "# Written by ./dev deps. Editing or removing this file marks the\n"
         "# checkout as user-managed, and every build warns about it.\n"
-        "name={}\ngit_url={}\nref={}\ncommit={}\n".format(
-            dependency.name, dependency.git_url, ref, commit
+        "name={}\ngit_url={}\nref={}\ncommit={}\npatches={}\nworktree={}\n"
+        "paths={}\n".format(
+            dependency.name,
+            dependency.git_url,
+            ref,
+            commit,
+            patch_set_digest(dependency),
+            worktree_digest(dependency),
+            json.dumps(patched_paths(dependency)),
         )
     )
     exclude_pin(dependency)
@@ -336,9 +530,27 @@ def dependency_status(dependency):
             "stale",
             "on {}, manifest pins {}".format(ref, dependency.ref),
         )
+    # A patch that only creates files leaves no tracked change, thus the test for
+    # the patch set comes before the test for a dirty checkout.
+    if is_patched(dependency, pin):
+        return PinStatus(
+            dependency,
+            "pinned",
+            "{} ({}){}".format(ref, short(head), describe_patches(dependency)),
+        )
     if dirty:
         return PinStatus(
-            dependency, "modified", "{} with local changes".format(ref)
+            dependency,
+            "modified",
+            "{} with local changes{}".format(
+                ref, " beyond the patch set" if dependency.patch_files else ""
+            ),
+        )
+    if dependency.patch_files:
+        return PinStatus(
+            dependency,
+            "unpatched",
+            "{} ({}), the patch set is not applied".format(ref, short(head)),
         )
     return PinStatus(dependency, "pinned", "{} ({})".format(ref, short(head)))
 
@@ -379,6 +591,8 @@ def resolve_ref(root, ref):
 def checkout_dependency(dependency, ref, commit):
     """Detach onto commit, warning when local edits are carried across."""
     root = dependency.root
+    if is_patched(dependency, read_pin(dependency) or {}):
+        remove_patches(dependency)
     if git(root, "status", "--porcelain", "--untracked-files=no", check=False):
         print(
             colorize(
@@ -409,6 +623,7 @@ def checkout_dependency(dependency, ref, commit):
                 result.stderr.decode(errors="replace").strip(),
             )
         )
+    apply_patches(dependency)
     write_pin(dependency, ref, commit)
 
 
@@ -434,6 +649,52 @@ def fetch_dependency(dependency):
     status = dependency_status(dependency)
     if status.state == "missing":
         clone_dependency(dependency)
+        return True
+
+    pin = read_pin(dependency) or {}
+    if (
+        pin.get("commit") == git(dependency.root, "rev-parse", "HEAD", check=False)
+        and pin.get("patches") not in (None, patch_set_digest(dependency))
+        and holds_recorded_patches(dependency, pin)
+    ):
+        # The patch set moved on and the checkout still holds the old one. Put
+        # the files back and apply what the manifest names now, thus a patch
+        # that went away leaves nothing of itself.
+        print(
+            "{}: the patch set changed; restoring the checkout".format(
+                dependency.name
+            ),
+            flush=True,
+        )
+        drop_recorded_patches(dependency, pin)
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
+        return True
+
+    if status.state == "unpatched":
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
+        return True
+
+    if status.state == "modified" and dependency.patch_files:
+        # The marker cannot always say that the checkout holds the patch set. An
+        # older version of this tool wrote a marker of another shape, and a
+        # digest that this tool computes can change. Ask the checkout instead:
+        # take the patch set out, and see what is left. A clean tree says the
+        # local changes were the patch set and nothing else.
+        remove_patches(dependency)
+        if git(dependency.root, "status", "--porcelain", "--untracked-files=no",
+               check=False):
+            apply_patches(dependency)
+            return False
+        print(
+            "{}: the checkout holds the patch set; recording it".format(
+                dependency.name
+            ),
+            flush=True,
+        )
+        apply_patches(dependency)
+        write_pin(dependency, dependency.ref, git(dependency.root, "rev-parse", "HEAD"))
         return True
 
     if status.state != "stale":
@@ -488,7 +749,10 @@ def update_dependency(dependency):
                 dependency.name, dependency.ref, short(commit)
             )
         )
-        if pin.get("ref") != dependency.ref:
+        if dependency_status(dependency).state == "unpatched":
+            apply_patches(dependency)
+            write_pin(dependency, dependency.ref, commit)
+        elif pin.get("ref") != dependency.ref:
             write_pin(dependency, dependency.ref, commit)
         return
 
@@ -616,6 +880,8 @@ def restore_dependency(dependency):
             ),
             flush=True,
         )
+    if is_patched(dependency, read_pin(dependency) or {}):
+        remove_patches(dependency)
     changes = git(
         dependency.root, "status", "--porcelain", "--untracked-files=no", check=False
     )
@@ -826,8 +1092,8 @@ def run_container(runtime, platform, command, check=True):
     return run_command(container_command, check=check)
 
 
-def build_device(platform, runtime):
-    build_dir = ROOT / "src" / "build" / platform
+def build_device(platform, runtime, kind):
+    build_dir = ROOT / "src" / "build" / kind / platform
     build_dir.mkdir(parents=True, exist_ok=True)
     if platform in AAC_PREBUILT_PLATFORMS:
         aac_library = ROOT / "bin" / platform / "libfdk-aac.so.1"
@@ -869,6 +1135,7 @@ def build_device(platform, runtime):
             "-C",
             CONTAINER_PROJECT + "/src",
             "PLATFORM={}".format(platform),
+            "KIND=" + kind,
             "NEXTUI_ROOT=" + nextui.make_root,
         ],
     )
@@ -882,7 +1149,7 @@ def desktop_setup_stale(dependency, marker):
     return bool(stamp) and stamp.stat().st_mtime > marker.stat().st_mtime
 
 
-def build_desktop():
+def build_desktop(kind):
     nextui = nextui_dependency()
     nextui_root = nextui.root.resolve()
     desktop_root = nextui_root / "workspace" / "desktop"
@@ -925,20 +1192,21 @@ def build_desktop():
             "-C",
             str(ROOT / "src"),
             "PLATFORM=desktop",
+            "KIND=" + kind,
             "NEXTUI_ROOT=" + nextui.make_root,
         ],
         env=env,
     )
 
 
-def build_platforms(platforms, runtime="docker"):
+def build_platforms(platforms, runtime="docker", kind="debug"):
     check_dependencies()
     for platform in platforms:
-        print("== Building {} ==".format(platform), flush=True)
+        print("== Building {} ({}) ==".format(platform, kind), flush=True)
         if platform == "desktop":
-            build_desktop()
+            build_desktop(kind)
         else:
-            build_device(platform, runtime)
+            build_device(platform, runtime, kind)
 
 
 def parse_manifest(platforms):
@@ -1635,7 +1903,7 @@ def command_container(args):
 def command_build(args):
     platforms = resolve_build_platforms(args.targets)
     runtime = container_runtime(args)
-    build_platforms(platforms, runtime)
+    build_platforms(platforms, runtime, args.kind)
     return 0
 
 
@@ -1660,7 +1928,7 @@ def command_dist(args):
         )
     check_dependencies(strict=args.strict and not args.allow_unpinned)
     runtime = container_runtime(args)
-    build_platforms(platforms, runtime)
+    build_platforms(platforms, runtime, args.kind)
     if DIST_ZIP.exists():
         DIST_ZIP.unlink()
     package = stage_package(platforms, strict=args.strict)
@@ -1712,7 +1980,7 @@ def command_install_or_run(args, should_run):
     )
     if not archive:
         runtime = container_runtime(args)
-        build_platforms(platforms, runtime)
+        build_platforms(platforms, runtime, args.kind)
 
     by_platform = {}
     for device in device_targets:
@@ -1799,6 +2067,30 @@ def command_log(args):
     ).returncode
 
 
+def add_build_kind_option(parser, default):
+    """Let the caller select what the compiler makes. The default differs by
+    command: a local build is for a person who examines it, a package is for a
+    user."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--debug",
+        dest="kind",
+        action="store_const",
+        const="debug",
+        help="optimized, with debug symbols and the control channel"
+        + (" (default)" if default == "debug" else ""),
+    )
+    group.add_argument(
+        "--release",
+        dest="kind",
+        action="store_const",
+        const="release",
+        help="optimized, stripped, no control channel"
+        + (" (default)" if default == "release" else ""),
+    )
+    parser.set_defaults(kind=default)
+
+
 def add_container_runtime_options(parser, device_builds=True):
     runtime = parser.add_mutually_exclusive_group()
     suffix = " for device builds" if device_builds else ""
@@ -1821,6 +2113,7 @@ def add_container_runtime_options(parser, device_builds=True):
 def add_install_options(parser, include_run, target_help):
     parser.add_argument("targets", nargs="*", metavar="target", help=target_help)
     add_container_runtime_options(parser)
+    add_build_kind_option(parser, "debug")
     parser.add_argument(
         "--full",
         action="store_true",
@@ -1835,10 +2128,37 @@ def add_install_options(parser, include_run, target_help):
         parser.add_argument("--run", action="store_true", help="run after installing")
 
 
+def parser_tree_help(parser, path=()):
+    """The help of this parser and of each command below it, deepest last.
+    Returns one block of text for each, in the sequence that a reader follows."""
+    blocks = []
+    if path:
+        title = " ".join(path)
+        blocks.append("=" * 72 + "\n{}\n".format(title) + "=" * 72)
+    blocks.append(parser.format_help().rstrip())
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, subparser in action.choices.items():
+            blocks.extend(parser_tree_help(subparser, path + (name,)))
+    return blocks
+
+
+def print_all_help(parser):
+    """Give the help of the tool and then the help of every command, thus a
+    reader finds an option without a call for each command."""
+    print("\n\n".join(parser_tree_help(parser)))
+
+
 def create_parser():
     parser = argparse.ArgumentParser(
         description="Build and deploy NextUI Music Player",
         formatter_class=CommandHelpFormatter,
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="with --help, give the help of every command as well",
     )
     subparsers = parser.add_subparsers(
         dest="command",
@@ -1901,7 +2221,7 @@ def create_parser():
         "build",
         help="build locally",
         description="build locally",
-        usage="%(prog)s target [-h] [--docker | --podman]",
+        usage="%(prog)s target [-h] [--docker | --podman] [--debug | --release]",
     )
     build.add_argument(
         "targets",
@@ -1910,6 +2230,7 @@ def create_parser():
         help="one or more of desktop (default), tg5040, tg5050, my355, all",
     )
     add_container_runtime_options(build)
+    add_build_kind_option(build, "debug")
     build.set_defaults(handler=command_build)
 
     test = subparsers.add_parser(
@@ -1998,7 +2319,7 @@ def create_parser():
         help="build the app and create a distribution package",
         description="build the app and create a distribution package",
         usage=(
-            "%(prog)s target [-h] [--docker | --podman] "
+            "%(prog)s target [-h] [--docker | --podman] [--debug | --release] "
             "[--no-zip] [--strict] [--allow-unpinned]"
         ),
     )
@@ -2009,6 +2330,7 @@ def create_parser():
         help="one or more of all (default), tg5040, tg5050, my355",
     )
     add_container_runtime_options(dist)
+    add_build_kind_option(dist, "release")
     dist.add_argument(
         "--no-zip",
         action="store_true",
@@ -2207,6 +2529,12 @@ def normalize_container_options(argv):
 def main():
     parser = create_parser()
     argv, app_args = split_app_args(normalize_container_options(sys.argv[1:]))
+    # --help exits inside argparse, thus --all is read before the parse. The scan
+    # stops at the first "--", because what follows belongs to the app.
+    scan = argv[: argv.index("--")] if "--" in argv else argv
+    if "--all" in scan and ("--help" in scan or "-h" in scan):
+        print_all_help(parser)
+        return 0
     args = parser.parse_args(argv)
     args.app_args = app_args
     if args.command is None:

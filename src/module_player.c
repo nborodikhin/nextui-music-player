@@ -641,7 +641,9 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
         }
 
         // Handle delete confirmation dialog (module-specific)
-        if (show_delete_confirm) {
+        // A pending stop skips the dialog, thus the global input below reports the
+        // quit and the module leaves through the path that it already has.
+        if (show_delete_confirm && !ModuleCommon_stopSignalled()) {
             if (PAD_justPressed(BTN_A)) {
                 if (unlink(delete_target_path) == 0) {
                     load_directory(browser.current_path);
@@ -664,7 +666,12 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
         }
 
         // Handle global input (skip if screen off or hint active)
-        if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
+        // A signal must reach the global input, thus a pending stop passes this
+        // guard. ModuleCommon_handleGlobalInput() reports the quit and returns
+        // before it reads any input, thus the screen-off states keep their
+        // behavior.
+        if (ModuleCommon_stopSignalled()
+            || (!screen_off && !ModuleCommon_isScreenOffHintActive())) {
             HelpId help_id = (state == PLAYER_INTERNAL_BROWSER) ? HELP_BROWSER : HELP_PLAYER;
             GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, help_id);
             if (global.should_quit) {
@@ -823,7 +830,12 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
 
         // Handle global input (skip if screen off or hint active)
-        if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
+        // A signal must reach the global input, thus a pending stop passes this
+        // guard. ModuleCommon_handleGlobalInput() reports the quit and returns
+        // before it reads any input, thus the screen-off states keep their
+        // behavior.
+        if (ModuleCommon_stopSignalled()
+            || (!screen_off && !ModuleCommon_isScreenOffHintActive())) {
             GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_PLAYER);
             if (global.should_quit) {
                 Player_stop();
@@ -1078,7 +1090,12 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
             }
 
             // Handle global input
-            if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
+            // A signal must reach the global input, thus a pending stop passes this
+            // guard. ModuleCommon_handleGlobalInput() reports the quit and returns
+            // before it reads any input, thus the screen-off states keep their
+            // behavior.
+            if (ModuleCommon_stopSignalled()
+                || (!screen_off && !ModuleCommon_isScreenOffHintActive())) {
                 GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &show_setting, HELP_PLAYER);
                 if (global.should_quit) {
                     Player_stop();

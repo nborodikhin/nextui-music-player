@@ -42,11 +42,14 @@
 static bool quit = false;
 static DisplayContext* display;
 
+// A handler must call nothing that is not async-signal-safe, thus it only
+// records the request. ModuleCommon_handleGlobalInput() acts on it, thus the
+// module that is in operation returns and the app runs its cleanup.
 static void sigHandler(int sig) {
     switch (sig) {
     case SIGINT:
     case SIGTERM:
-        quit = true;
+        ModuleCommon_signalStop();
         break;
     default:
         break;
@@ -59,7 +62,10 @@ static void print_usage(const char* program) {
         "\n"
         "Usage: %s [options]\n"
         "\n"
-        "Options:\n"
+        "Options:\n",
+        program);
+#ifdef TEST_CONTROL
+    printf(
         "  --test-control <in>[,<out>]  Read button commands from <in> and write the\n"
         "                               replies to <out>. Each side is 'std' for the\n"
         "                               standard streams, 'fd:<n>' for a descriptor\n"
@@ -68,8 +74,11 @@ static void print_usage(const char* program) {
         "                               standard output, with '@' before each one.\n"
         "                               One bidirectional descriptor is given twice,\n"
         "                               as in fd:3,fd:3. The form\n"
-        "                               --test-control=<in> is also accepted.\n"
-        "  -h, --help                   Give this text and stop.\n"
+        "                               --test-control=<in> is also accepted.\n");
+#endif
+    printf("  -h, --help                   Give this text and stop.\n");
+#ifdef TEST_CONTROL
+    printf(
         "\n"
         "Commands of the control channel, one step for each line:\n"
         "  press(BTN)  press(BTN, n)  hold(BTN, ms)  hold(BTN, keep)  release(BTN)\n"
@@ -80,8 +89,8 @@ static void print_usage(const char* program) {
         "\n"
         "The app replies '@ok <line>' after each step, '@err <line> <message>' for a\n"
         "command that it cannot execute, and '@bye' before it stops. The end of a file\n"
-        "or of a pipe stops the app, if the script did not give keep(). See README.md.\n",
-        program);
+        "or of a pipe stops the app, if the script did not give keep(). See README.md.\n");
+#endif
 }
 
 int main(int argc, char* argv[]) {
@@ -94,6 +103,7 @@ int main(int argc, char* argv[]) {
             print_usage(argv[0]);
             return EXIT_SUCCESS;
         }
+#ifdef TEST_CONTROL
         if (strncmp(arg, "--test-control=", 15) == 0) {
             if (!TestControl_init(arg + 15)) return EXIT_FAILURE;
             continue;
@@ -106,6 +116,7 @@ int main(int argc, char* argv[]) {
             if (!TestControl_init(argv[++i])) return EXIT_FAILURE;
             continue;
         }
+#endif
 
         LOG_error("unknown option '%s', use --help for the options\n", arg);
         return EXIT_FAILURE;
@@ -202,7 +213,7 @@ int main(int argc, char* argv[]) {
     Downloader_init();
 
     // Main application loop
-    while (!quit) {
+    while (!quit && !ModuleCommon_stopSignalled()) {
         Toast_screenChanged();
         MenuSelection selection = MenuModule_run(display);
 
