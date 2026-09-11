@@ -230,7 +230,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
         }
 
         // Handle confirmation dialog
-        if (show_confirm) {
+        // A pending stop skips the dialog, thus the global input below reports the
+        // quit and the module leaves through the path that it already has.
+        if (show_confirm && !ModuleCommon_stopSignalled()) {
             if (PAD_justPressed(BTN_A)) {
                 bool removed = false;
                 if (confirm_action_type == 0) {
@@ -264,7 +266,12 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
         }
 
         // Handle global input (skip if screen off or hint active)
-        if (!screen_off && !ModuleCommon_isScreenOffHintActive()) {
+        // A signal must reach the global input, thus a pending stop passes this
+        // guard. ModuleCommon_handleGlobalInput() reports the quit and returns
+        // before it reads any input, thus the screen-off states keep their
+        // behavior.
+        if (ModuleCommon_stopSignalled()
+            || (!screen_off && !ModuleCommon_isScreenOffHintActive())) {
             HelpId help_id;
             switch (state) {
                 case RADIO_INTERNAL_LIST:         help_id = HELP_RADIO_LIST;    break;

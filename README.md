@@ -146,6 +146,13 @@ The player compiles against the dependencies specified in `deps.json`.
 `fetch` is a step of `build`, so the first build on a fresh clone will pull
 all dependencies automatically.
 
+A dependency can name a directory of patches, which `fetch` applies to the
+checkout. `deps/patches/nextui/` holds them for the NextUI trees: each one is a
+pull request that is open upstream, and it goes away when the pull request is
+merged and the pin moves. The pin marker records the patch set, thus a build
+tells a patched checkout from one with hand edits and warns only about the
+second.
+
 Dependency file can be updated, the call to `./dev deps update` will try to update
 checkouts to match the new version.
 
@@ -171,6 +178,19 @@ Defines:
 USE_SDL2=1
 PLATFORM=desktop
 ```
+
+### CLion
+
+Open the project root as a Makefile project. CLion collects the compiler
+flags from a dry run of one make goal, and the default goal builds `src/`
+only, thus symbols in `test/` do not resolve and *Find Usages* does not
+find them. Point CLion at the `ide` goal, which also compiles the unit
+tests:
+
+1. Run `./dev deps fetch` and `./dev build desktop` once.
+2. **Settings | Build, Execution, Deployment | Makefile**: set
+   **Build target** to `ide`.
+3. **Tools | Makefile | Reload Makefile Project**.
 
 ### Build Commands and Tools
 
@@ -200,11 +220,46 @@ PLATFORM=desktop
 ./dev version latest
 ./dev version list
 
+# Help
+./dev --help
+./dev --help --all
+
 # Enter a toolchain or run a command in it
 ./dev docker 5040
 ./dev docker 5040 -- ls
 ./dev docker 5040 --podman -- ls
 ```
+
+### Build Kinds
+
+The build makes one of two kinds.
+
+| Kind | Optimization | Debug symbols | Control channel |
+|---|---|---|---|
+| `--debug` | `-O2` | yes | yes |
+| `--release` | `-O2` | no, the binary is stripped | no |
+
+Both kinds optimize the same. Thus a fault that the optimizer causes is in both,
+and the debug kind shows the behavior of the release kind.
+
+`./dev build`, `./dev install` and `./dev run` make the debug kind unless you
+pass `--release`. `./dev dist` makes the release kind unless you pass `--debug`.
+
+```bash
+./dev build brick                      # debug: symbols and the control channel
+./dev build brick --release            # what the pak ships
+./dev dist all --strict                # release
+./dev dist all --strict --debug        # a strict pak with symbols and the channel
+```
+
+A driven test needs the debug kind. A release binary does not accept
+`--test-control`, and its `--help` does not name the option or the commands of
+the channel. `--strict` checks the dependencies and the contents of the package,
+not the kind.
+
+Each kind keeps its object files under `src/build/<kind>/`, so switching kinds
+does not rebuild the tree. Both kinds write the same binary path, and the build
+prints the kind on every target.
 
 Platform aliases include `brick`, `brickpro`, `tsp`, `smartpro`, `5040`,
 `tsps`, `smartpros`, and `5050`. Aliases ignore case, spaces, hyphens, and
@@ -313,9 +368,10 @@ echo 'press(DOWN), press(A)' > cmds
 echo 'quit()' > cmds
 ```
 
-The image shows what the app draws to its surface. The title that scrolls and
-the time of the track go to a graphics layer of the platform, thus they are not
-in the image.
+The image shows what the display shows: the app composes its surface with the
+graphics layers of the platform, thus the title that scrolls, the time of the
+track, the lyrics, the spectrum and each toast are in the image. A NextUI tree
+that cannot compose gives the surface alone, and the layers are then absent.
 
 The same option operates a device build. The app also continues to accept the
 buttons of the hardware during a run.
@@ -338,9 +394,12 @@ nextui-music-player/         # This project
 │   ├── qjs                  # QuickJS, required by yt-dlp (installed on demand)
 │   ├── ffmpeg               # media convertor, required by yt-dlp (installed on demand)
 │   └── keyboard             # On-screen keyboard
+├── deps/
+│   └── patches/             # Patches that ./dev deps fetch applies to a checkout
 ├── res/                     # Resources (fonts, images, CA bundle)
 ├── stations/                # Curated radio stations
-└── state/                   # Runtime state files
+├── state/                   # Runtime state files
+└── Makefile                 # Forwards to src/; the `ide` goal also builds test/
 ```
 
 ### Dependencies

@@ -15,6 +15,15 @@
 #include "module_common.h"
 #include "test_control.h"
 
+// Composes the screen and the layers of the platform into out, thus a
+// screenshot holds the spectrum, the play time, the lyrics, the title that
+// scrolls and each toast. Returns 0 on success.
+//
+// Weak, because the NextUI tree that the build uses does not always carry it.
+// Where the symbol is absent it is null, and take_screenshot() writes the
+// surface alone.
+int PLAT_captureScreenshot(SDL_Surface* out) __attribute__((weak));
+
 // Buttons enter the pad state directly, after PAD_poll() reads the hardware.
 // Do not send synthetic SDL events instead: the desktop platform reads key
 // events and the device platforms read joystick events, thus one event shape
@@ -588,9 +597,13 @@ static void button_up(int btn) {
     pad.is_pressed &= ~btn;
 }
 
+// Writes the screen to a PNG. The composition of the platform holds the layers
+// and the background, thus it is the first choice.
+//
 // The app draws no page background into the surface. The platform gives that
 // color when it puts the surface on the screen, thus a copy of the surface
-// alone is transparent. Put the surface on the background color of the theme.
+// alone is transparent. The fallback puts the surface on the background color
+// of the theme, and the layers are absent from the image.
 static void take_screenshot(const Action* a) {
     SDL_Surface* screen = DisplayHelper_getSurface(DisplayHelper_current());
     if (!screen) {
@@ -605,13 +618,17 @@ static void take_screenshot(const Action* a) {
         return;
     }
 
-    // The theme keeps its colors packed as red, green, blue, alpha.
-    uint32_t color = CFG_getColor(COLOR_BACKGROUND);
-    SDL_FillRect(image, NULL, SDL_MapRGB(image->format,
-                                         (color >> 24) & 0xff,
-                                         (color >> 16) & 0xff,
-                                         (color >> 8) & 0xff));
-    SDL_BlitSurface(screen, NULL, image, NULL);
+    // The composition gives the background, thus the fill and the copy of the
+    // surface are for the trees that cannot compose.
+    if (!PLAT_captureScreenshot || PLAT_captureScreenshot(image) != 0) {
+        // The theme keeps its colors packed as red, green, blue, alpha.
+        uint32_t color = CFG_getColor(COLOR_BACKGROUND);
+        SDL_FillRect(image, NULL, SDL_MapRGB(image->format,
+                                             (color >> 24) & 0xff,
+                                             (color >> 16) & 0xff,
+                                             (color >> 8) & 0xff));
+        SDL_BlitSurface(screen, NULL, image, NULL);
+    }
 
     if (IMG_SavePNG(image, a->path) != 0) {
         reply("err %d cannot write %s: %s", a->line, a->path, IMG_GetError());

@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <string.h>
 #include <time.h>
 #include <msettings.h>
@@ -30,6 +31,11 @@ static bool show_quit_confirm = false;
 // Set once the user confirms the quit dialog.
 // Sticky, any subsequent call to ModuleCommon_handleGlobalInput() will return should_quit = true
 static bool quit_requested = false;
+
+// Set by a signal handler, thus sig_atomic_t and not bool. ModuleCommon_init()
+// does not clear it: the handlers are in place before the app initializes the
+// modules, and a signal in that interval must not be lost.
+static volatile sig_atomic_t stop_signalled = 0;
 static bool show_controls_help = false;
 
 // START button long press detection
@@ -57,6 +63,10 @@ void ModuleCommon_init(void) {
 
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
+
+    if (stop_signalled) {
+        quit_requested = true;
+    }
 
     // Keep reporting a confirmed quit until somebody acts on it
     if (quit_requested) {
@@ -351,6 +361,14 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
 
 void ModuleCommon_requestQuit(void) {
     quit_requested = true;
+}
+
+void ModuleCommon_signalStop(void) {
+    stop_signalled = 1;
+}
+
+bool ModuleCommon_stopSignalled(void) {
+    return stop_signalled != 0;
 }
 
 void ModuleCommon_frameBegin(void) {

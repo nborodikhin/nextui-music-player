@@ -43,7 +43,12 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
 # source of the tree, and it takes the rest of the symbols from the objects that
 # the desktop build already made. Run ./dev build desktop first.
-DESKTOP_OBJ = ../src/build/desktop/obj
+# The desktop build makes one kind at a time and keeps each kind apart. The tests
+# link the kind that ./dev build makes by default. Pass KIND=release to link the
+# other one.
+KIND ?= debug
+DESKTOP_BUILD = ../src/build/$(KIND)/desktop
+DESKTOP_OBJ = $(DESKTOP_BUILD)/obj
 TESTS   += $(BIN)/test_ui_utils
 
 # ui_fonts.c reads the theme of the platform, thus its test links the objects of
@@ -52,8 +57,11 @@ TESTS   += $(BIN)/test_ui_utils
 # the tree.
 TESTS   += $(BIN)/test_ui_fonts
 
-.PHONY: all check run clean
+.PHONY: all build check run clean
 all: run
+
+# Compile every test binary and run none. An IDE indexes the tests through it.
+build: $(TESTS)
 
 check:
 	./check_color_calls.py
@@ -85,7 +93,7 @@ $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c 
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib
-DESKTOP_LIBS = $(DESKTOP_RPATH) -L../src/build/desktop -L/var/tmp/nextui/lib \
+DESKTOP_LIBS = $(DESKTOP_RPATH) -L$(DESKTOP_BUILD) -L/var/tmp/nextui/lib \
                -L../NextUI/workspace/desktop/libmsettings \
                $(shell pkg-config --libs sdl2) -lSDL2_ttf -lSDL2_image -lsamplerate \
                -lzip -lopus -lmbedtls -lm -lpthread -ldl -lz -lGL -lmsettings
@@ -103,8 +111,9 @@ DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
 .PHONY: desktop-objs
 desktop-objs:
 	@test -d $(DESKTOP_OBJ) || \
-	  { echo "test_ui_utils needs the desktop build. Run: ./dev build desktop"; exit 1; }
-	@$(MAKE) --no-print-directory -C ../src PLATFORM=desktop \
+	  { echo "test_ui_utils needs the $(KIND) desktop build."; \
+	    echo "Run: ./dev build desktop --$(KIND)"; exit 1; }
+	@$(MAKE) --no-print-directory -C ../src objs PLATFORM=desktop KIND=$(KIND) \
 	  NEXTUI_ROOT=$(abspath ../NextUI/workspace)
 
 $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN) desktop-objs
