@@ -80,8 +80,9 @@ static bool radio_screen_drawn = false;
 // fallen, thus the wait for the stream happens on the screen of the station that
 // the user chose.
 //
-// `keep_bars` lets those bars fall where the screen stays, and takes them away at
-// once where the screen changes and the fall would not be seen.
+// Pass true in `keep_bars` where the screen stays, thus the bars of the old
+// station fall on it. Pass false where the screen changes and that fall would not
+// be seen.
 // Give up a station that waits, thus a screen that the user leaves does not hold
 // a station that never starts.
 static void cancel_pending_station(void) {

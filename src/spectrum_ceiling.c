@@ -24,7 +24,8 @@ void SpectrumCeiling_tick(SpectrumCeiling* ceiling, bool sound_is_playing, uint3
     uint32_t dt = now_ms - last_ms;
     if (dt > CEILING_STEP_MAX_MS) dt = CEILING_STEP_MAX_MS;
 
-    // Ticks during buffering should not raise the ceiling.
+    // A tick that does not rise keeps the value and takes its time with it, thus
+    // the time of a sound that has not started never counts toward the rise.
     if (sound_is_playing) {
         ceiling->value += (float)dt / CEILING_RISE_MS;
         if (ceiling->value > 1.0f) ceiling->value = 1.0f;

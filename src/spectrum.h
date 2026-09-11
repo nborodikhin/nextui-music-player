@@ -27,7 +27,8 @@ void Spectrum_reset(void);
 void Spectrum_setPosition(int x, int y, int w, int h);
 bool Spectrum_needsRefresh(void);
 
-// The spectrum, as painted onto the player's overlay layer.
+// Returns true while the spectrum has something on the overlay layer of a playing
+// screen. The painter of that layer asks this before it draws the bars.
 bool Spectrum_isShowing(void);
 void Spectrum_paint(int layer);
 
@@ -54,8 +55,10 @@ typedef struct {
 void SpectrumCeiling_clear(SpectrumCeiling* ceiling);
 
 // Advance the ceiling animation to the time `now_ms`.
-// Pass `sound_is_playing` if the period from the last tick should be considered
-// as part of rising flow (for example buffering time should not).
+//
+// Pass true in `sound_is_playing` to count the period since the last tick as part
+// of the rise. Pass false to keep the value and take that period with it, as
+// buffering time must not raise the ceiling.
 void SpectrumCeiling_tick(SpectrumCeiling* ceiling, bool sound_is_playing, uint32_t now_ms);
 
 // Current value of the ceiling, 0..1. At 0, spectrogram should not be drawn.

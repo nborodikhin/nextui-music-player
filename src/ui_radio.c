@@ -714,7 +714,7 @@ bool RadioStatus_needsRefresh(void) {
 // Build the row of the state into the cached surface. The painter of the layer
 // draws that surface, thus this holds no clear and no flip.
 //
-// Gives true where the surface changed, thus the caller knows that the layer
+// Returns true where the surface changed, thus the caller knows that the layer
 // must paint again.
 bool RadioStatus_renderGPU(void) {
     if (!status_position_set) return false;

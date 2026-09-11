@@ -262,7 +262,8 @@ static bool start_playback(const char* path) {
     return false;
 }
 
-// Clean up playback state
+// Clean up playback state. Pass true in `quit_spectrum` where the playing screen
+// goes as well, thus the spectrum releases its FFT and its layer.
 static void cleanup_playback(bool quit_spectrum) {
     clear_gpu_layers();
     PlayTime_clear();

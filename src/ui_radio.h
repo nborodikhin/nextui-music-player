@@ -12,9 +12,9 @@
 void render_radio_list(SDL_Surface* screen, int show_setting,
                        int radio_selected, int* radio_scroll);
 
-// Say that a station waits for its screen, before its stream starts. The playing
-// screen then says that it connects, in place of the metadata of the station that
-// played before.
+// Pass true in `waiting` while a station waits for its screen, before its stream
+// starts. The playing screen then says that it connects, in place of the metadata
+// of the station that played before. Pass false once the stream starts.
 void RadioUI_setWaitingToStart(bool waiting);
 
 // Render the radio playing screen
@@ -39,6 +39,7 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll);
 void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
                               int left_x, int row_bottom_y);
 void RadioStatus_clear(void);
+// Returns true where the row of the state has something new to draw.
 bool RadioStatus_needsRefresh(void);
 bool RadioStatus_renderGPU(void);
 

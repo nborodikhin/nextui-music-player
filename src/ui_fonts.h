@@ -25,7 +25,7 @@ TTF_Font* Fonts_getTiny(void);    // Genre, bitrate
 // The first three come from a glyph of the font, and each measures up from the
 // baseline: https://en.wikipedia.org/wiki/X-height
 //
-// The rest come from SDL_ttf and keep the value and the sign that it gives. The
+// The rest come from SDL_ttf and keep the value and the sign that it returns. The
 // descent is negative, because it falls below the baseline.
 typedef enum {
     FONT_METRIC_X_HEIGHT,      // the top of a lowercase letter with no ascender
@@ -37,8 +37,8 @@ typedef enum {
     FONT_METRIC_LINE_SKIP,     // the baseline of one line to the baseline of the next
 } FontMetric;
 
-// The metric of `font`, in pixels. Gives 0 where there is no font, and 0 for a
-// glyph metric where the font has no ascent to work from.
+// Returns the metric of `font` in pixels. Returns 0 where there is no font, and 0
+// for a glyph metric where the font has no ascent to work from.
 //
 // A mark that shares a row with text takes the x-height for its thickness, thus
 // each mark of the app has one weight. It sits on the metric of the text beside

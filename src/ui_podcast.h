@@ -64,6 +64,7 @@ void Podcast_clearTitleScroll(void);
 
 // The title of the playing screen, as painted onto the overlay layer of that
 // screen. The painter of the layer calls these, and it draws the spectrum first.
+// Returns true while the title moves, thus the painter of the layer must run.
 bool Podcast_playingTitleNeedsRefresh(void);
 bool Podcast_playingTitleShowing(void);
 void Podcast_paintPlayingTitle(int layer);
