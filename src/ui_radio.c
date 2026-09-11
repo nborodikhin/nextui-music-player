@@ -851,11 +851,11 @@ bool RadioStatus_renderGPU(void) {
                             (state == RADIO_STATE_PLAYING || state == RADIO_STATE_BUFFERING);
 
     if (sound_is_running) {
-        // The bar takes the band of the lowercase letters beside it, thus it has
-        // their top and their foot.
+        // The row holds words, thus the bar takes the x-height of them: it has
+        // their top and it sits on their baseline.
         int bar_x_in_surface = surface_w - status_bar_w;
-        int bar_h_drawn = optical_mark_height(status_font);
-        int bar_y_pos = optical_mark_y(status_font, bar_h_drawn, TEXT_BAND_LOWERCASE);
+        int bar_h_drawn = Fonts_getMetric(status_font, FONT_METRIC_X_HEIGHT);
+        int bar_y_pos = Fonts_getMetric(status_font, FONT_METRIC_ASCENT) - bar_h_drawn;
 
         SDL_Rect bar_bg = {bar_x_in_surface, bar_y_pos, status_bar_w, bar_h_drawn};
         SDL_FillRect(surface, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));

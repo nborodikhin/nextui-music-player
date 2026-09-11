@@ -9,6 +9,47 @@
 #include "ui_fonts.h"
 #include "utf8.h"
 
+// A glyph takes about this much of the ascent, where the font gives no usable
+// metrics for it.
+#define X_HEIGHT_OF_ASCENT 0.52f
+#define CAP_HEIGHT_OF_ASCENT 0.70f
+#define DIGIT_HEIGHT_OF_ASCENT 0.72f
+
+int Fonts_getMetric(TTF_Font* font, FontMetric metric) {
+    if (!font) return 0;
+
+    char sample;
+    float fallback;
+
+    switch (metric) {
+        case FONT_METRIC_ASCENT:    return TTF_FontAscent(font);
+        case FONT_METRIC_DESCENT:   return TTF_FontDescent(font);
+        case FONT_METRIC_HEIGHT:    return TTF_FontHeight(font);
+        case FONT_METRIC_LINE_SKIP: return TTF_FontLineSkip(font);
+
+        case FONT_METRIC_X_HEIGHT:     sample = 'x'; fallback = X_HEIGHT_OF_ASCENT;     break;
+        case FONT_METRIC_CAP_HEIGHT:   sample = 'H'; fallback = CAP_HEIGHT_OF_ASCENT;   break;
+        case FONT_METRIC_DIGIT_HEIGHT: sample = '0'; fallback = DIGIT_HEIGHT_OF_ASCENT; break;
+
+        default: return 0;
+    }
+
+    int ascent = TTF_FontAscent(font);
+    if (ascent <= 0) return 0;
+
+    int minx, maxx, miny, maxy, advance;
+    if (TTF_GlyphMetrics(font, sample, &minx, &maxx, &miny, &maxy, &advance) == 0) {
+        // maxy is the top of the glyph above the baseline. A face where the
+        // glyph reaches the ascender line gives the whole ascent, which is not
+        // the height of that glyph. Some fonts of the platform report exactly
+        // that. Take the metrics only where they give a height that a face can
+        // have.
+        if (maxy > 0 && maxy <= ascent - ascent / 5) return maxy;
+    }
+
+    return (int)(ascent * fallback);
+}
+
 // The font of NextUI. CFG_getFontFile() gives the name of the file that the
 // user selected, and each font of the system is in RES_PATH.
 static char font_path[MAX_PATH];

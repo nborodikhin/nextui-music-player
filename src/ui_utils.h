@@ -91,27 +91,6 @@ int chip_footer_height(int row_h);
 // pill row on the screen that draws no button hint (e.g. playing screen).
 int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
 
-// What a row of text puts on the line, for a mark that shares the row with it.
-typedef enum {
-    TEXT_BAND_LOWERCASE,  // words, such as "32 kbps streaming"
-    TEXT_BAND_DIGITS,     // figures, such as "13:33/35:43"
-} TextBand;
-
-// The thickness of a mark that shares a row with text of `font`. It is the height
-// of a lowercase letter with no ascender, thus one row of the app gives marks of
-// one weight whatever the text beside them holds.
-int optical_mark_height(TTF_Font* font);
-
-// The y of a mark `mark_h` high, inside a box that starts at y 0 and holds one
-// line of `font`. The mark centers on the band that `band` names, thus it sits on
-// the line that the eye takes from the text beside it.
-//
-// The em box of a font holds room for an ascender, a descender and the leading,
-// thus a mark that centers on the em box reads high. Digits have no descender and
-// they are taller than a lowercase letter, thus a row of figures gives a different
-// band from a row of words.
-int optical_mark_y(TTF_Font* font, int mark_h, TextBand band);
-
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
 

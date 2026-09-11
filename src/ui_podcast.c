@@ -2021,10 +2021,13 @@ void PodcastProgress_renderGPU(void) {
     int bar_x = progress_left_x + cur_w + total_w + SCALE1(12);
     int bar_w = progress_right_x - bar_x;
     if (bar_w > 0) {
-        // The play time is figures, thus the bar centers on the band of the
-        // digits and not on the band of a lowercase letter.
-        int bar_h = optical_mark_height(time_font);
-        int bar_y = optical_mark_y(time_font, bar_h, TEXT_BAND_DIGITS);
+        // The play time is figures, thus the bar centers on the digit height and
+        // not on the x-height. It keeps the thickness of the x-height, as each
+        // mark of the app does.
+        int bar_h = Fonts_getMetric(time_font, FONT_METRIC_X_HEIGHT);
+        int digit_h = Fonts_getMetric(time_font, FONT_METRIC_DIGIT_HEIGHT);
+        int ascent = Fonts_getMetric(time_font, FONT_METRIC_ASCENT);
+        int bar_y = ascent - digit_h + (digit_h - bar_h) / 2;
 
         SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
         SDL_FillRect(combined, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));

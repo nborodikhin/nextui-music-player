@@ -46,6 +46,12 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
 DESKTOP_OBJ = ../src/build/desktop/obj
 TESTS   += $(BIN)/test_ui_utils
 
+# ui_fonts.c reads the theme of the platform, thus its test links the objects of
+# the desktop build as the test above does. It links ui_fonts.o in place of a
+# copy of its own, because `desktop-objs` rebuilds that object from the source of
+# the tree.
+TESTS   += $(BIN)/test_ui_fonts
+
 .PHONY: all check run clean
 all: run
 
@@ -104,6 +110,12 @@ desktop-objs:
 $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_utils.c $(SRC)/ui_utils.c \
 	  $(DESKTOP_LINK_OBJ) $(DESKTOP_LIBS)
+
+$(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_fonts.c \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip

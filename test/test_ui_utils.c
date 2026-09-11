@@ -141,51 +141,6 @@ TEST(test_header_height) {
     SDL_FreeSurface(narrow);
 }
 
-// A mark beside text sits on the band of that text. A row of words gives the band
-// of a lowercase letter; a row of figures gives the band of a digit, which is
-// taller and has no descender.
-TEST(test_optical_band_of_a_row) {
-    // With no font the caller still gets a value that it can draw with
-    CHECK(optical_mark_height(NULL) >= 0);
-    CHECK(optical_mark_y(NULL, 4, TEXT_BAND_LOWERCASE) >= 0);
-
-    if (TTF_WasInit() == 0 && TTF_Init() != 0) {
-        printf("    SKIP no TTF: %s\n", TTF_GetError());
-        return;
-    }
-
-    TTF_Font *font = TTF_OpenFont("../NextUI/workspace/all/show2/"
-                                  "RoundedMplus1c-Bold-reduced.ttf", SCALE1(18));
-    if (!font) {
-        printf("    SKIP no font: %s\n", TTF_GetError());
-        return;
-    }
-
-    int mark_h = optical_mark_height(font);
-    int line_h = TTF_FontHeight(font);
-    int ascent = TTF_FontAscent(font);
-
-    // The thickness comes from the letters and it is shorter than the em box
-    CHECK(mark_h > 0);
-    CHECK(mark_h < line_h);
-
-    int on_words = optical_mark_y(font, mark_h, TEXT_BAND_LOWERCASE);
-    int on_digits = optical_mark_y(font, mark_h, TEXT_BAND_DIGITS);
-
-    // A mark of that thickness fills the band of the words, thus it ends on the
-    // baseline
-    CHECK_EQ_INT(on_words + mark_h, ascent);
-
-    // Digits are taller, thus a mark of the same thickness centers higher
-    CHECK(on_digits < on_words);
-
-    // And it stays inside the line
-    CHECK(on_digits >= 0);
-    CHECK(on_words + mark_h <= line_h);
-
-    TTF_CloseFont(font);
-}
-
 int main(void) {
     RUN(test_chip_on_the_top_pill_row);
     RUN(test_footer_chip_box);
@@ -194,6 +149,5 @@ int main(void) {
     RUN(test_rows_of_a_page);
     RUN(test_footer_height);
     RUN(test_header_height);
-    RUN(test_optical_band_of_a_row);
     return test_summary();
 }
