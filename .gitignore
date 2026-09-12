@@ -18,6 +18,8 @@ bin/my355/musicplayer.elf
 bin/desktop/musicplayer.elf
 # Records the build kind that the binary beside it has
 bin/*/.kind
+# Libraries the build copies out of a toolchain image
+bin/*/*.so*
 test/bin/
 dist/
 __pycache__/
