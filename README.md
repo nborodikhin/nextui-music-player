@@ -408,3 +408,7 @@ The music player uses:
 - **Shared code**: `NextUI/workspace/all/common/` (utils, api, config, scaler)
 - **Platform code**: `NextUI/workspace/<PLATFORM>/platform/`
 - **Libraries**: SDL2, SDL2_image, SDL2_ttf, GLESv2, EGL, libsamplerate, libzip, mbedTLS, ALSA
+- **Pak libraries**: where the firmware lacks a library, the pak carries one in
+  `bin/<platform>/` and `launch.sh` loads it before `/usr/lib`. The build copies
+  each one out of a toolchain image (`PAK_LIBRARIES` in `dev`); none is in git.
+  Today: libfdk-aac on tg5050 and my355, and SDL2_image 2.9 (JPEG decoder) on my355.

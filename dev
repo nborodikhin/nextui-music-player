@@ -66,8 +66,8 @@ PLATFORM_DEPENDENCIES = {
     "my355": "nextui-my355",
 }
 
-# Platforms whose toolchain has no libfdk-aac; the pak carries its own copy.
-AAC_PREBUILT_PLATFORMS = ("tg5050", "my355")
+# Where a toolchain image keeps the shared libraries of its sysroot.
+SYSROOT_LIB = "/opt/aarch64-nextui-linux-gnu/aarch64-nextui-linux-gnu/libc/usr/lib"
 
 CPUINFO_PLATFORMS = {
     "TG5040": "tg5040",
@@ -90,6 +90,46 @@ class CommandHelpFormatter(argparse.HelpFormatter):
                 format_action(command) for command in action._get_subactions()
             )
         return super()._format_action(action)
+
+
+@dataclass(frozen=True)
+class PakLibrary:
+    """A shared library that the pak carries because the firmware lacks it.
+
+    The build copies `source` out of the toolchain image of `image` into
+    bin/<platform>/<name> on every device build, thus no library is a file in
+    git. `name` is the SONAME, which is what the loader looks up. `source` is
+    the SONAME path in the sysroot as well, thus a new libtool suffix in the
+    image does not stop the copy. Set `link` where the sysroot of the
+    platform has no copy and the link needs one.
+    """
+
+    name: str
+    image: str
+    source: str
+    link: bool = False
+
+
+# libfdk-aac exists in the tg5040 image only; tg5050 and my355 borrow it.
+FDK_AAC = PakLibrary(
+    name   = "libfdk-aac.so.1",
+    image  = "tg5040",
+    source = SYSROOT_LIB + "/libfdk-aac.so.1",
+    link   = True,
+)
+
+# SDL2_image 2.9 with the JPEG and PNG decoders compiled in. The firmware of
+# the Flip ships SDL2_image 2.0 with PNG only.
+SDL2_IMAGE = PakLibrary(
+    name   = "libSDL2_image-2.0.so.0",
+    image  = "my355",
+    source = SYSROOT_LIB + "/libSDL2_image-2.0.so.0",
+)
+
+PAK_LIBRARIES = {
+    "tg5050": (FDK_AAC,),
+    "my355": (FDK_AAC, SDL2_IMAGE),
+}
 
 
 @dataclass(frozen=True)
@@ -1092,24 +1132,63 @@ def run_container(runtime, platform, command, check=True):
     return run_command(container_command, check=check)
 
 
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extract_pak_libraries(platform, runtime, build_dir):
+    """Copy each library of the pak out of its toolchain image.
+
+    Runs on every build, thus a newer image gives a newer library with no
+    cache to clear. Prints the SHA-256 of each copy, thus the build log shows
+    when an image update changed one.
+    """
+    libraries = PAK_LIBRARIES.get(platform, ())
+    if not libraries:
+        return
+    target_dir = ROOT / "bin" / platform
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    by_image = {}
+    for library in libraries:
+        by_image.setdefault(library.image, []).append(library)
+    for image, image_libraries in by_image.items():
+        steps = []
+        for library in image_libraries:
+            target = shlex.quote(
+                "{}/bin/{}/{}".format(CONTAINER_PROJECT, platform, library.name)
+            )
+            steps.append("cp -L {} {}".format(shlex.quote(library.source), target))
+            # The loader needs .dynsym only; .symtab and .debug_* are dead weight
+            # in the pak.
+            steps.append("aarch64-nextui-linux-gnu-strip " + target)
+        run_container(runtime, image, ["sh", "-c", " && ".join(steps)])
+
+    for library in libraries:
+        copied = target_dir / library.name
+        if not copied.is_file():
+            raise DevError("{} did not come out of the {} image".format(
+                copied.relative_to(ROOT), library.image))
+        print("Extracted {} sha256 {}".format(copied.relative_to(ROOT), sha256_of(copied)))
+
+        if not library.link:
+            continue
+        # The linker wants the bare .so name; the loader wants the SONAME.
+        staged = build_dir / library.name
+        shutil.copy2(copied, staged)
+        link = build_dir / (library.name.split(".so")[0] + ".so")
+        link.unlink(missing_ok=True)
+        link.symlink_to(library.name)
+
+
 def build_device(platform, runtime, kind):
     build_dir = ROOT / "src" / "build" / kind / platform
     build_dir.mkdir(parents=True, exist_ok=True)
-    if platform in AAC_PREBUILT_PLATFORMS:
-        aac_library = ROOT / "bin" / platform / "libfdk-aac.so.1"
-        if not aac_library.exists():
-            raise DevError("Missing {}".format(aac_library.relative_to(ROOT)))
-
-        staged = build_dir / aac_library.name
-        if not staged.exists():
-            print("Copying {}".format(aac_library.relative_to(ROOT)))
-            shutil.copy2(aac_library, staged)
-
-        link = build_dir / "libfdk-aac.so"
-        if not link.exists() or not link.is_symlink:
-            print("Symlinking {}".format(link.relative_to(ROOT)))
-            link.unlink(missing_ok=True)
-            link.symlink_to(aac_library.name)
+    extract_pak_libraries(platform, runtime, build_dir)
 
     nextui = nextui_dependency(platform)
     run_container(
