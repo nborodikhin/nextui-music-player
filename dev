@@ -1157,14 +1157,16 @@ def extract_pak_libraries(platform, runtime, build_dir):
     for library in libraries:
         by_image.setdefault(library.image, []).append(library)
     for image, image_libraries in by_image.items():
-        command = ["sh", "-c", " && ".join(
-            "cp -L {} {}".format(
-                shlex.quote(library.source),
-                shlex.quote("{}/bin/{}/{}".format(CONTAINER_PROJECT, platform, library.name)),
+        steps = []
+        for library in image_libraries:
+            target = shlex.quote(
+                "{}/bin/{}/{}".format(CONTAINER_PROJECT, platform, library.name)
             )
-            for library in image_libraries
-        )]
-        run_container(runtime, image, command)
+            steps.append("cp -L {} {}".format(shlex.quote(library.source), target))
+            # The loader needs .dynsym only; .symtab and .debug_* are dead weight
+            # in the pak.
+            steps.append("aarch64-nextui-linux-gnu-strip " + target)
+        run_container(runtime, image, ["sh", "-c", " && ".join(steps)])
 
     for library in libraries:
         copied = target_dir / library.name
