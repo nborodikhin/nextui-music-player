@@ -27,9 +27,6 @@
 #include "background.h"
 #include "album_art.h"
 
-// Music folder path
-#define MUSIC_PATH SDCARD_PATH "/Music"
-
 // Internal states
 typedef enum {
     PLAYER_INTERNAL_BROWSER,
@@ -332,28 +329,61 @@ static bool browser_play_entry(FileEntry *entry) {
     return start_playback(entry->path);
 }
 
+// Goes to the parent of the current directory, which the ".." row of the list
+// names. The cursor goes to the row that the user was on when they entered this
+// directory, where the history knows it, and to the row of the directory that
+// they left otherwise. A stale history, such as after a resume, is dropped.
+static void browser_go_up(void) {
+    char child[512];
+    snprintf(child, sizeof(child), "%s", browser.current_path);
+    char parent[512];
+    if (Browser_hasParent(&browser)) {
+        snprintf(parent, sizeof(parent), "%s", browser.entries[0].path);
+    } else {
+        // The directory did not load, thus it has no ".." row: the path names
+        // the parent, and a path outside the library goes to its root
+        snprintf(parent, sizeof(parent), "%s", child);
+        char* last_slash = strrchr(parent, '/');
+        if (last_slash) *last_slash = '\0';
+        if (strncmp(parent, MUSIC_PATH, strlen(MUSIC_PATH)) != 0) {
+            snprintf(parent, sizeof(parent), "%s", MUSIC_PATH);
+        }
+    }
+
+    int sel = -1;
+    if (nav_stack_top > 0 && strcmp(nav_stack[nav_stack_top - 1].path, parent) == 0) {
+        nav_stack_top--;
+        sel = nav_stack[nav_stack_top].selected;
+    } else {
+        nav_stack_top = 0;
+    }
+
+    load_directory(parent);
+
+    if (sel < 0) {
+        sel = 0;
+        for (int i = 0; i < browser.entry_count; i++) {
+            if (browser.entries[i].is_dir && strcmp(browser.entries[i].path, child) == 0) {
+                sel = i;
+                break;
+            }
+        }
+    }
+    if (sel >= browser.entry_count) sel = browser.entry_count > 0 ? browser.entry_count - 1 : 0;
+    browser.selected = sel;
+    int half = browser.items_per_page / 2;
+    browser.scroll_offset = sel - half;
+    if (browser.scroll_offset < 0) browser.scroll_offset = 0;
+    int max_scroll = browser.entry_count - browser.items_per_page;
+    if (max_scroll < 0) max_scroll = 0;
+    if (browser.scroll_offset > max_scroll) browser.scroll_offset = max_scroll;
+}
+
 // Handle input in browser state. Returns true if module should exit to menu.
 static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
     if (PAD_justPressed(BTN_B)) {
         if (strcmp(browser.current_path, MUSIC_PATH) != 0) {
-            if (nav_stack_top > 0) {
-                nav_stack_top--;
-                load_directory(nav_stack[nav_stack_top].path);
-                int sel = nav_stack[nav_stack_top].selected;
-                if (sel >= browser.entry_count)
-                    sel = browser.entry_count > 0 ? browser.entry_count - 1 : 0;
-                browser.selected = sel;
-                int half = browser.items_per_page / 2;
-                browser.scroll_offset = sel - half;
-                if (browser.scroll_offset < 0) browser.scroll_offset = 0;
-                int max_scroll = browser.entry_count - browser.items_per_page;
-                if (max_scroll < 0) max_scroll = 0;
-                if (browser.scroll_offset > max_scroll) browser.scroll_offset = max_scroll;
-            } else {
-                // No history: fall back to path truncation
-                char* last_slash = strrchr(browser.current_path, '/');
-                if (last_slash) { *last_slash = '\0'; load_directory(browser.current_path); }
-            }
+            browser_go_up();
             *dirty = 1;
         } else {
             GFX_clearLayers(LAYER_SCROLLTEXT);
@@ -375,7 +405,11 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
         }
         else if (PAD_justPressed(BTN_A)) {
             FileEntry* entry = &browser.entries[browser.selected];
-            if (entry->is_dir) {
+            if (entry->is_dir && strcmp(entry->name, "..") == 0) {
+                // The parent row is the way up, the same as B
+                browser_go_up();
+                *dirty = 1;
+            } else if (entry->is_dir) {
                 if (nav_stack_top < NAV_STACK_DEPTH) {
                     snprintf(nav_stack[nav_stack_top].path, sizeof(nav_stack[nav_stack_top].path),
                              "%s", browser.current_path);
@@ -607,6 +641,9 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
     PlayerInternalState state = PLAYER_INTERNAL_BROWSER;
     int dirty = 1;
     int show_setting = 0;
+    // A path that changes while the title moves scrolls in, thus the marquee
+    // does not jump on each directory.
+    ScreenTitle_start(true);
 
     screen_off = false;
     ModuleCommon_resetScreenOffHint();
@@ -724,6 +761,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
         } else if (!screen_off) {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, state == PLAYER_INTERNAL_BROWSER && !screen_off);
     }
 }
 
@@ -785,6 +823,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
     if (!tracks || track_count <= 0) return MODULE_EXIT_TO_MENU;
 
     init_player();
+    ScreenTitle_start(true);
 
     // Set up the playlist context
     Playlist_free(&playlist);
@@ -1069,6 +1108,7 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
         int dirty = 1;
         int show_setting = 0;
         screen_off = false;
+        ScreenTitle_start(true);
         ModuleCommon_resetScreenOffHint();
         ModuleCommon_recordInputTime();
         PlayerInternalState state = PLAYER_INTERNAL_PLAYING;

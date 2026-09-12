@@ -17,8 +17,8 @@
 // menu_selected: currently selected menu item
 // menu_scroll: index of the first visible row. The rows do not all fit one page
 //   at scale 3, so this list is windowed like any other.
-void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                          int menu_scroll);
+void render_settings_menu(SDL_Surface* screen, int show_setting,
+                          int menu_selected, int menu_scroll);
 
 
 #endif

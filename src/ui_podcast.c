@@ -19,6 +19,8 @@
 #include "ui_album_art.h"
 #include "wget_fetch.h"
 #include "module_common.h"
+#include "podcast_episode_layout.h"
+#include "utf8.h"
 
 // Max artwork size (1MB to match radio album art buffer)
 #define PODCAST_ARTWORK_MAX_SIZE (1024 * 1024)
@@ -612,16 +614,18 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     int sub_item_h = layout.rich_item_h;
     int cl_item_h = sub_item_h;
     int section_header_h = SCALE1(16);
-    int section_gap = SCALE1(4);  // Gap between section header and first item
+    // The gap between a section header and its first row. A row keeps its own
+    // room under its pill, thus the next section needs no more than this.
+    int section_gap = SCALE1(4);
 
     // Calculate total content height and per-item Y positions
     // We'll compute item positions in a flat array
     int item_y[PODCAST_MAX_CONTINUE_LISTENING + PODCAST_MAX_SUBSCRIPTIONS + 4];  // generous
     int content_y = 0;
-    // Start content right after page title pill (no extra margin)
-    int base_y = SCALE1(PADDING + PILL_SIZE + 1);
-    int hh = screen->h;
-    int viewport_h = hh - base_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 8);
+    // The stream takes the room of a list: under the top pill row, and one scroll
+    // indicator above the bottom pill row
+    int base_y = layout.list_y;
+    int viewport_h = layout.list_h;
 
     content_y = 0;
 
@@ -636,7 +640,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
 
     // Subscriptions section
     if (sub_count > 0) {
-        if (cl_count > 0) content_y += SCALE1(18);  // Gap between sections
+        if (cl_count > 0) content_y += section_gap;
         content_y += section_header_h + section_gap;
         for (int i = 0; i < sub_count; i++) {
             item_y[cl_count + i] = content_y;
@@ -646,7 +650,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
 
     // Downloads item (at the bottom)
     if (has_downloads_item) {
-        if (cl_count > 0 || sub_count > 0) content_y += SCALE1(18);  // Gap
+        if (cl_count > 0 || sub_count > 0) content_y += section_gap;
         item_y[cl_count + sub_count] = content_y;
         content_y += sub_item_h;
     }
@@ -664,7 +668,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
             sel_top = 0;  // include "Continue Listening" header
         } else if (selected == cl_count && sub_count > 0) {
             sel_top = sel_y - section_header_h - section_gap;
-            if (cl_count > 0) sel_top -= SCALE1(18);  // include gap
+            if (cl_count > 0) sel_top -= section_gap;
         }
 
         if (sel_top - *scroll < 0) {
@@ -715,7 +719,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
 
     // --- Subscriptions section ---
     if (sub_count > 0) {
-        if (cl_count > 0) cy += SCALE1(18);  // Gap between sections
+        if (cl_count > 0) cy += section_gap;
         int header_screen_y = draw_offset + cy;
         if (header_screen_y + section_header_h > base_y && header_screen_y < base_y + viewport_h) {
             render_section_header(screen, "Subscriptions", header_screen_y);
@@ -766,7 +770,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
 
     // --- Downloads item ---
     if (has_downloads_item) {
-        if (cl_count > 0 || sub_count > 0) cy += SCALE1(18);  // Gap
+        if (cl_count > 0 || sub_count > 0) cy += section_gap;
         int dl_idx = cl_count + sub_count;
         bool dl_selected = (dl_idx == selected);
         int y = draw_offset + cy;
@@ -796,6 +800,7 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     }
 
     SDL_SetClipRect(screen, NULL);
+    render_stream_scroll_indicators(screen, &layout, *scroll, total_content_h);
 
     // Button hints — context dependent
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -843,7 +848,7 @@ void render_podcast_manage(SDL_Surface* screen, int show_setting,
                               pos.text_x, pos.text_y, layout.max_width, selected);
     }
 
-    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, PODCAST_MANAGE_COUNT);
+    render_scroll_indicators(screen, &layout, menu_scroll, PODCAST_MANAGE_COUNT);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -915,7 +920,7 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
         if (artwork_fetch_one(item->itunes_id, item->artwork_url, thumb_size)) break;
     }
 
-    render_scroll_indicators(screen, *scroll, layout.items_per_page, count);
+    render_scroll_indicators(screen, &layout, *scroll, count);
 
     // Check if selected item is already subscribed (by iTunes ID)
     bool selected_is_subscribed = false;
@@ -1005,7 +1010,7 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
         if (artwork_fetch_one(result->itunes_id, result->artwork_url, thumb_size)) break;
     }
 
-    render_scroll_indicators(screen, *scroll, layout.items_per_page, count);
+    render_scroll_indicators(screen, &layout, *scroll, count);
 
     // Show subscribe/unsubscribe button based on subscription status
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -1019,6 +1024,227 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
 }
 
 // Render episode list for a feed
+// One line of the wrapped description: a slice of the text of the feed, not a copy.
+typedef struct {
+    const char* start;
+    int         len;
+    bool        cut;   // the text goes on after this line, and the line ends in "..."
+} SummaryLine;
+
+#define SUMMARY_DESC_LINES 3
+
+// The feed summary as one measurement: the renderer draws what it measured,
+// thus the height that the rows follow is the height of what is on the screen.
+typedef struct {
+    int         art_size;       // 0 where the feed has no artwork
+    int         text_x;
+    int         text_max_w;
+    int         title_h;
+    int         author_h;       // 0 where the feed has no author
+    int         desc_line_h;
+    int         desc_count;
+    SummaryLine desc[SUMMARY_DESC_LINES];
+    int         height;         // the block and its padding
+} FeedSummary;
+
+// The space above and below the summary, and between its lines.
+#define SUMMARY_PAD_Y      2
+#define SUMMARY_ART_GAP_X  8
+#define SUMMARY_TITLE_GAP  1
+#define SUMMARY_AUTHOR_GAP 2
+
+// Copies at most `len` bytes of `text` into `buf`, whole characters only, thus
+// a slice that a buffer cuts short stays valid UTF-8.
+static int copy_slice(char* buf, size_t buf_size, const char* text, int len) {
+    if (len >= (int)buf_size) len = buf_size - 1;
+    int n = 0;
+    while (n < len) {
+        int bytes = UTF8_charBytes(text + n);
+        if (bytes <= 0 || n + bytes > len) break;
+        n += bytes;
+    }
+    memcpy(buf, text, n);
+    buf[n] = '\0';
+    return n;
+}
+
+static int text_width(TTF_Font* font, const char* text, int len) {
+    // The measure takes a bounded copy, thus a slice of any length is safe.
+    char buf[512];
+    copy_slice(buf, sizeof(buf), text, len);
+    int w = 0;
+    TTF_SizeUTF8(font, buf, &w, NULL);
+    return w;
+}
+
+// Wraps the description into at most SUMMARY_DESC_LINES lines of `max_w`. The
+// first line break of the text ends it, as before. Each line is a slice of the
+// text. The wrap of the platform is not used: it copies the text with no bound,
+// and its cut of the last line can split a UTF-8 sequence.
+static int wrap_description(TTF_Font* font, const char* text, int max_w, SummaryLine* lines) {
+    const char* end = text;
+    while (*end && *end != '\n' && *end != '\r') end++;
+
+    int count = 0;
+    const char* p = text;
+    while (p < end && count < SUMMARY_DESC_LINES) {
+        // The longest run of words that fits
+        const char* last_fit = NULL;
+        const char* q = p;
+        while (q < end) {
+            const char* word_end = q;
+            while (word_end < end && *word_end != ' ') word_end++;
+            if (text_width(font, p, (int)(word_end - p)) > max_w) break;
+            last_fit = word_end;
+            q = word_end;
+            while (q < end && *q == ' ') q++;
+        }
+        if (!last_fit) {
+            // One word is wider than the line: the line takes it, and it is cut
+            last_fit = q;
+            while (last_fit < end && *last_fit != ' ') last_fit++;
+        }
+
+        lines[count].start = p;
+        lines[count].len   = (int)(last_fit - p);
+        lines[count].cut   = false;
+        count++;
+
+        p = last_fit;
+        while (p < end && *p == ' ') p++;
+    }
+
+    if (p < end && count > 0) {
+        // The text goes on past the last line, thus the line ends in "..."
+        SummaryLine* last = &lines[count - 1];
+        int dots = text_width(font, "...", 3);
+        while (last->len > 0 && text_width(font, last->start, last->len) + dots > max_w) {
+            last->len--;
+            // Do not cut a UTF-8 sequence
+            while (last->len > 0 && ((unsigned char)last->start[last->len] & 0xC0) == 0x80) last->len--;
+        }
+        last->cut = true;
+    }
+    return count;
+}
+
+// The height of a full text block of the summary: the title, an author and
+// each description line. The artwork takes this height, thus the summary is as
+// high as its text and no higher.
+static int summary_text_block_height(void) {
+    return TTF_FontHeight(Fonts_getMedium()) + SCALE1(SUMMARY_TITLE_GAP)
+         + TTF_FontHeight(Fonts_getSmall()) + SCALE1(SUMMARY_AUTHOR_GAP)
+         + SUMMARY_DESC_LINES * TTF_FontHeight(Fonts_getTiny());
+}
+
+// The summary of the feed on the screen, as measured on its last frame. A
+// download in progress redraws the screen each frame, thus the measure is kept.
+static FeedSummary summary_cache;
+static const PodcastFeed* summary_cache_ptr = NULL;  // the lines point into it
+static char        summary_cache_feed[17];
+static char        summary_cache_desc[PODCAST_MAX_DESCRIPTION];  // a refresh can change it
+static int         summary_cache_w = 0;
+static bool        summary_cache_art = false;
+static bool        summary_cache_author = false;  // a refresh can add or drop it
+
+static FeedSummary measure_feed_summary(SDL_Surface* screen, const PodcastFeed* feed,
+                                        SDL_Surface* art) {
+    if (summary_cache_ptr == feed && summary_cache_w == screen->w
+        && summary_cache_art == (art != NULL)
+        && summary_cache_author == (feed->author[0] != '\0')
+        && strcmp(summary_cache_feed, feed->feed_id) == 0
+        && strcmp(summary_cache_desc, feed->description) == 0) {
+        return summary_cache;
+    }
+
+    FeedSummary s = {0};
+    int pad = SCALE1(PADDING);
+
+    s.art_size = art ? art->w : 0;
+
+    s.text_x     = art ? pad + s.art_size + SCALE1(SUMMARY_ART_GAP_X) : pad;
+    s.text_max_w = screen->w - s.text_x - pad;
+
+    s.title_h  = TTF_FontHeight(Fonts_getMedium());
+    s.author_h = feed->author[0] ? TTF_FontHeight(Fonts_getSmall()) : 0;
+
+    s.desc_line_h = TTF_FontHeight(Fonts_getTiny());
+    s.desc_count  = feed->description[0]
+                  ? wrap_description(Fonts_getTiny(), feed->description, s.text_max_w, s.desc)
+                  : 0;
+
+    int text_h = s.title_h + SCALE1(SUMMARY_TITLE_GAP);
+    if (s.author_h) text_h += s.author_h + SCALE1(SUMMARY_AUTHOR_GAP);
+    text_h += s.desc_count * s.desc_line_h;
+
+    int block = text_h > s.art_size ? text_h : s.art_size;
+    s.height = block + 2 * SCALE1(SUMMARY_PAD_Y);
+
+    summary_cache     = s;
+    summary_cache_ptr = feed;
+    snprintf(summary_cache_feed, sizeof(summary_cache_feed), "%s", feed->feed_id);
+    snprintf(summary_cache_desc, sizeof(summary_cache_desc), "%s", feed->description);
+    summary_cache_w      = screen->w;
+    summary_cache_art    = art != NULL;
+    summary_cache_author = feed->author[0] != '\0';
+    return s;
+}
+
+// Draws the summary with its top at `y`. Draws only what measure_feed_summary()
+// counted, thus the two never differ.
+static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_Surface* art,
+                              const FeedSummary* s, int y) {
+    int pad = SCALE1(PADDING);
+    int top = y + SCALE1(SUMMARY_PAD_Y);
+    char truncated[256];
+
+    if (art) {
+        SDL_Rect art_dst = {pad, top, s->art_size, s->art_size};
+        SDL_BlitScaled(art, NULL, screen, &art_dst);
+    }
+
+    int ty = top;
+
+    // Title (medium font, white). The title of a feed fits `truncated`.
+    GFX_truncateText(Fonts_getMedium(), feed->title, truncated, s->text_max_w, 0);
+    SDL_Surface* t = TTF_RenderUTF8_Blended(
+        Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
+    if (t) {
+        SDL_BlitSurface(t, NULL, screen, &(SDL_Rect){s->text_x, ty});
+        SDL_FreeSurface(t);
+    }
+    ty += s->title_h + SCALE1(SUMMARY_TITLE_GAP);
+
+    // Author (small font, gray)
+    if (s->author_h) {
+        GFX_truncateText(Fonts_getSmall(), feed->author, truncated, s->text_max_w, 0);
+        SDL_Surface* a = TTF_RenderUTF8_Blended(
+            Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        if (a) {
+            SDL_BlitSurface(a, NULL, screen, &(SDL_Rect){s->text_x, ty});
+            SDL_FreeSurface(a);
+        }
+        ty += s->author_h + SCALE1(SUMMARY_AUTHOR_GAP);
+    }
+
+    // Description (tiny font, gray), the lines that the measure gave
+    for (int i = 0; i < s->desc_count; i++) {
+        char line[512];
+        copy_slice(line, sizeof(line) - 3, s->desc[i].start, s->desc[i].len);
+        if (s->desc[i].cut) strcat(line, "...");
+        SDL_Surface* d = TTF_RenderUTF8_Blended(
+            Fonts_getTiny(), line, Theme_getColor(THEME_ROLE_SECONDARY, false));
+        if (d) {
+            // One word wider than the line is a line of its own: it stops at the
+            // right margin
+            SDL_Rect src = {0, 0, d->w > s->text_max_w ? s->text_max_w : d->w, d->h};
+            SDL_BlitSurface(d, &src, screen, &(SDL_Rect){s->text_x, ty});
+            SDL_FreeSurface(d);
+        }
+        ty += s->desc_line_h;
+    }
+}
+
 void render_podcast_episodes(SDL_Surface* screen, int show_setting,
                               int feed_index, int selected, int* scroll) {
     GFX_clear(screen);
@@ -1035,45 +1261,38 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
 
     int count = feed->episode_count;
 
-    render_screen_header(screen, "Episodes", show_setting);
+    render_screen_header(screen, feed->title, show_setting);
 
-    // Viewport (below fixed header, above buttons)
-    int base_y = SCALE1(PADDING + PILL_SIZE + BUTTON_MARGIN);
-    int viewport_h = screen->h - base_y - SCALE1(PADDING + BUTTON_SIZE + BUTTON_MARGIN + 8);
-    int pad = SCALE1(PADDING);
+    // The stream takes the room of a list: under the top pill row, and one scroll
+    // indicator above the bottom pill row
+    ListLayout list = calc_list_layout(screen);
+    int base_y = list.list_y;
+    int viewport_h = list.list_h;
+    int item_h = list.rich_item_h;
 
-    // Content dimensions (info area + episodes — all scrollable together)
-    int info_area_h = SCALE1(PILL_SIZE) * 9 / 2 - base_y;
-    int item_h = calc_list_layout(screen).rich_item_h;
-    // First episode sits at bottom of viewport when scroll=0
-    int episodes_start = viewport_h - item_h;
-    int total_content_h = episodes_start + count * item_h;
+    // The summary and the rows are one stream of content. The summary takes the
+    // height of what it draws, and the first row follows it.
+    SDL_Surface* art = get_episode_header_art(feed->feed_id, summary_text_block_height());
+    FeedSummary summary = measure_feed_summary(screen, feed, art);
+    // The summary keeps its own padding, thus the first row follows it with no gap
+    PodcastEpisodeLayout geometry = PodcastEpisodeLayout_compute(
+        summary.height, 0, viewport_h, item_h, count, selected, *scroll);
+    *scroll = geometry.scroll;
+    int episodes_start = geometry.first_row_y;
+    int draw_offset = base_y - *scroll;
 
-    // Empty state — show info without scrolling
+    // Set clip rect for scrollable area
+    SDL_Rect clip = {0, base_y, hw, viewport_h};
+    SDL_SetClipRect(screen, &clip);
+
+    if (draw_offset + summary.height > base_y && draw_offset < base_y + viewport_h) {
+        draw_feed_summary(screen, feed, art, &summary, draw_offset);
+    }
+
+    // Empty state: the summary, and the message in the room under it
     if (count == 0) {
-        // Render info area at fixed position
-        int img_pad = SCALE1(2);
-        int img_size = info_area_h - img_pad * 2;
-        SDL_Surface* header_art = get_episode_header_art(feed->feed_id, img_size);
-        bool has_art = (header_art != NULL);
-        if (has_art) {
-            SDL_Rect art_dst = {pad, base_y + img_pad, img_size, img_size};
-            SDL_BlitScaled(header_art, NULL, screen, &art_dst);
-        }
-        int text_x = has_art ? (pad + img_size + SCALE1(8)) : pad;
-        int text_max_w = hw - text_x - pad;
-        int ty = base_y + img_pad;
-        GFX_truncateText(Fonts_getMedium(), feed->title, truncated, text_max_w, 0);
-        SDL_Surface* t = TTF_RenderUTF8_Blended(
-            Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
-        if (t) { SDL_BlitSurface(t, NULL, screen, &(SDL_Rect){text_x, ty}); ty += t->h + SCALE1(1); SDL_FreeSurface(t); }
-        if (feed->author[0]) {
-            GFX_truncateText(Fonts_getSmall(), feed->author, truncated, text_max_w, 0);
-            SDL_Surface* a = TTF_RenderUTF8_Blended(
-                Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-            if (a) { SDL_BlitSurface(a, NULL, screen, &(SDL_Rect){text_x, ty}); SDL_FreeSurface(a); }
-        }
-        int center_y = base_y + info_area_h + (viewport_h - info_area_h) / 2;
+        int center_y = draw_offset + summary.height
+                     + (viewport_h - summary.height) / 2;
         const char* msg = "No episodes available";
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
@@ -1081,152 +1300,10 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
             SDL_FreeSurface(text);
         }
+        SDL_SetClipRect(screen, NULL);
+        render_stream_scroll_indicators(screen, &list, *scroll, geometry.content_h);
         GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
         return;
-    }
-
-    // Scroll adjustment: keep selected episode visible
-    // When selected == 0 (first item or wrapped to top), show info area
-    {
-        int sel_y = episodes_start + selected * item_h;
-        int sel_bottom = sel_y + item_h;
-
-        if (selected == 0) {
-            *scroll = 0;
-        } else {
-            if (sel_bottom - *scroll > viewport_h)
-                *scroll = sel_bottom - viewport_h;
-            if (sel_y < *scroll)
-                *scroll = sel_y;
-        }
-    }
-
-    // Clamp scroll
-    if (*scroll < 0) *scroll = 0;
-    if (total_content_h > viewport_h) {
-        if (*scroll > total_content_h - viewport_h)
-            *scroll = total_content_h - viewport_h;
-    } else {
-        *scroll = 0;
-    }
-
-    int draw_offset = base_y - *scroll;
-
-    // Set clip rect for scrollable area
-    SDL_Rect clip = {0, base_y, hw, viewport_h};
-    SDL_SetClipRect(screen, &clip);
-
-    // === Info Area (content_y = 0, scrolls with episodes) ===
-    {
-        int info_sy = draw_offset;  // screen y of info area top
-        if (info_sy + info_area_h > base_y && info_sy < base_y + viewport_h) {
-            int img_pad = SCALE1(2);
-            int img_size = info_area_h - img_pad * 2;
-            SDL_Surface* header_art = get_episode_header_art(feed->feed_id, img_size);
-            bool has_art = (header_art != NULL);
-
-            if (has_art) {
-                SDL_Rect art_dst = {pad, info_sy + img_pad, img_size, img_size};
-                SDL_BlitScaled(header_art, NULL, screen, &art_dst);
-            }
-
-            int text_x = has_art ? (pad + img_size + SCALE1(8)) : pad;
-            int text_max_w = hw - text_x - pad;
-            int ty = info_sy + img_pad;
-            int info_bottom = info_sy + info_area_h;
-
-            // Title (medium font, white)
-            {
-                GFX_truncateText(Fonts_getMedium(), feed->title, truncated, text_max_w, 0);
-                SDL_Surface* t = TTF_RenderUTF8_Blended(
-                    Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
-                if (t) {
-                    SDL_BlitSurface(t, NULL, screen, &(SDL_Rect){text_x, ty});
-                    ty += t->h + SCALE1(1);
-                    SDL_FreeSurface(t);
-                }
-            }
-
-            // Author (small font, gray)
-            if (feed->author[0]) {
-                GFX_truncateText(Fonts_getSmall(), feed->author, truncated, text_max_w, 0);
-                SDL_Surface* a = TTF_RenderUTF8_Blended(
-                    Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-                if (a) {
-                    SDL_BlitSurface(a, NULL, screen, &(SDL_Rect){text_x, ty});
-                    ty += a->h + SCALE1(2);
-                    SDL_FreeSurface(a);
-                }
-            }
-
-            // Description (tiny font, gray, word-wrapped up to 3 lines)
-            if (feed->description[0]) {
-                TTF_Font* desc_font = Fonts_getTiny();
-                char desc_buf[512];
-                int di;
-                for (di = 0; di < 511 && feed->description[di]
-                     && feed->description[di] != '\n' && feed->description[di] != '\r'; di++)
-                    desc_buf[di] = feed->description[di];
-                desc_buf[di] = '\0';
-
-                int desc_line_h = TTF_FontHeight(desc_font);
-                const char* remaining = desc_buf;
-                int max_lines = 3;
-
-                for (int line = 0; line < max_lines && *remaining; line++) {
-                    if (ty + desc_line_h > info_bottom) break;
-
-                    int tw;
-                    TTF_SizeUTF8(desc_font, remaining, &tw, NULL);
-
-                    if (tw <= text_max_w || line == max_lines - 1) {
-                        GFX_truncateText(desc_font, remaining, truncated, text_max_w, 0);
-                        SDL_Surface* d = TTF_RenderUTF8_Blended(
-                            desc_font, truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-                        if (d) {
-                            SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){text_x, ty});
-                            ty += d->h;
-                            SDL_FreeSurface(d);
-                        }
-                        break;
-                    }
-
-                    const char* p = remaining;
-                    const char* last_break = remaining;
-                    while (*p) {
-                        while (*p && *p != ' ') p++;
-                        int seg_len = p - remaining;
-                        char measure[512];
-                        if (seg_len >= 512) seg_len = 511;
-                        memcpy(measure, remaining, seg_len);
-                        measure[seg_len] = '\0';
-                        TTF_SizeUTF8(desc_font, measure, &tw, NULL);
-                        if (tw > text_max_w) break;
-                        last_break = p;
-                        while (*p == ' ') p++;
-                    }
-
-                    if (last_break == remaining) break;
-
-                    int line_len = last_break - remaining;
-                    char line_buf[512];
-                    if (line_len >= 512) line_len = 511;
-                    memcpy(line_buf, remaining, line_len);
-                    line_buf[line_len] = '\0';
-
-                    SDL_Surface* d = TTF_RenderUTF8_Blended(
-                        desc_font, line_buf, Theme_getColor(THEME_ROLE_SECONDARY, false));
-                    if (d) {
-                        SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){text_x, ty});
-                        ty += d->h;
-                        SDL_FreeSurface(d);
-                    }
-
-                    remaining = last_break;
-                    while (*remaining == ' ') remaining++;
-                }
-            }
-        }
     }
 
     // === Episodes (pixel-based positioning) ===
@@ -1404,6 +1481,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
     }
 
     SDL_SetClipRect(screen, NULL);
+    render_stream_scroll_indicators(screen, &list, *scroll, geometry.content_h);
 
     // Dynamic button hints based on selected episode's state
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -1602,7 +1680,7 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
     }
 
     // Scroll indicators
-    render_scroll_indicators(screen, *scroll, layout.items_per_page, queue_count);
+    render_scroll_indicators(screen, &layout, *scroll, queue_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);

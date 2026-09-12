@@ -56,11 +56,13 @@ static ListNav queue_nav = {
 static DownloaderResult* results = NULL;
 static int result_count = 0;
 
+
 YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* show_setting) {
     Downloader_startUpdateCheck();
 
     int dirty = 1;
     YtdlpUiState shown = YTDLP_UI_UNCHECKED;
+    bool outer_title_defer = ScreenTitle_start(false);
 
     // One screen for the whole thing: it checks, then asks, then installs, and
     // the layout only gains a progress bar on the way. A dialog on top would
@@ -121,9 +123,11 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         } else {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 
     Downloader_refreshVersion();
+    ScreenTitle_start(outer_title_defer);
     return YTDLP_INSTALL_DONE;
 }
 
@@ -158,6 +162,7 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
     DownloaderInternalState state = DOWNLOADER_INTERNAL_MENU;
     int dirty = 1;
     char search_query[256] = "";
+    ScreenTitle_start(false);
 
     ListNav_scrollToTop(&menu_nav);
     ListNav_scrollToTop(&queue_nav);
@@ -398,5 +403,6 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         } else {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 }

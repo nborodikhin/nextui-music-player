@@ -374,7 +374,7 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
     }
 
     // Scroll indicators
-    render_scroll_indicators(screen, *queue_scroll, layout.items_per_page, qcount);
+    render_scroll_indicators(screen, &layout, *queue_scroll, qcount);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -441,8 +441,7 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     // not the yt-dlp binary on its own
     bool installing = status.fresh_install;
 
-    render_screen_header(screen,
-                         installing ? "Installing Youtube helpers" : "Updating Youtube helpers",
+    render_screen_header(screen, installing ? "Installing Youtube helpers" : "Updating Youtube helpers",
                          show_setting);
 
     // Current version

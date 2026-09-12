@@ -10,6 +10,7 @@
 #include "ui_main.h"
 #include "ui_music.h"
 #include "ui_radio.h"
+#include "ui_utils.h"
 #include "player.h"
 #include "radio.h"
 #include "spectrum.h"
@@ -338,6 +339,11 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
         // Buttons just released - start timer
         overlay_release_time = SDL_GetTicks();
     }
+    else if (overlay_buttons_active) {
+        // A press ends the release timer, thus a hold that follows a release
+        // keeps its pill. The platform shows the pill on each auto-repeat.
+        overlay_release_time = 0;
+    }
 
     // Call platform PWR_update
     PWR_update(dirty, show_setting, NULL, NULL);
@@ -373,6 +379,7 @@ bool ModuleCommon_stopSignalled(void) {
 
 void ModuleCommon_frameBegin(void) {
     GFX_startFrame();
+    ScreenTitle_frameBegin();
     PAD_poll();
     TestControl_tick();
     Toast_tick();

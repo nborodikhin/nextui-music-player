@@ -24,6 +24,7 @@
 // Help state for controls dialog
 static const char* library_items[] = {"Files", "Playlists", "Downloader"};
 
+
 static void render_library_menu(SDL_Surface* screen, int show_setting, int menu_selected,
                                 int menu_scroll) {
     SimpleMenuConfig config = {
@@ -47,6 +48,8 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
     };
     int dirty = 1;
     int show_setting = 0;
+
+    ScreenTitle_start(false);
 
     while (1) {
         ModuleCommon_frameBegin();
@@ -88,7 +91,10 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
             }
 
             // Sub-module returned to library menu. Start a fresh frame: it may
-            // have recreated the display, freeing this frame's surface.
+            // have recreated the display, freeing this frame's surface. The
+            // title starts again, in the mode of this menu and not of the
+            // browser, thus a path that was in transition does not stay.
+            ScreenTitle_start(false);
             dirty = 1;
             continue;
         }
@@ -112,5 +118,6 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
         } else {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 }

@@ -7,6 +7,7 @@
 #include "api.h"      // For SDL types and TTF
 #include "player.h"   // For AudioFormat
 #include "ui_theme.h"
+#include "screen_title.h"
 
 // Format duration as MM:SS
 void format_time(char* buf, int ms);
@@ -75,16 +76,9 @@ int top_of_the_chip_box(SDL_Surface* screen, int chip_h);
 // If status group is not displayed, the height could be defined by `chip_h`.
 int total_header_height(SDL_Surface* screen, int chip_h);
 
-// The total height of the bottom pill row including all applicable paddings,
-// which defines the bottom of the area usable for content.
-//
-// This function is for when pills are used (normal case).
-// See also: `chip_footer_height`
-int pill_footer_height(void);
 
 // The total height of the bottom chip footer of a screen including
 // all applicable paddings, used when pills are not used (e.g. playing screen).
-// See also: `pill_footer_height`
 int chip_footer_height(int row_h);
 
 // The y of the top of a box `box_h` high, which takes the role of the bottom
@@ -94,8 +88,37 @@ int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
 
-// Render standard screen header (title pill + hardware status)
-void render_screen_header(SDL_Surface* screen, const char* title, int show_setting);
+// The area of the screen title on a screen whose status group is `status_w` wide.
+// Pass 0 in `status_w` where the platform draws no status group. The area ends one
+// inset before the status group, thus a title never runs under it.
+SDL_Rect screen_title_area(SDL_Surface* screen, int status_w, int text_h);
+
+// Paints `title` at rest in `area` of the surface and returns true. A title that
+// moves is not painted here, and false comes back: its marquee goes on
+// LAYER_SCROLLTEXT, thus a frame of the marquee costs no redraw of the surface.
+bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
+                        SDL_Color color, SDL_Rect area, uint32_t now);
+
+// Starts the screen title of a module, on its entry. Pass true in `defer` to
+// let a change of text scroll in while the title moves, as the file browser
+// does; with false a change replaces the text at once. Returns the mode of the
+// title before, thus a nested loop such as the keyboard starts the outer title
+// again with that mode when it returns.
+bool ScreenTitle_start(bool defer);
+
+// Call at the start of each frame, before any paint of LAYER_SCROLLTEXT.
+void ScreenTitle_frameBegin(void);
+
+// Call once at the end of each frame of a module loop, after its flip. Pass true
+// in `has_header` where the screen of this frame draws a standard header. Sets
+// `dirty` where the title needs a frame of the surface, and paints the marquee
+// on LAYER_SCROLLTEXT where the row of the list did not paint the layer this
+// frame. A screen with no header leaves the layer to its own painter.
+void ScreenTitle_frameEnd(int* dirty, bool has_header);
+
+// Draws the status group and the screen title `text`. The title of a module is
+// one state that ScreenTitle_start() begins.
+void render_screen_header(SDL_Surface* screen, const char* text, int show_setting);
 
 // Adjust scroll offset to keep selected item visible
 void adjust_list_scroll(int selected, int* scroll, int items_per_page);
@@ -110,8 +133,10 @@ bool list_page_up(int *selected, int *scroll, int total_count, int items_per_pag
 // Note: non-positive items_per_page is treated as 1.
 bool list_page_down(int *selected, int *scroll, int total_count, int items_per_page);
 
-// Render scroll up/down indicators for lists
-void render_scroll_indicators(SDL_Surface* screen, int scroll, int items_per_page, int total_count);
+// Draws one scroll indicator, `ASSET_SCROLL_UP` or `ASSET_SCROLL_DOWN`, in the
+// color of the unselected secondary role.
+void draw_scroll_indicator(SDL_Surface* screen, int asset, int x, int y);
+
 
 // ============================================
 // Generic List Rendering Helpers
@@ -130,6 +155,24 @@ typedef struct {
 
 // Calculate standard list layout based on screen dimensions
 ListLayout calc_list_layout(SDL_Surface* screen);
+
+// The height of a scroll indicator. A list keeps this room under its last row.
+int scroll_indicator_height(void);
+
+// The x of a scroll indicator, centered on the screen.
+int scroll_indicator_x(SDL_Surface* screen);
+
+// Draws the up indicator above the first row where rows are above the page, and
+// the down indicator directly under the last row of the page where rows are below
+// it. Pass the layout of the rows, thus a rich list gives its own row height.
+void render_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                              int total_count);
+
+// The same two indicators for a stream that scrolls by the pixel through the
+// viewport of `layout`: `scroll` is the content pixel at the top of the viewport
+// and `content_h` the height of the whole stream.
+void render_stream_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                                     int content_h);
 
 // Render a list item's text with optional scrolling for selected items
 // Returns the text_x position after any prefix (useful for chaining)

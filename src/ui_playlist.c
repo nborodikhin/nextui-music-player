@@ -12,7 +12,7 @@
 // Scroll text state for selected item in playlist lists
 static ScrollTextState playlist_scroll = {0};
 
-void render_playlist_list(SDL_Surface *screen, int show_setting,
+void render_playlist_list(SDL_Surface* screen, int show_setting,
                           PlaylistInfo *playlists, int count,
                           int selected, int scroll) {
     GFX_clear(screen);
@@ -46,13 +46,13 @@ void render_playlist_list(SDL_Surface *screen, int show_setting,
                               pos.text_x, pos.text_y, available_width, is_selected);
     }
 
-    render_scroll_indicators(screen, scroll, layout.items_per_page, count);
+    render_scroll_indicators(screen, &layout, scroll, count);
 
     GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
     GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
 }
 
-void render_playlist_detail(SDL_Surface *screen, int show_setting,
+void render_playlist_detail(SDL_Surface* screen, int show_setting,
                             const char *playlist_name,
                             PlaylistTrack *tracks, int count,
                             int selected, int scroll) {
@@ -107,7 +107,7 @@ void render_playlist_detail(SDL_Surface *screen, int show_setting,
                               text_x, pos.text_y, available_width, is_selected);
     }
 
-    render_scroll_indicators(screen, scroll, layout.items_per_page, count);
+    render_scroll_indicators(screen, &layout, scroll, count);
 
     GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
     GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);

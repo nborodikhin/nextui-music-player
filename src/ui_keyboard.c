@@ -320,7 +320,8 @@ void UIKeyboard_render(SDL_Surface* screen, const KeyboardUiState* state) {
     const char* text = state->text;
 
     GFX_clear(screen);
-    render_screen_header(screen, state->title ? state->title : "", state->show_setting);
+    render_screen_header(screen, state->title ? state->title : "",
+                         state->show_setting);
 
     const KeyboardLayout* layout = state->layout;
     bool shifted = (state->shift != SHIFT_OFF);

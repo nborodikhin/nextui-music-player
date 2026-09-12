@@ -2,7 +2,12 @@
 #define __BROWSER_H__
 
 #include <stdbool.h>
+#include "defines.h"
 #include "player.h"  // For AudioFormat
+
+// The root of the library: the browser starts here, and a title gives a path
+// from here.
+#define MUSIC_PATH SDCARD_PATH "/Music"
 
 // File entry structure
 typedef struct {

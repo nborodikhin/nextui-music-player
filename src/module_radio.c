@@ -192,12 +192,15 @@ static void refresh_gpu_layers(int dirty) {
     if (repaint_layer && !dirty) paint_radio_layer();
 }
 
+
 ModuleExitReason RadioModule_run(DisplayContext* display) {
     Radio_init();
 
     RadioInternalState state = RADIO_INTERNAL_LIST;
     int dirty = 1;
     int show_setting = 0;
+
+    ScreenTitle_start(false);
 
     screen_off = false;
     ModuleCommon_resetScreenOffHint();
@@ -708,5 +711,6 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
         } else if (!screen_off) {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, state != RADIO_INTERNAL_PLAYING && !screen_off);
     }
 }

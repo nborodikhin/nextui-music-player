@@ -9,8 +9,8 @@
 #include "menu_rows.h"
 
 // Render the main menu.
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll,
-                 const MenuRows* rows);
+void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
+                 int menu_scroll, const MenuRows* rows);
 
 // Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title);
