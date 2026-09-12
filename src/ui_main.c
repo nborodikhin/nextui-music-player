@@ -91,8 +91,8 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 }
 
 // Render the main menu
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected, int menu_scroll,
-                 const MenuRows* rows) {
+void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
+                 int menu_scroll, const MenuRows* rows) {
     current_rows = *rows;
 
     const char* items[MENU_ROWS_MAX];

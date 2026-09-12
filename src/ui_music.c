@@ -32,14 +32,22 @@ static char last_lyric_line[256] = "";
 static char last_next_lyric_line[256] = "";
 
 // Render the file browser
-void render_browser(SDL_Surface *screen, int show_setting, BrowserContext *browser) {
+void render_browser(SDL_Surface* screen, int show_setting,
+                    BrowserContext *browser) {
     GFX_clear(screen);
 
     int hw = screen->w;
     int hh = screen->h;
     char truncated[256];
 
-    render_screen_header(screen, "Music Player", show_setting);
+    // The path of the directory from the music root, thus the user sees where the
+    // rows are. The root itself is "/".
+    const char* path = browser->current_path;
+    size_t root_len = strlen(MUSIC_PATH);
+    if (strncmp(path, MUSIC_PATH, root_len) == 0 && (path[root_len] == '/' || path[root_len] == '\0')) {
+        path += root_len;
+    }
+    render_screen_header(screen, path[0] ? path : "/", show_setting);
 
     // Empty state at root: no playable music anywhere
     if (Browser_countAudioFiles(browser) == 0 && !Browser_hasParent(browser)) {
@@ -123,7 +131,7 @@ void render_browser(SDL_Surface *screen, int show_setting, BrowserContext *brows
                               text_x, pos.text_y, available_width, selected);
     }
 
-    render_scroll_indicators(screen, browser->scroll_offset, browser->items_per_page, browser->entry_count);
+    render_scroll_indicators(screen, &layout, browser->scroll_offset, browser->entry_count);
 
     // Button hints
     GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);

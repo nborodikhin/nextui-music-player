@@ -24,6 +24,7 @@ typedef enum {
     SETTINGS_STATE_UPDATING
 } SettingsState;
 
+
 ModuleExitReason SettingsModule_run(DisplayContext* display) {
     SettingsState state = SETTINGS_STATE_MENU;
     ListNav nav = {
@@ -37,6 +38,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
 
     // What the About screen last painted, so a change repaints it exactly once
     UpdateUiState shown_update_ui = UPDATE_UI_UNCHECKED;
+
+    ScreenTitle_start(false);
 
     while (1) {
         ModuleCommon_frameBegin();
@@ -257,5 +260,6 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
         } else {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 }

@@ -23,8 +23,8 @@ static void format_cache_size(long bytes, char* buf, int buf_size) {
     }
 }
 
-void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                          int menu_scroll) {
+void render_settings_menu(SDL_Surface* screen, int show_setting,
+                          int menu_selected, int menu_scroll) {
     GFX_clear(screen);
 
     int hw = screen->w;
@@ -139,7 +139,7 @@ void render_settings_menu(SDL_Surface* screen, int show_setting, int menu_select
     }
 
     // Scroll indicators when the list overflows the visible window
-    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, SETTINGS_ITEM_COUNT);
+    render_scroll_indicators(screen, &layout, menu_scroll, SETTINGS_ITEM_COUNT);
 
     // Button hints
     GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);

@@ -84,7 +84,7 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
 
     }
 
-    render_scroll_indicators(screen, *radio_scroll, layout.items_per_page, station_count);
+    render_scroll_indicators(screen, &layout, *radio_scroll, station_count);
 
     // Show note for users using default stations (no custom stations yet)
     if (!Radio_hasUserStations()) {
@@ -379,7 +379,7 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
 
     }
 
-    render_scroll_indicators(screen, *add_country_scroll, layout.items_per_page, country_count);
+    render_scroll_indicators(screen, &layout, *add_country_scroll, country_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -504,7 +504,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
 
     }
 
-    render_scroll_indicators(screen, *add_station_scroll, layout.items_per_page, sorted_count);
+    render_scroll_indicators(screen, &layout, *add_station_scroll, sorted_count);
 
     // Button hints - dynamic based on whether selected station is already added
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -618,10 +618,11 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
     if (max_scroll > 0) {
         int ox = (hw - SCALE1(24)) / 2;
         if (*help_scroll > 0) {
-            GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen, &(SDL_Rect){ox, content_start_y - SCALE1(12)});
+            draw_scroll_indicator(screen, ASSET_SCROLL_UP, ox, content_start_y - SCALE1(12));
         }
         if (*help_scroll < max_scroll) {
-            GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen, &(SDL_Rect){ox, hh - button_area_h - bottom_padding - SCALE1(4)});
+            draw_scroll_indicator(screen, ASSET_SCROLL_DOWN, ox,
+                                  hh - button_area_h - bottom_padding - SCALE1(4));
         }
     }
 

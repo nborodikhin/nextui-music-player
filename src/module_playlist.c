@@ -60,6 +60,7 @@ static void refresh_detail(void) {
     M3U_loadTracks(playlists[current_playlist_index].path, detail_tracks, PLAYLIST_MAX_TRACKS, &detail_track_count);
 }
 
+
 ModuleExitReason PlaylistModule_run(DisplayContext* display) {
     M3U_init();
     Keyboard_init();
@@ -68,6 +69,8 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
     PlaylistInternalState state = PLAYLIST_INTERNAL_LIST;
     int dirty = 1;
     int show_setting = 0;
+
+    ScreenTitle_start(false);
 
     while (1) {
         ModuleCommon_frameBegin();
@@ -206,7 +209,9 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                     PlayerModule_setResumePlaylistPath(playlists[current_playlist_index].path);
                     PlayerModule_runWithPlaylist(display, detail_tracks, detail_track_count, detail_nav.selected);
                     PlayerModule_setResumePlaylistPath(NULL);
-                    // On return, refresh and go back to detail
+                    // On return, refresh and go back to detail. The title starts
+                    // again in the mode of this screen.
+                    ScreenTitle_start(false);
                     refresh_detail();
                     ListNav_reconcile(&detail_nav, detail_track_count);
                     // The player may have recreated the display - start a fresh frame.
@@ -245,7 +250,8 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             }
 
             if (state == PLAYLIST_INTERNAL_LIST) {
-                render_playlist_list(screen, show_setting, playlists, playlist_count, list_nav.selected, list_nav.scroll);
+                render_playlist_list(screen, show_setting, playlists, playlist_count,
+                                     list_nav.selected, list_nav.scroll);
             } else {
                 render_playlist_detail(screen, show_setting, playlists[current_playlist_index].name,
                                        detail_tracks, detail_track_count, detail_nav.selected, detail_nav.scroll);
@@ -260,5 +266,6 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
         } else {
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 }

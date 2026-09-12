@@ -197,6 +197,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     *dirty = 1;
 }
 
+
 ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
     Keyboard_init();
@@ -212,6 +213,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     int dirty = 1;
     int show_setting = 0;
 
+    ScreenTitle_start(false);
     screen_off = false;
     ModuleCommon_resetScreenOffHint();
     ModuleCommon_recordInputTime();
@@ -1090,6 +1092,9 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
         } else if (!screen_off) {
             GFX_sync();
         }
+        // The playing screen and the seek that leads to it have no standard header
+        ScreenTitle_frameEnd(&dirty, state != PODCAST_INTERNAL_PLAYING
+                                     && state != PODCAST_INTERNAL_SEEKING && !screen_off);
     }
 }
 

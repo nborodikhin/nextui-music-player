@@ -24,6 +24,14 @@
 # float arithmetic, with the FFT and the paint left in spectrum.c. It declares
 # itself in spectrum.h, which holds no platform include.
 #
+# screen_title.c is the same shape as toast_state.c: the text of a title and
+# where its marquee is, with the clock and the measured widths passed in and the
+# paint left in ui_utils.c.
+#
+# podcast_episode_layout.c is integer geometry, as list_nav.c is: the summary
+# height, the viewport and the rows come in, and the scroll comes out. Its test
+# links list_nav.c for the wrap of the cursor.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -37,7 +45,8 @@ BIN      = bin
 
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
-           $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling
+           $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
+           $(BIN)/test_podcast_episode_layout
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -77,6 +86,13 @@ $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h te
 
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
+
+$(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c
+
+$(BIN)/test_podcast_episode_layout: test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c \
+                                    $(SRC)/podcast_episode_layout.h $(SRC)/list_nav.c test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c $(SRC)/list_nav.c
 
 $(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c

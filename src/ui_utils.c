@@ -117,6 +117,30 @@ void ScrollText_activateAfterDelay(ScrollTextState* state) {
     }
 }
 
+// The screen title. One standard header is on the screen at a time, thus one
+// state serves each module: a module starts it on entry and the header renders
+// through it. A title that moves is on LAYER_SCROLLTEXT with the marquee of the
+// selected row, thus the two share one clear and one flip a frame. The row
+// paints through the scroll text of the platform, which flips by itself, thus
+// the title goes on the layer before it.
+static ScreenTitle title_state;
+static bool        header_drawn = false;   // the last render drew a standard header
+static SDL_Rect    header_area;
+static bool        layer_painted_this_frame = false;  // by a row or the title
+static bool        layer_holds_title = false;
+
+// Where the display shows the title at rest. The surface has the title one flip
+// before the display does, and a present of the layer in between shows the old
+// surface, thus the layer keeps the title until the flip.
+typedef enum {
+    TITLE_OFF_SURFACE,
+    TITLE_SURFACE_PENDING,
+    TITLE_ON_SURFACE,
+} TitleSurface;
+static TitleSurface title_surface = TITLE_OFF_SURFACE;
+
+static void paint_title_on_layer(uint32_t now);
+
 // Update scroll animation only (for GPU mode, doesn't redraw screen)
 // Call this when dirty=0 but scrolling is active - uses saved position from last render
 void ScrollText_animateOnly(ScrollTextState* state) {
@@ -125,6 +149,8 @@ void ScrollText_animateOnly(ScrollTextState* state) {
 
     // Just update the scroll layer - don't redraw main screen
     GFX_clearLayers(LAYER_SCROLLTEXT);
+    paint_title_on_layer(SDL_GetTicks());
+    layer_painted_this_frame = true;
     GFX_scrollTextTexture(
         state->last_font,
         state->text,
@@ -163,8 +189,12 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
 
     // If text fits (or still in delay/transition), render normally without scrolling
     if (!state->needs_scroll) {
-        // Clear scroll layer to remove any previous scrolling text
+        // Clear scroll layer to remove any previous scrolling text. The title
+        // that moves goes back on it, thus the flip of the surface that follows
+        // shows the title and not a blink.
         GFX_clearLayers(LAYER_SCROLLTEXT);
+        paint_title_on_layer(SDL_GetTicks());
+        layer_painted_this_frame = true;
         SDL_Surface* surf = TTF_RenderUTF8_Blended(font, state->text, color);
         if (surf) {
             SDL_Rect src = {0, 0, surf->w > state->max_width ? state->max_width : surf->w, surf->h};
@@ -177,6 +207,8 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
     if (state->use_gpu_scroll) {
         // GPU mode: Use NextUI's scroll text (has pill background)
         GFX_clearLayers(LAYER_SCROLLTEXT);
+        paint_title_on_layer(SDL_GetTicks());
+        layer_painted_this_frame = true;
         GFX_scrollTextTexture(
             font,
             state->text,
@@ -301,13 +333,6 @@ int total_header_height(SDL_Surface* screen, int chip_h) {
                                            : SCALE1(PADDING) + chip_h + SCALE1(PADDING);
 }
 
-// The room that the foot of a screen takes. A screen that draws button hints gives
-// the pill row and a margin on each side of it. A screen that draws none gives the
-// margin, the row of its own, and the margin again.
-int pill_footer_height(void) {
-    return SCALE1(PADDING + PILL_SIZE + PADDING);
-}
-
 int chip_footer_height(int row_h) {
     return SCALE1(PADDING) + row_h + SCALE1(PADDING);
 }
@@ -316,10 +341,185 @@ int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h) {
     return screen->h - SCALE1(PADDING) - box_h;
 }
 
-// Render standard screen header (title pill + hardware status)
-void render_screen_header(SDL_Surface* screen, const char* title, int show_setting) {
-    int hw = screen->w;
-    char truncated[256];
+SDL_Rect screen_title_area(SDL_Surface* screen, int status_w, int text_h) {
+    // The same inset on each side, thus the title and the status group keep one gap.
+    int x     = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
+    int right = screen->w - SCALE1(PADDING) - SCALE1(BUTTON_PADDING) - status_w;
+    // The title keeps a row as high as a selection pill, with the status group
+    // or without it, thus the list below it starts on the same line either way.
+    return (SDL_Rect){x, top_of_the_pill_row_box(text_h, true), right - x, text_h};
+}
+
+// A rendered text of the tape. A text is immutable while it is on the tape,
+// thus each renders once, with its wash baked in, and each frame blits it.
+typedef struct {
+    char         text[SCREEN_TITLE_MAX];
+    int          len;
+    bool         cut;
+    SDL_Color    color;
+    SDL_Surface* surf;
+} SegmentCache;
+static SegmentCache segment_cache[SCREEN_TITLE_SEGMENTS];
+
+static bool same_color(SDL_Color a, SDL_Color b) {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+// Returns the rendered text of `seg`, from the cache of slot `slot` where it
+// holds that text already. A cut text washes out over the last `fade_w` of its
+// room: its alpha goes from opaque to transparent, and the text ends there.
+static SDL_Surface* segment_surface(int slot, const ScreenTitleSegment* seg, TTF_Font* font,
+                                    SDL_Color color, int fade_w) {
+    SegmentCache* c = &segment_cache[slot];
+    if (c->surf && c->len == seg->len && c->cut == seg->cut && same_color(c->color, color)
+        && strcmp(c->text, seg->text) == 0) {
+        return c->surf;
+    }
+    if (c->surf) SDL_FreeSurface(c->surf);
+    c->surf = TTF_RenderUTF8_Blended(font, seg->text, color);
+    if (!c->surf) return NULL;
+    snprintf(c->text, sizeof(c->text), "%s", seg->text);
+    c->len   = seg->len;
+    c->cut   = seg->cut;
+    c->color = color;
+
+    if (seg->cut) {
+        SDL_Surface* surf = c->surf;
+        int fade_x = seg->len - fade_w;
+        // The text surface of SDL_ttf is ARGB8888, thus the alpha is the top byte
+        uint32_t* px = surf->pixels;
+        int pitch = surf->pitch / 4;
+        for (int col = fade_x; col < seg->len && col < surf->w; col++) {
+            uint32_t keep = (uint32_t)(255 * (seg->len - col) / fade_w);
+            for (int row = 0; row < surf->h; row++) {
+                uint32_t* p = &px[row * pitch + col];
+                uint32_t a = (*p >> 24) * keep / 255;
+                *p = (*p & 0x00ffffffu) | (a << 24);
+            }
+        }
+    }
+    return c->surf;
+}
+
+static void blit_segment(SDL_Surface* dst, int x, int y, int slot, const ScreenTitleSegment* seg,
+                         TTF_Font* font, SDL_Color color, int fade_w) {
+    SDL_Surface* surf = segment_surface(slot, seg, font, color, fade_w);
+    if (!surf) return;
+    SDL_Rect src = {0, 0, seg->cut ? seg->len : surf->w, surf->h};
+    SDL_BlitSurface(surf, &src, dst, &(SDL_Rect){x, y});
+}
+
+// Blits the slice of the tape that the area shows onto `dst`, with the area at
+// `x`, `y` of `dst`. Each text renders whole and the clip shows the slice, thus
+// no copy of a text has a size limit of its own.
+static void blit_title_slice(SDL_Surface* dst, int x, int y, ScreenTitle* title,
+                             TTF_Font* font, SDL_Color color, int area_w, uint32_t now) {
+    int em  = TTF_FontHeight(font);
+    int gap = title->gap;
+    int offset = ScreenTitle_offset(title, now);
+    if (title->count == 0) return;
+
+    SDL_Rect clip;
+    SDL_GetClipRect(dst, &clip);
+    SDL_SetClipRect(dst, &(SDL_Rect){x, y, area_w, em});
+
+    int pos = x - offset;
+    for (int i = 0; i < title->count && pos < x + area_w; i++) {
+        blit_segment(dst, pos, y, i, &title->seg[i], font, color, em);
+        pos += title->seg[i].len + gap;
+    }
+    if (title->count == 1 && offset > 0 && pos < x + area_w) {
+        // The one text loops: the next copy follows the gap, thus the slice
+        // never shows an end
+        blit_segment(dst, pos, y, 0, &title->seg[0], font, color, em);
+    }
+    SDL_SetClipRect(dst, &clip);
+}
+
+bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
+                        SDL_Color color, SDL_Rect area, uint32_t now) {
+    // One em between two texts, and one em of wash at a cut: the gap of a row
+    // marquee reads as a hole in a title. The area is the one of this frame: the
+    // status group changes width with a setting pill, and a title that fit can
+    // then move, or the reverse.
+    int em = TTF_FontHeight(font);
+    ScreenTitle_measure(title, area.w, em, em, now);
+    if (ScreenTitle_moves(title, now)) {
+        // The marquee is on the GPU layer, thus the surface holds no title under it.
+        return false;
+    }
+    blit_title_slice(screen, area.x, area.y, title, font, color, area.w, now);
+    return true;
+}
+
+// Paints the title on LAYER_SCROLLTEXT, after a clear of the layer and before
+// its flip. The layer shows the title while the display does not: while it
+// moves, and at rest until the flip of the surface frame that draws it.
+static void paint_title_on_layer(uint32_t now) {
+    if (!header_drawn || title_surface == TITLE_ON_SURFACE) return;
+
+    TTF_Font* font = Fonts_getLarge();
+    SDL_Surface* slice = SDL_CreateRGBSurfaceWithFormat(0, header_area.w, header_area.h, 32,
+                                                        SDL_PIXELFORMAT_ARGB8888);
+    if (!slice) return;
+    SDL_FillRect(slice, NULL, 0);
+    blit_title_slice(slice, 0, 0, &title_state, font,
+                     Theme_getColor(THEME_ROLE_SECONDARY, false), header_area.w, now);
+    PLAT_drawOnLayer(slice, header_area.x, header_area.y, header_area.w, header_area.h,
+                     1.0f, false, LAYER_SCROLLTEXT);
+    SDL_FreeSurface(slice);
+    layer_holds_title = true;
+}
+
+bool ScreenTitle_start(bool defer) {
+    bool before = title_state.defer;
+    ScreenTitle_reset(&title_state, defer);
+    header_drawn  = false;
+    title_surface = TITLE_OFF_SURFACE;
+    return before;
+}
+
+void ScreenTitle_frameBegin(void) {
+    layer_painted_this_frame = false;
+}
+
+void ScreenTitle_frameEnd(int* dirty, bool has_header) {
+    if (!has_header) {
+        // The screen paints the layer through a painter of its own
+        header_drawn      = false;
+        layer_holds_title = false;
+        return;
+    }
+    if (title_surface == TITLE_SURFACE_PENDING) {
+        // The flip of this frame put the surface with the title on the display
+        title_surface = TITLE_ON_SURFACE;
+    }
+
+    uint32_t now = SDL_GetTicks();
+    if (header_drawn && ScreenTitle_needsFrame(&title_state, now, title_surface != TITLE_OFF_SURFACE)) {
+        *dirty = 1;
+    }
+
+    if (layer_painted_this_frame) {
+        // A row painted the layer this frame, and the title with it
+        return;
+    }
+    if (header_drawn && title_surface == TITLE_OFF_SURFACE) {
+        // Moving, or at rest until the surface frame draws it
+        GFX_clearLayers(LAYER_SCROLLTEXT);
+        paint_title_on_layer(now);
+        PLAT_GPU_Flip();
+        layer_painted_this_frame = true;
+    } else if (layer_holds_title) {
+        // The surface shows the title, thus its last slice leaves the layer
+        GFX_clearLayers(LAYER_SCROLLTEXT);
+        PLAT_GPU_Flip();
+        layer_holds_title = false;
+    }
+}
+
+void render_screen_header(SDL_Surface* screen, const char* text, int show_setting) {
+    uint32_t now = SDL_GetTicks();
 
     // The status group draws first and gives its width, thus the title takes the room
     // that is left and never runs under the wifi and battery pill. The width changes
@@ -330,21 +530,27 @@ void render_screen_header(SDL_Surface* screen, const char* title, int show_setti
         status_w = GFX_blitHardwareGroup(screen, show_setting);
     }
 
-    int title_x = SCALE1(PADDING) + SCALE1(BUTTON_PADDING);
-    int title_max_w = hw - SCALE1(PADDING) - status_w - SCALE1(BUTTON_PADDING) - title_x;
-
     // The title takes the font of a row of the list, as the menu of the platform
     // does. The secondary text role keeps it apart from a row.
-    GFX_truncateText(Fonts_getLarge(), title, truncated, title_max_w, 0);
+    TTF_Font* font = Fonts_getLarge();
+    if (!ScreenTitle_isCurrent(&title_state, text)) {
+        int text_w = 0;
+        TTF_SizeUTF8(font, text, &text_w, NULL);
+        ScreenTitle_set(&title_state, text, text_w, now);
+    }
 
-    SDL_Surface* title_text = TTF_RenderUTF8_Blended(
-        Fonts_getLarge(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-    if (title_text) {
-        // The title keeps a row as high as a selection pill, with the status group
-        // or without it, thus the list below it starts on the same line either way.
-        int title_y = top_of_the_pill_row_box(title_text->h, true);
-        SDL_BlitSurface(title_text, NULL, screen, &(SDL_Rect){title_x, title_y});
-        SDL_FreeSurface(title_text);
+    header_area  = screen_title_area(screen, status_w, TTF_FontHeight(font));
+    header_drawn = true;
+    bool drew = paint_screen_title(screen, &title_state, font,
+                                   Theme_getColor(THEME_ROLE_SECONDARY, false), header_area, now);
+    // The display shows this surface after the flip. Until then the layer keeps
+    // the title: a present of the layer before the flip shows the old surface.
+    // Where the display shows the title at rest already, the old surface has
+    // it too, thus the layer stays clear and the title is not drawn twice.
+    if (!drew) {
+        title_surface = TITLE_OFF_SURFACE;
+    } else if (title_surface != TITLE_ON_SURFACE) {
+        title_surface = TITLE_SURFACE_PENDING;
     }
 }
 
@@ -365,27 +571,64 @@ bool list_page_down(int *selected, int *scroll, int total_count, int items_per_p
     return ListNav_pageDown(selected, scroll, total_count, items_per_page);
 }
 
-// Render scroll up/down indicators for lists
-void render_scroll_indicators(SDL_Surface* screen, int scroll, int items_per_page, int total_count) {
-    if (total_count <= items_per_page) return;
+void draw_scroll_indicator(SDL_Surface* screen, int asset, int x, int y) {
+    // The scroll assets of the platform are 24 by 6 units (`api.c`, `asset_rects`).
+    int w = SCALE1(24);
+    int h = SCALE1(6);
 
-    int hw = screen->w;
-    int ox = (hw - SCALE1(24)) / 2;
-    ListLayout layout = calc_list_layout(screen);
+    // The asset is a dark shape, thus a tint can only make it darker. Its alpha
+    // is the shape, and the color of the role fills it. The indicator is a hint
+    // beside the list, thus it takes the secondary role, which stays visible on
+    // the page of each theme.
+    SDL_Surface* shape = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!shape) return;
+    SDL_FillRect(shape, NULL, 0);
+    GFX_blitAsset(asset, NULL, shape, &(SDL_Rect){0, 0});
+
+    uint32_t rgb = Theme_getPackedColor(THEME_ROLE_SECONDARY, false) & 0x00ffffffu;
+    uint32_t* px = shape->pixels;
+    for (int i = 0; i < w * h; i++) {
+        px[i] = (px[i] & 0xff000000u) | rgb;
+    }
+
+    SDL_SetSurfaceBlendMode(shape, SDL_BLENDMODE_BLEND);
+    SDL_BlitSurface(shape, NULL, screen, &(SDL_Rect){x, y});
+    SDL_FreeSurface(shape);
+}
+
+int scroll_indicator_height(void) {
     // The scroll assets of the platform are 6 units high (`api.c`, `asset_rects`).
-    int arrow_h = SCALE1(6);
+    return SCALE1(6);
+}
 
-    if (scroll > 0) {
-        // Above the first row, in the gap that the top pill row leaves
-        GFX_blitAsset(ASSET_SCROLL_UP, NULL, screen,
-                      &(SDL_Rect){ox, layout.list_y - arrow_h});
-    }
-    if (scroll + items_per_page < total_count) {
-        // Below the last row. The bottom pill row holds it, between the two button
-        // hints, which this change accepts.
-        GFX_blitAsset(ASSET_SCROLL_DOWN, NULL, screen,
-                      &(SDL_Rect){ox, layout.list_y + layout.list_h});
-    }
+int scroll_indicator_x(SDL_Surface* screen) {
+    return (screen->w - SCALE1(24)) / 2;
+}
+
+// Draws the up indicator where `above` and the down indicator at `down_y` where
+// `below`. The up indicator sits above the first row, in the room that the top
+// pill row leaves.
+static void draw_list_scroll_indicators(SDL_Surface* screen, const ListLayout* layout,
+                                        bool above, bool below, int down_y) {
+    int ox = scroll_indicator_x(screen);
+    if (above) draw_scroll_indicator(screen, ASSET_SCROLL_UP, ox, layout->list_y - scroll_indicator_height());
+    if (below) draw_scroll_indicator(screen, ASSET_SCROLL_DOWN, ox, down_y);
+}
+
+void render_stream_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                                     int content_h) {
+    // The content ends at the foot of the viewport, thus the indicator is under it
+    draw_list_scroll_indicators(screen, layout, scroll > 0, scroll + layout->list_h < content_h,
+                                layout->list_y + layout->list_h);
+}
+
+void render_scroll_indicators(SDL_Surface* screen, const ListLayout* layout, int scroll,
+                              int total_count) {
+    if (total_count <= layout->items_per_page) return;
+    // Directly under the last row of the page
+    draw_list_scroll_indicators(screen, layout, scroll > 0,
+                                scroll + layout->items_per_page < total_count,
+                                layout->list_y + layout->items_per_page * layout->item_h);
 }
 
 // ============================================
@@ -399,10 +642,11 @@ ListLayout calc_list_layout(SDL_Surface* screen) {
 
     ListLayout layout;
     // The first row starts where the top pill row ends, as a row of the menu of the
-    // platform does, and the list stops at the top of the bottom pill row, which
-    // holds the button hints.
+    // platform does, and the list stops one scroll indicator above the bottom pill
+    // row, which holds the button hints. The indicator takes that room, and not the
+    // margin of the footer.
     layout.list_y = SCALE1(PADDING + PILL_SIZE);
-    layout.list_h = hh - layout.list_y - pill_footer_height();
+    layout.list_h = hh - layout.list_y - SCALE1(PADDING + PILL_SIZE) - scroll_indicator_height();
     layout.item_h = SCALE1(PILL_SIZE);
     layout.items_per_page = layout.list_h / layout.item_h;
     // "Rich" rows (thumbnail + two text lines) are 1.5x a plain row.
@@ -751,7 +995,8 @@ MenuItemPos render_menu_item_pill(SDL_Surface* screen, ListLayout* layout,
     pos.item_y = layout->list_y + index * item_h;
 
     // Calculate text width for pill sizing (include prefix_width for icon)
-    pos.pill_width = calc_list_item_width(Fonts_getLarge(), text, truncated, layout->max_width - prefix_width, prefix_width);
+    // One subtraction of the prefix: the helper makes the room for it.
+    pos.pill_width = calc_list_item_width(Fonts_getLarge(), text, truncated, layout->max_width, prefix_width);
 
     // Background pill (pill height is PILL_SIZE, not item_h)
     SDL_Rect pill_rect = {SCALE1(PADDING), pos.item_y, pos.pill_width, SCALE1(PILL_SIZE)};
@@ -867,7 +1112,7 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
         }
     }
 
-    render_scroll_indicators(screen, menu_scroll, layout.items_per_page, config->item_count);
+    render_scroll_indicators(screen, &layout, menu_scroll, config->item_count);
 
     // Button hints
     GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
@@ -880,8 +1125,12 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
 // ============================================
 
 DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
-    // Clear scroll text GPU layer so it doesn't show through the dialog
+    // Clear scroll text GPU layer so it doesn't show through the dialog. The
+    // title of the header under the dialog leaves the layer with it, until the
+    // header draws again.
     GFX_clearLayers(LAYER_SCROLLTEXT);
+    header_drawn = false;
+    layer_holds_title = false;
 
     int hw = screen->w;
     int hh = screen->h;

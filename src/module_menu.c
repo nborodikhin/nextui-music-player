@@ -28,8 +28,11 @@ static ToastToken exit_prompt = TOAST_TOKEN_NONE;
 // until NextUI draws its first frame.
 #define EXIT_TOAST_DELAY_MS 100
 
-// The item the cursor was on when the menu was last left.
-static MenuSelection last_selection = MENU_LIBRARY;
+// The item the cursor was on when the menu was last left. MENU_NONE on the
+// first visit, thus the cursor takes row 0: Resume or Now Playing where one
+// exists, and Library otherwise.
+static MenuSelection last_selection = MENU_NONE;
+
 
 // State of the playback row. Now Playing wins over Resume when both apply.
 static MenuSelection menu_playing_item(void) {
@@ -55,6 +58,8 @@ MenuSelection MenuModule_run(DisplayContext* display) {
     int dirty = 1;
     int show_setting = 0;
     int exiting = 0;
+
+    ScreenTitle_start(false);
 
     while (1) {
         ModuleCommon_frameBegin();
@@ -165,5 +170,6 @@ MenuSelection MenuModule_run(DisplayContext* display) {
             if (menu_needs_scroll_redraw()) dirty = 1;
             GFX_sync();
         }
+        ScreenTitle_frameEnd(&dirty, true);
     }
 }

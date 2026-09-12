@@ -7,6 +7,7 @@
 #include "keyboard_map.h"
 #include "utf8.h"
 #include "ui_keyboard.h"
+#include "ui_utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,7 @@ typedef struct {
     int current_variant; // the alternate being picked, while they are
     const char *current_char; // what that key types now, "" where it types nothing
 } KeyboardState;
+
 
 static void prepare_ui_state(const KeyboardState *in, KeyboardUiState *out) {
     const Keyboard *keyboard = in->keyboard;
@@ -227,6 +229,9 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
     KeyboardUiState last_ui_state;
     memset(&ui_state, 0, sizeof ui_state);
     memset(&last_ui_state, 0, sizeof ui_state);
+    // The keyboard is a screen inside a module, thus the title of the module
+    // starts again, in its own mode, when the keyboard returns
+    bool outer_title_defer = ScreenTitle_start(false);
 
     // text version tracking is needed because keyboard UI state equality is shallow
     int last_text_version = -1;
@@ -418,7 +423,13 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
         } else {
             GFX_sync();
         }
+        // A title that needs a surface frame asks for it through the redraw flag
+        int title_frame = 0;
+        ScreenTitle_frameEnd(&title_frame, true);
+        if (title_frame) force_render = true;
     }
+
+    ScreenTitle_start(outer_title_defer);
 
     if (!confirmed || state.text[0] == '\0') return NULL;
 
