@@ -4,6 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "add_to_playlist.h"
+#include "file_utils.h"
 #include "playlist.h"
 #include "playlist_m3u.h"
 #include "keyboard.h"
@@ -104,12 +105,16 @@ int AddToPlaylist_handleInput(void) {
                 if (M3U_sanitizeName(name, safe_name, sizeof(safe_name)) &&
                     M3U_create(name) == 0) {
                     char new_path[512];
-                    snprintf(new_path, sizeof(new_path), "%s/%s.m3u", PLAYLISTS_DIR, safe_name);
                     int added = 0;
-                    char dname[256];
-                    for (int i = 0; i < file_count; i++) {
-                        display_name_from_path(file_paths[i], dname, sizeof(dname));
-                        if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
+                    char relative_path[sizeof("playlists/") + MAX_PLAYLIST_NAME + sizeof(".m3u")];
+                    snprintf(relative_path, sizeof(relative_path), "playlists/%s.m3u", safe_name);
+                    int length = userdata_snpath(relative_path, new_path, sizeof(new_path));
+                    if (length >= 0 && (size_t)length < sizeof(new_path)) {
+                        char dname[256];
+                        for (int i = 0; i < file_count; i++) {
+                            display_name_from_path(file_paths[i], dname, sizeof(dname));
+                            if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
+                        }
                     }
                     char msg[128];
                     snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, safe_name);

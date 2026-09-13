@@ -2,6 +2,7 @@
 #include "ui_layers.h"
 #include "ui_theme.h"
 #include "player.h"
+#include "file_utils.h"
 #include "defines.h"
 #include "api.h"
 #include "audio/kiss_fftr.h"
@@ -9,7 +10,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#define SPECTRUM_SETTINGS_FILE SHARED_USERDATA_PATH "/spectrum_settings.txt"
+#define OLD_SPECTRUM_SETTINGS_FILE SHARED_USERDATA_PATH "/spectrum_settings.txt"
 
 #define SMOOTHING_FACTOR 0.7f
 
@@ -73,7 +74,13 @@ static uint32_t last_samples_ms = 0;
 
 // Save spectrum settings to file
 static void save_settings(void) {
-    FILE* f = fopen(SPECTRUM_SETTINGS_FILE, "w");
+    if (!userdata_mkdir("")) return;
+
+    char path[512];
+    int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    FILE* f = fopen(path, "w");
     if (!f) return;
     fprintf(f, "%d\n%d\n", (int)current_style, spectrum_visible ? 1 : 0);
     fclose(f);
@@ -81,17 +88,29 @@ static void save_settings(void) {
 
 // Load spectrum settings from file
 static void load_settings(void) {
-    FILE* f = fopen(SPECTRUM_SETTINGS_FILE, "r");
+    char path[512];
+    int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    bool loaded_old = false;
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        f = fopen(OLD_SPECTRUM_SETTINGS_FILE, "r");
+        loaded_old = f != NULL;
+    }
     if (!f) return;
 
     int style = 0, visible = 1;
-    if (fscanf(f, "%d\n%d\n", &style, &visible) == 2) {
+    bool loaded = fscanf(f, "%d\n%d\n", &style, &visible) == 2;
+    if (loaded) {
         if (style >= 0 && style < SPECTRUM_STYLE_COUNT) {
             current_style = (SpectrumStyle)style;
         }
         spectrum_visible = (visible != 0);
     }
     fclose(f);
+
+    if (loaded_old && loaded) save_settings();
 }
 
 // HSV to RGB conversion (h: 0-360, s: 0-1, v: 0-1)

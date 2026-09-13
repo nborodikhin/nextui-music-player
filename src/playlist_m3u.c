@@ -3,17 +3,16 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <sys/stat.h>
 
 #include "defines.h"
 #include "api.h"
+#include "file_utils.h"
 #include "playlist_m3u.h"
 #include "utf8.h"
 #include "player.h"
 
 void M3U_init(void) {
-    mkdir(SHARED_USERDATA_PATH "/music-player", 0755);
-    mkdir(PLAYLISTS_DIR, 0755);
+    userdata_mkdir("playlists");
 }
 
 // Count non-comment, non-empty lines in an m3u file (= track count)
@@ -36,7 +35,11 @@ static int count_tracks_in_file(const char* path) {
 }
 
 int M3U_listPlaylists(PlaylistInfo* out, int max) {
-    DIR* dir = opendir(PLAYLISTS_DIR);
+    char playlists_dir[512];
+    int length = userdata_snpath("playlists", playlists_dir, sizeof(playlists_dir));
+    if (length < 0 || (size_t)length >= sizeof(playlists_dir)) return 0;
+
+    DIR* dir = opendir(playlists_dir);
     if (!dir) return 0;
 
     int count = 0;
@@ -49,7 +52,7 @@ int M3U_listPlaylists(PlaylistInfo* out, int max) {
         if (len < 5 || strcasecmp(ent->d_name + len - 4, ".m3u") != 0) continue;
 
         PlaylistInfo* info = &out[count];
-        snprintf(info->path, sizeof(info->path), "%s/%s", PLAYLISTS_DIR, ent->d_name);
+        snprintf(info->path, sizeof(info->path), "%s/%s", playlists_dir, ent->d_name);
 
         // Name without .m3u extension
         snprintf(info->name, sizeof(info->name), "%.*s", len - 4, ent->d_name);
@@ -108,8 +111,12 @@ int M3U_create(const char* name) {
     char safe_name[MAX_PLAYLIST_NAME];
     if (!M3U_sanitizeName(name, safe_name, sizeof(safe_name))) return -1;
 
+    char relative_path[sizeof("playlists/") + MAX_PLAYLIST_NAME + sizeof(".m3u")];
+    snprintf(relative_path, sizeof(relative_path), "playlists/%s.m3u", safe_name);
+
     char path[512];
-    snprintf(path, sizeof(path), "%s/%s.m3u", PLAYLISTS_DIR, safe_name);
+    int length = userdata_snpath(relative_path, path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return -1;
 
     // Don't overwrite existing
     if (access(path, F_OK) == 0) return -1;

@@ -24,6 +24,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "file_utils.h"
 
 // SDL for rendering
 #include <SDL2/SDL.h>
@@ -65,8 +66,6 @@ typedef enum {
 
 #define SAMPLE_RATE 48000
 #define AUDIO_CHANNELS 2
-#define RADIO_STATIONS_FILE SHARED_USERDATA_PATH "/music-player/radio/stations.txt"
-
 // Ring buffer for decoded audio
 #define AUDIO_RING_SIZE (SAMPLE_RATE * 2 * 10)  // 10 seconds of stereo audio
 
@@ -1555,9 +1554,13 @@ bool Radio_removeStation(int index) {
 }
 
 void Radio_saveStations(void) {
-    mkdir(SHARED_USERDATA_PATH "/music-player", 0755);
-    mkdir(SHARED_USERDATA_PATH "/music-player/radio", 0755);
-    FILE* f = fopen(RADIO_STATIONS_FILE, "w");
+    if (!userdata_mkdir("radio")) return;
+
+    char path[512];
+    int length = userdata_snpath("radio/stations.txt", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    FILE* f = fopen(path, "w");
     if (!f) return;
 
     for (int i = 0; i < radio.station_count; i++) {
@@ -1576,7 +1579,11 @@ void Radio_saveStations(void) {
 }
 
 void Radio_loadStations(void) {
-    FILE* f = fopen(RADIO_STATIONS_FILE, "r");
+    char path[512];
+    int length = userdata_snpath("radio/stations.txt", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    FILE* f = fopen(path, "r");
     if (!f) return;
 
     radio.station_count = 0;
