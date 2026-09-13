@@ -1,4 +1,5 @@
 #include "spectrum.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
 #include "player.h"
 #include "defines.h"
@@ -461,7 +462,7 @@ bool Spectrum_isShowing(void) {
             spectrum_data.valid;
 }
 
-void Spectrum_paint(int layer) {
+void Spectrum_paint(UiLayer layer) {
     SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0,
         spec_w, spec_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!surface) return;
@@ -527,6 +528,6 @@ void Spectrum_paint(int layer) {
         }
     }
 
-    PLAT_drawOnLayer(surface, spec_x, spec_y, spec_w, spec_h, 1.0f, false, layer);
+    UiLayer_blit(surface, spec_x, spec_y, layer);
     SDL_FreeSurface(surface);
 }

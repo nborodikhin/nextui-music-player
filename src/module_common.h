@@ -89,4 +89,21 @@ void ModuleCommon_handleHardwareVolume(void);
 // MUST be the first statement of every module's loop body.
 void ModuleCommon_frameBegin(void);
 
+// Records that the frame drew the regular surface, thus ModuleCommon_frameEnd()
+// uploads it. Call it after a render of a screen or of a dialog.
+void ModuleCommon_markSurfaceDrawn(void);
+
+// Records that the frame drew into a GPU layer, thus ModuleCommon_frameEnd()
+// presents the layers. UiLayer_clear() and UiLayer_blit() call it, thus a
+// painter that draws through them needs no call of its own.
+void ModuleCommon_markLayerDrawn(void);
+
+// The one presentation of the app. Call it once at the end of each pass of a
+// loop, after all drawing of the frame, and before a call that blocks after a
+// draw. A surface change uploads the surface and presents it with the layers.
+// A layer change presents the layers over the surface that the display holds.
+// No change synchronizes to the frame rate and presents nothing. No painter
+// presents by itself.
+void ModuleCommon_frameEnd(SDL_Surface* screen);
+
 #endif

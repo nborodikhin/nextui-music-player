@@ -9,11 +9,10 @@
 #include "defines.h"
 #include "api.h"
 #include "podcast.h"
-#include "player.h"
 #include "ui_podcast.h"
-#include "spectrum.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
 #include "ui_icons.h"
 #include "ui_album_art.h"
@@ -22,32 +21,10 @@
 #include "podcast_episode_layout.h"
 #include "utf8.h"
 
-// Max artwork size (1MB to match radio album art buffer)
-#define PODCAST_ARTWORK_MAX_SIZE (1024 * 1024)
-
 // Scroll state for selected item title in lists
 static ScrollTextState podcast_title_scroll = {0};
 
-// Scroll state for playing screen episode title
-static ScrollTextState podcast_playing_title_scroll = {0};
-
-// Podcast artwork state
-static SDL_Surface* podcast_artwork = NULL;
-static char podcast_artwork_url[512] = {0};
-
-// Podcast progress GPU state
-// The play time and the bar of progress take one row at the foot of the screen.
-// The time is at the left margin and the bar fills the room that is left, to the
-// right margin.
-static int progress_left_x = 0, progress_right_x = 0;
-static int progress_row_y = 0, progress_bar_h = 0;
-static int progress_screen_w = 0;
-static int progress_duration_ms = 0;
-static int progress_last_position_sec = -1;
-static bool progress_position_set = false;
-
-// Helper to convert surface to ARGB8888 for proper scaling
-static SDL_Surface* convert_to_argb8888(SDL_Surface* src) {
+SDL_Surface* Podcast_surfaceToArgb8888(SDL_Surface* src) {
     if (!src) return NULL;
 
     SDL_Surface* converted = SDL_ConvertSurfaceFormat(src, SDL_PIXELFORMAT_ARGB8888, 0);
@@ -55,9 +32,8 @@ static SDL_Surface* convert_to_argb8888(SDL_Surface* src) {
     return converted;
 }
 
-// Check if downloaded image data is complete (not truncated)
 // JPEG: ends with FF D9, PNG: ends with IEND chunk
-static bool is_image_complete(const uint8_t* data, int size) {
+bool Podcast_imageIsComplete(const uint8_t* data, int size) {
     if (size < 4) return false;
     // JPEG: starts with FF D8, ends with FF D9
     if (data[0] == 0xFF && data[1] == 0xD8) {
@@ -71,87 +47,6 @@ static bool is_image_complete(const uint8_t* data, int size) {
     }
     // Unknown format — assume complete
     return true;
-}
-
-// Fetch podcast artwork from URL (cached in podcast folder)
-// feed_id: the podcast's feed_id for storing artwork in its folder
-static void podcast_fetch_artwork(const char* artwork_url, const char* feed_id) {
-    if (!artwork_url || !artwork_url[0] || !feed_id || !feed_id[0]) return;
-
-    // Already have this artwork
-    if (strcmp(podcast_artwork_url, artwork_url) == 0 && podcast_artwork) return;
-
-    // Clear old artwork and invalidate album art background cache
-    if (podcast_artwork) {
-        SDL_FreeSurface(podcast_artwork);
-        podcast_artwork = NULL;
-        cleanup_album_art_background();
-    }
-    strncpy(podcast_artwork_url, artwork_url, sizeof(podcast_artwork_url) - 1);
-
-    // Build cache path: <podcast_data_dir>/<feed_id>/artwork.jpg
-    char feed_dir[512];
-    Podcast_getFeedDataPath(feed_id, feed_dir, sizeof(feed_dir));
-
-    char cache_path[768];
-    snprintf(cache_path, sizeof(cache_path), "%s/artwork.jpg", feed_dir);
-
-    // Try to load from cache first
-    FILE* f = fopen(cache_path, "rb");
-    if (f) {
-        fseek(f, 0, SEEK_END);
-        long size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-
-        if (size > 0 && size < PODCAST_ARTWORK_MAX_SIZE) {
-            uint8_t* data = (uint8_t*)malloc(size);
-            if (data && fread(data, 1, size, f) == (size_t)size) {
-                if (is_image_complete(data, size)) {
-                    SDL_RWops* rw = SDL_RWFromConstMem(data, size);
-                    if (rw) {
-                        SDL_Surface* loaded = IMG_Load_RW(rw, 1);
-                        podcast_artwork = convert_to_argb8888(loaded);
-                    }
-                }
-            }
-            free(data);
-        }
-        fclose(f);
-        if (podcast_artwork) return;
-        // Cached file is corrupt/incomplete — delete it so we re-fetch
-        remove(cache_path);
-    }
-
-    // Fetch from network using static buffer
-    static uint8_t artwork_buffer[PODCAST_ARTWORK_MAX_SIZE];
-    int size = wget_fetch_bytes(artwork_url, artwork_buffer, PODCAST_ARTWORK_MAX_SIZE);
-
-    if (size > 0 && is_image_complete(artwork_buffer, size)) {
-        // Save to podcast folder (directory should already exist from subscription)
-        f = fopen(cache_path, "wb");
-        if (f) {
-            fwrite(artwork_buffer, 1, size, f);
-            fclose(f);
-        }
-
-        // Load as SDL surface and convert to ARGB8888 for proper scaling
-        SDL_RWops* rw = SDL_RWFromConstMem(artwork_buffer, size);
-        if (rw) {
-            SDL_Surface* loaded = IMG_Load_RW(rw, 1);
-            podcast_artwork = convert_to_argb8888(loaded);
-        }
-    }
-}
-
-// Clear podcast artwork (call when leaving playing screen)
-void Podcast_clearArtwork(void) {
-    if (podcast_artwork) {
-        SDL_FreeSurface(podcast_artwork);
-        podcast_artwork = NULL;
-    }
-    podcast_artwork_url[0] = '\0';
-    memset(&podcast_playing_title_scroll, 0, sizeof(podcast_playing_title_scroll));
-    PodcastProgress_clear();  // Clear GPU progress layer
 }
 
 // Thumbnail cache for subscription artwork on main page
@@ -213,7 +108,7 @@ static SDL_Surface* load_circular_thumbnail(const char* path, int size) {
     fclose(f);
 
     // Validate image completeness
-    if (!is_image_complete(data, fsize)) {
+    if (!Podcast_imageIsComplete(data, fsize)) {
         free(data);
         remove(path);  // Delete corrupt file so it gets re-fetched
         return NULL;
@@ -326,7 +221,7 @@ static bool artwork_fetch_one(const char* itunes_id, const char* artwork_url, in
     // Fetch from network
     static uint8_t art_buf[PODCAST_ARTWORK_MAX_SIZE];
     int dl_size = wget_fetch_bytes(artwork_url, art_buf, PODCAST_ARTWORK_MAX_SIZE);
-    if (dl_size <= 0 || !is_image_complete(art_buf, dl_size)) return false;
+    if (dl_size <= 0 || !Podcast_imageIsComplete(art_buf, dl_size)) return false;
 
     // Save to disk cache
     mkdir(PODCAST_CACHE_PARENT, 0755);
@@ -397,7 +292,7 @@ static SDL_Surface* load_rounded_thumbnail(const char* path, int size, int radiu
     fclose(f);
 
     // Validate image completeness
-    if (!is_image_complete(data, fsize)) {
+    if (!Podcast_imageIsComplete(data, fsize)) {
         free(data);
         remove(path);
         return NULL;
@@ -474,7 +369,7 @@ static const char* podcast_manage_items[] = {
 };
 
 // Format duration as HH:MM:SS or MM:SS
-static void format_duration(char* buf, int seconds) {
+void Podcast_formatDuration(char* buf, int seconds) {
     if (seconds <= 0) {
         strcpy(buf, "--:--");
         return;
@@ -1452,7 +1347,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
         } else {
             char subtitle_str[64] = {0};
             if (ep->duration_sec > 0) {
-                format_duration(subtitle_str, ep->duration_sec);
+                Podcast_formatDuration(subtitle_str, ep->duration_sec);
             }
             char date_str[32];
             format_date(date_str, ep->pub_date);
@@ -1694,241 +1589,6 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
 }
 
 // Render now playing screen for podcast (matches radio/music player style)
-void render_podcast_playing(SDL_Surface* screen, int show_setting,
-                             int feed_index, int episode_index) {
-    GFX_clear(screen);
-
-    int hw = screen->w;
-    int hh = screen->h;
-    char truncated[256];
-
-    PodcastFeed* feed = Podcast_getSubscription(feed_index);
-    PodcastEpisode* ep = Podcast_getEpisode(feed_index, episode_index);
-
-    if (!feed || !ep) {
-        render_screen_header(screen, "Now Playing", show_setting);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
-        return;
-    }
-
-    // Fetch and render album art background (if available)
-    if (feed->artwork_url[0] && feed->feed_id[0]) {
-        podcast_fetch_artwork(feed->artwork_url, feed->feed_id);
-        if (podcast_artwork && podcast_artwork->w > 0 && podcast_artwork->h > 0) {
-            render_album_art_background(screen, podcast_artwork);
-        }
-    }
-
-    // === TOP BAR ===
-    int top_y = top_of_the_chip_box(screen, chip_height());
-
-    // Source chip
-    const char* chip_text = "PODCAST";
-    SDL_Rect chip = draw_chip(screen, chip_text, SCALE1(PADDING), top_y);
-
-    int next_chip_x = chip.x + chip.w;
-
-    // Playback speed badge (show when not 1x, right after PODCAST badge)
-    float pspeed = Player_getPlaybackSpeed();
-    if (pspeed != 1.0f) {
-        char speed_label[16];
-        snprintf(speed_label, sizeof(speed_label), "%.2gx", pspeed);
-        SDL_Surface* speed_surf = TTF_RenderUTF8_Blended(
-            Fonts_getTiny(), speed_label, Theme_getColor(THEME_ROLE_SECONDARY, false));
-        if (speed_surf) {
-            int sx = next_chip_x + SCALE1(4);
-            int speed_chip_w = speed_surf->w + SCALE1(10);
-            int speed_chip_h = speed_surf->h + SCALE1(4);
-            uint32_t outline = Theme_getPackedColor(THEME_ROLE_SECONDARY, false);
-            SDL_FillRect(screen, &(SDL_Rect){sx, top_y, speed_chip_w, 1}, outline);
-            SDL_FillRect(screen,
-                         &(SDL_Rect){sx, top_y + speed_chip_h - 1, speed_chip_w, 1}, outline);
-            SDL_FillRect(screen, &(SDL_Rect){sx, top_y, 1, speed_chip_h}, outline);
-            SDL_FillRect(screen,
-                         &(SDL_Rect){sx + speed_chip_w - 1, top_y, 1, speed_chip_h}, outline);
-            SDL_BlitSurface(speed_surf, NULL, screen, &(SDL_Rect){sx + SCALE1(5), top_y + SCALE1(2)});
-            next_chip_x = sx + speed_chip_w;
-            SDL_FreeSurface(speed_surf);
-        }
-    }
-
-    // Episode counter "01 / 67" (like track counter in music player)
-    // Show position among downloaded episodes, not total episodes
-    int downloaded_total = Podcast_countDownloadedEpisodes(feed_index);
-    int downloaded_idx = Podcast_getDownloadedEpisodeIndex(feed_index, episode_index);
-    char ep_counter[32];
-    if (downloaded_idx >= 0 && downloaded_total > 0) {
-        snprintf(ep_counter, sizeof(ep_counter), "%02d / %02d", downloaded_idx + 1, downloaded_total);
-    } else {
-        // Fallback if episode is not downloaded (shouldn't happen in playing state)
-        snprintf(ep_counter, sizeof(ep_counter), "%02d / %02d", episode_index + 1, feed->episode_count);
-    }
-    SDL_Surface* counter_surf = TTF_RenderUTF8_Blended(
-        Fonts_getTiny(), ep_counter, Theme_getColor(THEME_ROLE_SECONDARY, false));
-    if (counter_surf) {
-        int counter_x = next_chip_x + SCALE1(8);
-        int counter_y = top_y + (chip.h - counter_surf->h) / 2;
-        SDL_BlitSurface(counter_surf, NULL, screen, &(SDL_Rect){counter_x, counter_y});
-        SDL_FreeSurface(counter_surf);
-    }
-
-    // Hardware status (clock, battery) on right
-    if (screen_has_status_group(screen)) GFX_blitHardwareGroup(screen, show_setting);
-
-    // === PODCAST INFO SECTION (like music player artist/title/album) ===
-    int info_y = total_header_height(screen, chip_height());
-    int max_w_text = hw - SCALE1(PADDING * 2);
-
-    // Podcast name (like Artist in music player) - gray, artist font
-    GFX_truncateText(Fonts_getArtist(), feed->title, truncated, max_w_text, 0);
-    SDL_Surface* podcast_surf = TTF_RenderUTF8_Blended(
-        Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-    if (podcast_surf) {
-        SDL_BlitSurface(podcast_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
-        info_y += podcast_surf->h + SCALE1(2);
-        SDL_FreeSurface(podcast_surf);
-    } else {
-        info_y += SCALE1(18);
-    }
-
-    // Episode title (like Title in music player) - white, title font, with scrolling
-    const char* title = ep->title[0] ? ep->title : "Unknown Episode";
-    int title_y = info_y;
-
-    // Check if text changed and reset scroll state
-    if (strcmp(podcast_playing_title_scroll.text, title) != 0 ||
-        podcast_playing_title_scroll.role != THEME_ROLE_PRIMARY) {
-        ScrollText_reset(&podcast_playing_title_scroll, title, Fonts_getTitle(), max_w_text,
-                         THEME_ROLE_PRIMARY, false, true);
-    }
-
-    // Activate scroll after delay (this render path bypasses ScrollText_render)
-    ScrollText_activateAfterDelay(&podcast_playing_title_scroll);
-
-    // A title that scrolls goes to the GPU layer, and the painter of that layer
-    // draws it. A title that fits goes on the surface of this screen.
-    if (podcast_playing_title_scroll.needs_scroll) {
-        podcast_playing_title_scroll.last_x     = SCALE1(PADDING);
-        podcast_playing_title_scroll.last_y     = title_y;
-        podcast_playing_title_scroll.last_font  = Fonts_getTitle();
-        podcast_playing_title_scroll.last_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
-    } else {
-        SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
-            Fonts_getTitle(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
-        if (title_surf) {
-            SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
-            SDL_FreeSurface(title_surf);
-        }
-    }
-    info_y += TTF_FontHeight(Fonts_getTitle()) + SCALE1(2);
-
-    // The row of the play time and the bar of progress is the foot of this screen,
-    // as it is on the music player. The spectrum takes its box above that row, and
-    // the description takes the room that is left.
-    int row_h = TTF_FontHeight(Fonts_getSmall());
-    int spec_h = SCALE1(50);
-    int spec_y = hh - chip_footer_height(row_h) - spec_h;
-    int spec_x = SCALE1(PADDING);
-    int spec_w = hw - SCALE1(PADDING * 2);
-
-    Spectrum_setPosition(spec_x, spec_y, spec_w, spec_h);
-
-    // Episode description. The count of lines comes from the room between the
-    // title and the box of the spectrum, thus a screen with more room shows more.
-    if (ep->description[0]) {
-        TTF_Font* desc_font = Fonts_getSmall();
-        int desc_line_h = TTF_FontHeight(desc_font);
-
-        int max_lines = (spec_y - info_y) / desc_line_h;
-        if (max_lines < 0) max_lines = 0;
-
-        // Strip HTML tags and newlines from description
-        char desc_buf[512];
-        int di = 0;
-        bool in_tag = false;
-        for (const char* sp = ep->description; *sp && di < 511; sp++) {
-            if (*sp == '<') { in_tag = true; continue; }
-            if (*sp == '>') { in_tag = false; continue; }
-            if (in_tag) continue;
-            if (*sp == '\n' || *sp == '\r') { desc_buf[di++] = ' '; continue; }
-            if (*sp == '&') {
-                if (strncmp(sp, "&amp;", 5) == 0) { desc_buf[di++] = '&'; sp += 4; }
-                else if (strncmp(sp, "&lt;", 4) == 0) { desc_buf[di++] = '<'; sp += 3; }
-                else if (strncmp(sp, "&gt;", 4) == 0) { desc_buf[di++] = '>'; sp += 3; }
-                else if (strncmp(sp, "&quot;", 6) == 0) { desc_buf[di++] = '"'; sp += 5; }
-                else if (strncmp(sp, "&apos;", 6) == 0) { desc_buf[di++] = '\''; sp += 5; }
-                else if (strncmp(sp, "&#39;", 5) == 0) { desc_buf[di++] = '\''; sp += 4; }
-                else if (strncmp(sp, "&nbsp;", 6) == 0) { desc_buf[di++] = ' '; sp += 5; }
-                else desc_buf[di++] = '&';
-                continue;
-            }
-            desc_buf[di++] = *sp;
-        }
-        desc_buf[di] = '\0';
-
-        const char* remaining = desc_buf;
-        for (int line = 0; line < max_lines && *remaining; line++) {
-            int tw;
-            TTF_SizeUTF8(desc_font, remaining, &tw, NULL);
-
-            if (tw <= max_w_text || line == max_lines - 1) {
-                GFX_truncateText(desc_font, remaining, truncated, max_w_text, 0);
-                SDL_Surface* d = TTF_RenderUTF8_Blended(
-                    desc_font, truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
-                if (d) {
-                    SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
-                    info_y += d->h;
-                    SDL_FreeSurface(d);
-                }
-                break;
-            }
-
-            const char* p = remaining;
-            const char* last_break = remaining;
-            while (*p) {
-                while (*p && *p != ' ') p++;
-                int seg_len = p - remaining;
-                char measure[512];
-                if (seg_len >= 512) seg_len = 511;
-                memcpy(measure, remaining, seg_len);
-                measure[seg_len] = '\0';
-                TTF_SizeUTF8(desc_font, measure, &tw, NULL);
-                if (tw > max_w_text) break;
-                last_break = p;
-                while (*p == ' ') p++;
-            }
-
-            if (last_break == remaining) break;
-
-            int line_len = last_break - remaining;
-            char line_buf[512];
-            if (line_len >= 512) line_len = 511;
-            memcpy(line_buf, remaining, line_len);
-            line_buf[line_len] = '\0';
-
-            SDL_Surface* d = TTF_RenderUTF8_Blended(
-                desc_font, line_buf, Theme_getColor(THEME_ROLE_SECONDARY, false));
-            if (d) {
-                SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
-                info_y += d->h;
-                SDL_FreeSurface(d);
-            }
-
-            remaining = last_break;
-            while (*remaining == ' ') remaining++;
-        }
-    }
-
-    // === PROGRESS ROW SECTION (GPU rendered) ===
-    // The time and the bar share the bottom row. The renderer puts the time at the
-    // left margin and gives the bar the room that is left.
-    int row_y = top_of_the_footer_chip_box(screen, row_h);
-    int duration = Podcast_getDuration();  // Uses episode metadata duration
-
-    PodcastProgress_setPosition(SCALE1(PADDING), hw - SCALE1(PADDING), row_y,
-                                SCALE1(4), hw, duration);
-}
-
 // Render loading screen
 void render_podcast_loading(SDL_Surface* screen, const char* message) {
     GFX_clear(screen);
@@ -1945,186 +1605,28 @@ void render_podcast_loading(SDL_Surface* screen, const char* message) {
     }
 }
 
-// Check if podcast title is currently scrolling (list or playing screen)
+// Check if the title of a row of a list is currently scrolling
 bool Podcast_isTitleScrolling(void) {
-    if (ScrollText_isScrolling(&podcast_title_scroll)) return true;
-    // Only scroll playing title when playing, not when paused
-    if (Player_getState() != PLAYER_STATE_PLAYING) return false;
-    return ScrollText_isScrolling(&podcast_playing_title_scroll);
+    return ScrollText_isScrolling(&podcast_title_scroll);
 }
 
 // Check if title scroll needs a render to transition from delay to active scrolling
 // Returns true during the delay phase when text is wider than max_width but scrolling hasn't started
 bool Podcast_titleScrollNeedsRender(void) {
-    if (ScrollText_needsRender(&podcast_title_scroll)) return true;
-    if (ScrollText_needsRender(&podcast_playing_title_scroll)) return true;
-    return false;
+    return ScrollText_needsRender(&podcast_title_scroll);
 }
 
 // Animate the title of a list of this module. `ScrollText_animateOnly()` paints
-// the layer of the scrolling text itself, thus it serves a screen where nothing
-// else is on that layer.
-//
-// The title of the playing screen is not here. That screen shares its layer with
-// the spectrum, thus one painter draws both and that painter moves the text.
+// the animation layer itself, thus it serves a screen where nothing else of
+// this module is on that layer.
 void Podcast_animateTitleScroll(void) {
     if (ScrollText_isScrolling(&podcast_title_scroll)) {
         ScrollText_animateOnly(&podcast_title_scroll);
     }
 }
 
-bool Podcast_playingTitleNeedsRefresh(void) {
-    // The title moves only while the sound plays, thus a still title needs no
-    // frame of its own.
-    if (Player_getState() != PLAYER_STATE_PLAYING) return false;
-    return ScrollText_isScrolling(&podcast_playing_title_scroll);
-}
-
-bool Podcast_playingTitleShowing(void) {
-    return podcast_playing_title_scroll.text[0] &&
-           podcast_playing_title_scroll.needs_scroll &&
-           podcast_playing_title_scroll.last_font != NULL;
-}
-
-void Podcast_paintPlayingTitle(int layer) {
-    // The paint moves the text as it draws it. The title of a sound that does
-    // not play must stand still and stay on the screen, thus the paint keeps its
-    // place on that frame.
-    int offset = podcast_playing_title_scroll.scroll_offset;
-
-    ScrollText_paintGPU(&podcast_playing_title_scroll,
-                        podcast_playing_title_scroll.last_font,
-                        podcast_playing_title_scroll.last_color,
-                        podcast_playing_title_scroll.last_x,
-                        podcast_playing_title_scroll.last_y, layer);
-
-    if (Player_getState() != PLAYER_STATE_PLAYING) {
-        podcast_playing_title_scroll.scroll_offset = offset;
-    }
-}
-
 // Clear podcast title scroll state (call when selection changes or leaving page)
 void Podcast_clearTitleScroll(void) {
-    memset(&podcast_title_scroll, 0, sizeof(podcast_title_scroll));
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    GFX_resetScrollText();  // Also reset NextUI's internal scroll state
-    PLAT_GPU_Flip();  // Commit the layer clearing to the display
-}
-
-// === PODCAST PROGRESS GPU FUNCTIONS ===
-
-void PodcastProgress_setPosition(int left_x, int right_x, int row_y, int bar_h,
-                                 int screen_w, int duration_ms) {
-    progress_left_x = left_x;
-    progress_right_x = right_x;
-    progress_row_y = row_y;
-    progress_bar_h = bar_h;
-    progress_screen_w = screen_w;
-    progress_duration_ms = duration_ms;
-    progress_position_set = true;
-}
-
-void PodcastProgress_markStale(void) {
-    progress_last_position_sec = -1;
-}
-
-void PodcastProgress_clear(void) {
-    progress_position_set = false;
-    progress_last_position_sec = -1;
-    PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-}
-
-bool PodcastProgress_needsRefresh(void) {
-    if (!progress_position_set) return false;
-    // Only update when playing, not when paused
-    if (Player_getState() != PLAYER_STATE_PLAYING) return false;
-
-    int position_ms = Player_getPosition();
-    int position_sec = position_ms / 1000;
-
-    // Only refresh if second changed
-    return (position_sec != progress_last_position_sec);
-}
-
-void PodcastProgress_renderGPU(void) {
-    if (!progress_position_set) return;
-
-    int position_ms = Player_getPosition();
-    int position_sec = position_ms / 1000;
-
-    // Skip if nothing changed
-    if (position_sec == progress_last_position_sec) return;
-
-    progress_last_position_sec = position_sec;
-
-    int duration_ms = progress_duration_ms > 0 ? progress_duration_ms : Podcast_getDuration();
-
-    // The position and the total take one font on one line, as the play time of the
-    // music player does. The separator gives a relation and is not a value, thus it
-    // goes with the total.
-    char time_cur[16], time_dur[16], time_total[24];
-    format_duration(time_cur, position_sec);
-    format_duration(time_dur, duration_ms / 1000);
-    snprintf(time_total, sizeof(time_total), "/%s", time_dur);
-
-    TTF_Font* time_font = Fonts_getSmall();
-    int time_h = TTF_FontHeight(time_font);
-    int cur_w = 0, total_w = 0;
-    TTF_SizeUTF8(time_font, time_cur, &cur_w, NULL);
-    TTF_SizeUTF8(time_font, time_total, &total_w, NULL);
-
-    int row_h = time_h > progress_bar_h ? time_h : progress_bar_h;
-
-    SDL_Surface* combined = SDL_CreateRGBSurfaceWithFormat(0, progress_screen_w, row_h, 32,
-                                                           SDL_PIXELFORMAT_ARGB8888);
-    if (!combined) return;
-
-    SDL_FillRect(combined, NULL, 0);  // Transparent background
-
-    int time_x = progress_left_x;
-    SDL_Surface* cur_surf = TTF_RenderUTF8_Blended(
-        time_font, time_cur, Theme_getColor(THEME_ROLE_PRIMARY, false));
-    if (cur_surf) {
-        SDL_BlitSurface(cur_surf, NULL, combined, &(SDL_Rect){time_x, 0});
-        SDL_FreeSurface(cur_surf);
-    }
-    SDL_Surface* dur_surf = TTF_RenderUTF8_Blended(
-        time_font, time_total, Theme_getColor(THEME_ROLE_SECONDARY, false));
-    if (dur_surf) {
-        SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){time_x + cur_w, 0});
-        SDL_FreeSurface(dur_surf);
-    }
-
-    // The bar takes the room that is left of the row, after the time and a gap.
-    int bar_x = progress_left_x + cur_w + total_w + SCALE1(12);
-    int bar_w = progress_right_x - bar_x;
-    if (bar_w > 0) {
-        // The play time is figures, thus the bar centers on the digit height and
-        // not on the x-height. It keeps the thickness of the x-height, as each
-        // mark of the app does.
-        int bar_h = Fonts_getMetric(time_font, FONT_METRIC_X_HEIGHT);
-        int digit_h = Fonts_getMetric(time_font, FONT_METRIC_DIGIT_HEIGHT);
-        int ascent = Fonts_getMetric(time_font, FONT_METRIC_ASCENT);
-        int bar_y = ascent - digit_h + (digit_h - bar_h) / 2;
-
-        SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
-        SDL_FillRect(combined, &bar_bg, Theme_getPackedColor(THEME_ROLE_PROGRESS_TRACK, false));
-
-        if (duration_ms > 0) {
-            int fill_w = (int)((int64_t)bar_w * position_ms / duration_ms);
-            if (fill_w > bar_w) fill_w = bar_w;
-            if (fill_w > 0) {
-                SDL_Rect bar_fill = {bar_x, bar_y, fill_w, bar_h};
-                SDL_FillRect(combined, &bar_fill, Theme_getPackedColor(THEME_ROLE_PROGRESS_FILL, false));
-            }
-        }
-    }
-
-    // Clear previous and draw new
-    PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-    PLAT_drawOnLayer(combined, 0, progress_row_y, progress_screen_w, row_h, 1.0f, false,
-                     LAYER_PODCAST_PROGRESS);
-    SDL_FreeSurface(combined);
-
-    PLAT_GPU_Flip();
+    ScrollText_forget(&podcast_title_scroll);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }

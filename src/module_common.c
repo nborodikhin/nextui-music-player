@@ -8,8 +8,8 @@
 #include "module_player.h"
 #include "settings.h"
 #include "ui_main.h"
-#include "ui_music.h"
-#include "ui_radio.h"
+#include "ui_layers.h"
+#include "frame_state.h"
 #include "ui_utils.h"
 #include "player.h"
 #include "radio.h"
@@ -19,6 +19,7 @@
 #include "test_control.h"
 
 static bool autosleep_disabled = false;
+static FrameState frame = {0};
 static uint32_t last_input_time = 0;
 
 // Screen off hint state
@@ -174,7 +175,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
         }
         // Dialog is shown, consume input and render (covers entire screen)
         render_confirmation_dialog(screen, NULL, "Quit Music Player?");
-        GFX_flip(screen);
+        ModuleCommon_markSurfaceDrawn();
         result.input_consumed = true;
         return result;
     }
@@ -193,7 +194,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
         }
         // Dialog is shown, consume input and render (covers entire screen)
         render_controls_help(screen, help_id);
-        GFX_flip(screen);
+        ModuleCommon_markSurfaceDrawn();
         result.input_consumed = true;
         return result;
     }
@@ -228,11 +229,10 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
 
         if (show_dialog) {
             start_was_pressed = false;
-            // Clear all GPU layers so dialog is not obscured
-            GFX_clearLayers(LAYER_SCROLLTEXT);
-            PLAT_clearLayers(LAYER_PLAYTIME);
-            PLAT_GPU_Flip();
-            PlayTime_clear();
+            // The dialog covers the screen, thus the layers of the screen go.
+            // The frame that redraws the screen after the dialog paints them again.
+            UiLayer_clear(UI_LAYER_STATUS);
+            UiLayer_clear(UI_LAYER_ANIMATION);
             result.input_consumed = true;
             result.dirty = true;
             return result;
@@ -319,14 +319,8 @@ void ModuleCommon_quit(void) {
         autosleep_disabled = false;
     }
 
-    // Clear all GPU layers
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_PLAYTIME);
-    PLAT_clearLayers(LAYER_BUFFER);
-
-    // The layer holds the play time no more, thus the next render of a playing
-    // screen draws it again whatever the position says.
-    PlayTime_invalidate();
+    UiLayer_clear(UI_LAYER_STATUS);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
 void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
@@ -383,6 +377,25 @@ void ModuleCommon_frameBegin(void) {
     PAD_poll();
     TestControl_tick();
     Toast_tick();
+}
+
+void ModuleCommon_markSurfaceDrawn(void) {
+    FrameState_markSurfaceDrawn(&frame);
+}
+
+void ModuleCommon_markLayerDrawn(void) {
+    FrameState_markLayerDrawn(&frame);
+}
+
+void ModuleCommon_frameEnd(SDL_Surface* screen) {
+    switch (FrameState_take(&frame)) {
+        case FRAME_CHANGED_SURFACE: GFX_flip(screen);  break;
+        case FRAME_CHANGED_LAYERS:  PLAT_GPU_Flip();   break;
+        case FRAME_CHANGED_NOTHING:                    break;
+    }
+    // A present that the platform does not hold to the display rate, such as
+    // one with no window, would let the loop run free
+    GFX_sync();
 }
 
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {

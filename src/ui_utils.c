@@ -10,6 +10,7 @@
 #include "ui_fonts.h"
 #include "ui_icons.h"
 #include "module_common.h"
+#include "ui_layers.h"
 #include "list_nav.h"
 
 // Format duration as MM:SS
@@ -44,8 +45,8 @@ const char* get_format_name(AudioFormat format) {
 // Reset scroll state for new text
 void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
                       int max_width, ThemeRole role, bool selected, bool use_gpu) {
-    // Clear the scroll layer when text changes to avoid ghost text
-    GFX_clearLayers(LAYER_SCROLLTEXT);
+    // The marquee of the old text leaves the layer with it
+    UiLayer_clear(UI_LAYER_ANIMATION);
 
     // Free old cached surface if exists
     if (state->cached_scroll_surface) {
@@ -63,7 +64,6 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
     state->start_time = SDL_GetTicks();
     state->scroll_offset = 0;
     state->use_gpu_scroll = use_gpu;
-    state->scroll_active = false;
 
     // Don't enable scrolling yet - delay it so text appears static first
     // needs_scroll will be set to true in ScrollText_render after SCROLL_START_DELAY
@@ -88,7 +88,7 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
                                                             Theme_getColor(role, state->selected));
             if (text_surf) {
                 // Important: TTF rendering produces "transparent white" pixels which are not handled well by
-                // LAYER_SCROLLTEXT which expects premultiplied pixels.
+                // the GPU layer which expects premultiplied pixels.
                 // BLEND mode converts those into "transparent black"
                 SDL_SetSurfaceBlendMode(text_surf, SDL_BLENDMODE_BLEND);
                 SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &(SDL_Rect){0, 0, 0, 0});
@@ -99,14 +99,23 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
     }
 }
 
+void ScrollText_forget(ScrollTextState* state) {
+    if (state->cached_scroll_surface) SDL_FreeSurface(state->cached_scroll_surface);
+    memset(state, 0, sizeof(*state));
+}
+
 // Check if scrolling is active (text needs to scroll)
 bool ScrollText_isScrolling(ScrollTextState* state) {
     return state->needs_scroll;
 }
 
-// Check if scroll needs a render to transition from delay to active
+// True on the frame that ends the delay of a text that is too wide: the render
+// of that frame starts the marquee. The delay itself asks for no render, thus
+// a list does not redraw on each frame for one second while the title marquee
+// moves on the layer.
 bool ScrollText_needsRender(ScrollTextState* state) {
-    return state->text[0] && state->text_width > state->max_width && !state->needs_scroll;
+    return state->text[0] && state->text_width > state->max_width && !state->needs_scroll &&
+           SDL_GetTicks() - state->start_time >= SCROLL_START_DELAY;
 }
 
 // Activate scrolling after delay (for player screens that bypass ScrollText_render)
@@ -119,168 +128,22 @@ void ScrollText_activateAfterDelay(ScrollTextState* state) {
 
 // The screen title. One standard header is on the screen at a time, thus one
 // state serves each module: a module starts it on entry and the header renders
-// through it. A title that moves is on LAYER_SCROLLTEXT with the marquee of the
-// selected row, thus the two share one clear and one flip a frame. The row
-// paints through the scroll text of the platform, which flips by itself, thus
-// the title goes on the layer before it.
+// through it. A title that moves is on the animation layer with the marquee of
+// the selected row, thus the two share one clear a frame. The row paints the
+// layer where it moves, and it puts the title on the layer before the marquee.
 static ScreenTitle title_state;
 static bool        header_drawn = false;   // the last render drew a standard header
 static SDL_Rect    header_area;
 static bool        layer_painted_this_frame = false;  // by a row or the title
 static bool        layer_holds_title = false;
-
-// Where the display shows the title at rest. The surface has the title one flip
-// before the display does, and a present of the layer in between shows the old
-// surface, thus the layer keeps the title until the flip.
-typedef enum {
-    TITLE_OFF_SURFACE,
-    TITLE_SURFACE_PENDING,
-    TITLE_ON_SURFACE,
-} TitleSurface;
-static TitleSurface title_surface = TITLE_OFF_SURFACE;
+static bool        title_on_surface = false;  // the last render drew the title at rest
 
 static void paint_title_on_layer(uint32_t now);
 
-// Update scroll animation only (for GPU mode, doesn't redraw screen)
-// Call this when dirty=0 but scrolling is active - uses saved position from last render
-void ScrollText_animateOnly(ScrollTextState* state) {
-    if (!state->text[0] || !state->needs_scroll || !state->use_gpu_scroll) return;
-    if (!state->last_font) return;  // Never rendered yet
-
-    // Just update the scroll layer - don't redraw main screen
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    paint_title_on_layer(SDL_GetTicks());
-    layer_painted_this_frame = true;
-    GFX_scrollTextTexture(
-        state->last_font,
-        state->text,
-        state->last_x, state->last_y,
-        state->max_width,
-        TTF_FontHeight(state->last_font),
-        state->last_color,
-        1.0f,
-        NULL  // fontMutex - not needed for single-threaded rendering
-    );
-}
-
-// Render scrolling text - GPU mode for lists, software mode for player
-void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
-                       SDL_Surface* screen, int x, int y) {
-    if (!state->text[0]) return;
-
-    // Save position info for animate-only mode
-    state->last_x = x;
-    state->last_y = y;
-    state->last_font = font;
-    state->last_color = color;
-
-    // Check if scroll delay has elapsed - activate scrolling
-    if (!state->needs_scroll && state->text_width > state->max_width &&
-        SDL_GetTicks() - state->start_time >= SCROLL_START_DELAY) {
-        if (state->use_gpu_scroll && !state->scroll_active) {
-            // First frame after delay: reset GPU scroll and render static text
-            // This gives the GPU scroll one frame to initialize before we use it
-            GFX_resetScrollText();
-            state->scroll_active = true;
-        } else {
-            state->needs_scroll = true;
-        }
-    }
-
-    // If text fits (or still in delay/transition), render normally without scrolling
-    if (!state->needs_scroll) {
-        // Clear scroll layer to remove any previous scrolling text. The title
-        // that moves goes back on it, thus the flip of the surface that follows
-        // shows the title and not a blink.
-        GFX_clearLayers(LAYER_SCROLLTEXT);
-        paint_title_on_layer(SDL_GetTicks());
-        layer_painted_this_frame = true;
-        SDL_Surface* surf = TTF_RenderUTF8_Blended(font, state->text, color);
-        if (surf) {
-            SDL_Rect src = {0, 0, surf->w > state->max_width ? state->max_width : surf->w, surf->h};
-            SDL_BlitSurface(surf, &src, screen, &(SDL_Rect){x, y, 0, 0});
-            SDL_FreeSurface(surf);
-        }
-        return;
-    }
-
-    if (state->use_gpu_scroll) {
-        // GPU mode: Use NextUI's scroll text (has pill background)
-        GFX_clearLayers(LAYER_SCROLLTEXT);
-        paint_title_on_layer(SDL_GetTicks());
-        layer_painted_this_frame = true;
-        GFX_scrollTextTexture(
-            font,
-            state->text,
-            x, y,
-            state->max_width,
-            TTF_FontHeight(font),
-            color,
-            1.0f,
-            NULL  // fontMutex - not needed for single-threaded rendering
-        );
-    } else {
-        // Software mode: No background, smooth scrolling for player title
-        GFX_clearLayers(LAYER_SCROLLTEXT);
-
-        // Render text surface
-        SDL_Surface* single_surf = TTF_RenderUTF8_Blended(font, state->text, color);
-        if (!single_surf) return;
-
-        // Create combined surface with two text copies for seamless loop
-        SDL_Surface* full_surf = SDL_CreateRGBSurfaceWithFormat(0,
-            state->text_width * 2 + SCROLL_GAP, single_surf->h, 32, SDL_PIXELFORMAT_ARGB8888);
-        if (!full_surf) {
-            SDL_FreeSurface(single_surf);
-            return;
-        }
-
-        SDL_FillRect(full_surf, NULL, 0);
-        SDL_SetSurfaceBlendMode(single_surf, SDL_BLENDMODE_NONE);
-        SDL_BlitSurface(single_surf, NULL, full_surf, &(SDL_Rect){0, 0, 0, 0});
-        SDL_BlitSurface(single_surf, NULL, full_surf, &(SDL_Rect){state->text_width + SCROLL_GAP, 0, 0, 0});
-        SDL_FreeSurface(single_surf);
-
-        // Simple per-frame increment like NextUI
-        state->scroll_offset += 2;
-        if (state->scroll_offset >= state->text_width + SCROLL_GAP) {
-            state->scroll_offset = 0;
-        }
-
-        // Blit the visible portion
-        SDL_SetSurfaceBlendMode(full_surf, SDL_BLENDMODE_BLEND);
-        SDL_Rect src = {state->scroll_offset, 0, state->max_width, full_surf->h};
-        SDL_Rect dst = {x, y, 0, 0};
-        SDL_BlitSurface(full_surf, &src, screen, &dst);
-        SDL_FreeSurface(full_surf);
-    }
-}
-
-// Unified update: checks for text change, resets if needed, and renders
-// use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
-void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
-                       int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
-                       int x, int y, bool use_gpu) {
-    // Rebuild the cache when its text, its role or the state of its row changes.
-    // ScrollText_reset() bakes the color into the cached surface.
-    if (strcmp(state->text, text) != 0 || state->role != role
-        || state->selected != selected) {
-        ScrollText_reset(state, text, font, max_width, role, selected, use_gpu);
-    }
-    ScrollText_render(state, font, Theme_getColor(role, selected), screen, x, y);
-}
-
-// GPU scroll without background (for player title)
-// Uses PLAT_drawOnLayer to render to GPU layer without pill background
-void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
-                         SDL_Color color, int x, int y, int layer) {
+// Draws the marquee of `state` at its offset on the animation layer, and moves
+// it `step` pixels for the next frame. Draws nothing where the text fits.
+static void paint_cached_marquee(ScrollTextState* state, int x, int y, int step) {
     if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) return;
-
-    // Save render info
-    state->last_x = x;
-    state->last_y = y;
-    state->last_font = font;
-    state->last_color = color;
 
     int padding = SCALE1(SCROLL_GAP);
     int height = state->cached_scroll_surface->h;
@@ -295,14 +158,92 @@ void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
     SDL_Rect src = {state->scroll_offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
 
-    PLAT_drawOnLayer(clipped, x, y, state->max_width, height, 1.0f, false, layer);
+    UiLayer_blit(clipped, x, y, UI_LAYER_ANIMATION);
     SDL_FreeSurface(clipped);
 
-    // Advance scroll offset (1 pixel per frame for smooth, slower scrolling)
-    state->scroll_offset += 1;
+    state->scroll_offset += step;
     if (state->scroll_offset >= state->text_width + padding) {
         state->scroll_offset = 0;
     }
+}
+
+// The marquee of a row moves two pixels a frame, as the rows of the platform do.
+#define ROW_MARQUEE_STEP 2
+
+// Paints the animation layer of a list screen: the title of the header where it
+// is not on the surface, then the marquee of the row. One clear serves both.
+static void paint_row_layer(ScrollTextState* state, int x, int y) {
+    UiLayer_clear(UI_LAYER_ANIMATION);
+    layer_holds_title = false;
+    paint_title_on_layer(SDL_GetTicks());
+    layer_painted_this_frame = true;
+    paint_cached_marquee(state, x, y, ROW_MARQUEE_STEP);
+}
+
+// Update scroll animation only (for GPU mode, doesn't redraw screen)
+// Call this when dirty=0 but scrolling is active - uses saved position from last render
+void ScrollText_animateOnly(ScrollTextState* state) {
+    if (!state->text[0] || !state->needs_scroll || !state->use_gpu_scroll) return;
+    if (!state->last_font) return;  // Never rendered yet
+
+    paint_row_layer(state, state->last_x, state->last_y);
+}
+
+void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
+                       SDL_Surface* screen, int x, int y) {
+    if (!state->text[0]) return;
+
+    // Save position info for animate-only mode
+    state->last_x = x;
+    state->last_y = y;
+    state->last_font = font;
+    state->last_color = color;
+
+    // Check if scroll delay has elapsed - activate scrolling
+    ScrollText_activateAfterDelay(state);
+
+    // If text fits (or still in delay/transition), render normally without scrolling
+    if (!state->needs_scroll) {
+        // The layer holds the marquee of the row before, thus it clears. The
+        // title that moves goes back on it.
+        paint_row_layer(state, x, y);
+        SDL_Surface* surf = TTF_RenderUTF8_Blended(font, state->text, color);
+        if (surf) {
+            SDL_Rect src = {0, 0, surf->w > state->max_width ? state->max_width : surf->w, surf->h};
+            SDL_BlitSurface(surf, &src, screen, &(SDL_Rect){x, y, 0, 0});
+            SDL_FreeSurface(surf);
+        }
+        return;
+    }
+
+    // The marquee is on the layer, thus the surface holds no text under it
+    paint_row_layer(state, x, y);
+}
+
+// Unified update: checks for text change, resets if needed, and renders
+void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
+                       int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
+                       int x, int y, bool use_gpu) {
+    // Rebuild the cache when its text, its role or the state of its row changes.
+    // ScrollText_reset() bakes the color into the cached surface.
+    if (strcmp(state->text, text) != 0 || state->role != role
+        || state->selected != selected) {
+        ScrollText_reset(state, text, font, max_width, role, selected, use_gpu);
+    }
+    ScrollText_render(state, font, Theme_getColor(role, selected), screen, x, y);
+}
+
+// The marquee of a playing title, on the layer of the playing screen. It moves
+// one pixel a frame, thus a long title reads at rest.
+void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
+                         SDL_Color color, int x, int y) {
+    // Save render info
+    state->last_x = x;
+    state->last_y = y;
+    state->last_font = font;
+    state->last_color = color;
+
+    paint_cached_marquee(state, x, y, 1);
 }
 
 // The platform draws the status group only where the screen has the room for it.
@@ -452,11 +393,10 @@ bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
     return true;
 }
 
-// Paints the title on LAYER_SCROLLTEXT, after a clear of the layer and before
-// its flip. The layer shows the title while the display does not: while it
-// moves, and at rest until the flip of the surface frame that draws it.
+// Paints the title on the animation layer, after a clear of the layer. The
+// layer shows the title while the surface does not: while it moves.
 static void paint_title_on_layer(uint32_t now) {
-    if (!header_drawn || title_surface == TITLE_ON_SURFACE) return;
+    if (!header_drawn || title_on_surface) return;
 
     TTF_Font* font = Fonts_getLarge();
     SDL_Surface* slice = SDL_CreateRGBSurfaceWithFormat(0, header_area.w, header_area.h, 32,
@@ -465,8 +405,7 @@ static void paint_title_on_layer(uint32_t now) {
     SDL_FillRect(slice, NULL, 0);
     blit_title_slice(slice, 0, 0, &title_state, font,
                      Theme_getColor(THEME_ROLE_SECONDARY, false), header_area.w, now);
-    PLAT_drawOnLayer(slice, header_area.x, header_area.y, header_area.w, header_area.h,
-                     1.0f, false, LAYER_SCROLLTEXT);
+    UiLayer_blit(slice, header_area.x, header_area.y, UI_LAYER_ANIMATION);
     SDL_FreeSurface(slice);
     layer_holds_title = true;
 }
@@ -474,8 +413,8 @@ static void paint_title_on_layer(uint32_t now) {
 bool ScreenTitle_start(bool defer) {
     bool before = title_state.defer;
     ScreenTitle_reset(&title_state, defer);
-    header_drawn  = false;
-    title_surface = TITLE_OFF_SURFACE;
+    header_drawn     = false;
+    title_on_surface = false;
     return before;
 }
 
@@ -490,13 +429,9 @@ void ScreenTitle_frameEnd(int* dirty, bool has_header) {
         layer_holds_title = false;
         return;
     }
-    if (title_surface == TITLE_SURFACE_PENDING) {
-        // The flip of this frame put the surface with the title on the display
-        title_surface = TITLE_ON_SURFACE;
-    }
 
     uint32_t now = SDL_GetTicks();
-    if (header_drawn && ScreenTitle_needsFrame(&title_state, now, title_surface != TITLE_OFF_SURFACE)) {
+    if (header_drawn && ScreenTitle_needsFrame(&title_state, now, title_on_surface)) {
         *dirty = 1;
     }
 
@@ -504,16 +439,14 @@ void ScreenTitle_frameEnd(int* dirty, bool has_header) {
         // A row painted the layer this frame, and the title with it
         return;
     }
-    if (header_drawn && title_surface == TITLE_OFF_SURFACE) {
-        // Moving, or at rest until the surface frame draws it
-        GFX_clearLayers(LAYER_SCROLLTEXT);
+    if (header_drawn && !title_on_surface) {
+        // The title moves, thus each frame draws it
+        UiLayer_clear(UI_LAYER_ANIMATION);
         paint_title_on_layer(now);
-        PLAT_GPU_Flip();
         layer_painted_this_frame = true;
     } else if (layer_holds_title) {
         // The surface shows the title, thus its last slice leaves the layer
-        GFX_clearLayers(LAYER_SCROLLTEXT);
-        PLAT_GPU_Flip();
+        UiLayer_clear(UI_LAYER_ANIMATION);
         layer_holds_title = false;
     }
 }
@@ -541,17 +474,11 @@ void render_screen_header(SDL_Surface* screen, const char* text, int show_settin
 
     header_area  = screen_title_area(screen, status_w, TTF_FontHeight(font));
     header_drawn = true;
-    bool drew = paint_screen_title(screen, &title_state, font,
-                                   Theme_getColor(THEME_ROLE_SECONDARY, false), header_area, now);
-    // The display shows this surface after the flip. Until then the layer keeps
-    // the title: a present of the layer before the flip shows the old surface.
-    // Where the display shows the title at rest already, the old surface has
-    // it too, thus the layer stays clear and the title is not drawn twice.
-    if (!drew) {
-        title_surface = TITLE_OFF_SURFACE;
-    } else if (title_surface != TITLE_ON_SURFACE) {
-        title_surface = TITLE_SURFACE_PENDING;
-    }
+    // The surface and the layer reach the display in one present, thus a title
+    // at rest on the surface leaves the layer in the same frame.
+    title_on_surface = paint_screen_title(screen, &title_state, font,
+                                          Theme_getColor(THEME_ROLE_SECONDARY, false),
+                                          header_area, now);
 }
 
 // Adjust scroll offset to keep selected item visible. Forwards to list_nav.c,
@@ -1125,10 +1052,9 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
 // ============================================
 
 DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
-    // Clear scroll text GPU layer so it doesn't show through the dialog. The
-    // title of the header under the dialog leaves the layer with it, until the
-    // header draws again.
-    GFX_clearLayers(LAYER_SCROLLTEXT);
+    // The marquee under the dialog leaves the layer. The title of the header
+    // under the dialog leaves it too, until the header draws again.
+    UiLayer_clear(UI_LAYER_ANIMATION);
     header_drawn = false;
     layer_holds_title = false;
 

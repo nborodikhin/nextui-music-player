@@ -6,10 +6,8 @@
 #include "toast.h"
 #include "toast_state.h"
 #include "ui_fonts.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
-
-// Toast sits on the highest GPU layer, above scroll text and every other overlay.
-#define LAYER_TOAST 5
 
 static ToastState state;
 
@@ -59,10 +57,8 @@ static void draw(void) {
         int text_y = border + (toast_h - text->h) / 2;
         SDL_BlitSurface(text, NULL, surface, &(SDL_Rect){text_x, text_y});
 
-        PLAT_clearLayers(LAYER_TOAST);
-        PLAT_drawOnLayer(surface, toast_x - border, toast_y - border,
-                         surface_w, surface_h, 1.0f, false, LAYER_TOAST);
-        PLAT_GPU_Flip();
+        UiLayer_clear(UI_LAYER_TOAST);
+        UiLayer_blit(surface, toast_x - border, toast_y - border, UI_LAYER_TOAST);
 
         SDL_FreeSurface(surface);
     }
@@ -70,8 +66,7 @@ static void draw(void) {
 }
 
 static void clear(void) {
-    PLAT_clearLayers(LAYER_TOAST);
-    PLAT_GPU_Flip();
+    UiLayer_clear(UI_LAYER_TOAST);
 }
 
 static ToastToken show(const char* msg, uint32_t duration_ms, bool screen_bound) {

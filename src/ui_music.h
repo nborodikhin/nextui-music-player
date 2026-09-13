@@ -6,19 +6,12 @@
 #include "browser.h"
 #include "player.h"
 
-// Use LAYER_THUMBNAIL (3) for playtime - platform only supports layers 0-5
-#define LAYER_PLAYTIME 3
-#define LAYER_LYRICS 2
+// The file browser of the music player. The playing screen is in
+// ui_music_playing.h.
 
 // Render the file browser screen
 void render_browser(SDL_Surface* screen, int show_setting,
                     BrowserContext* browser);
-
-// Render the now playing screen
-// playlist_track_num and playlist_total: if > 0, use these instead of browser counts
-void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* browser,
-                    bool shuffle_enabled, bool repeat_enabled,
-                    int playlist_track_num, int playlist_total);
 
 // Check if browser list has active scrolling (for refresh optimization)
 bool browser_needs_scroll_refresh(void);
@@ -28,33 +21,5 @@ bool browser_scroll_needs_render(void);
 
 // Animate browser scroll only (GPU mode, no screen redraw needed)
 void browser_animate_scroll(void);
-
-// Check if player title has active scrolling (for refresh optimization)
-bool player_needs_scroll_refresh(void);
-
-// Check if player title scroll needs a render to transition (delay phase)
-bool player_title_scroll_needs_render(void);
-
-// Scrolling title, as painted onto the player's overlay layer.
-bool player_title_scroll_showing(void);
-void player_title_scroll_paint(int layer);
-
-// Playtime GPU rendering functions
-void PlayTime_setPosition(int x, int y);
-void PlayTime_renderGPU(void);
-bool PlayTime_needsRefresh(void);
-void PlayTime_clear(void);
-
-// Drop the cached elapsed/duration so the next render repaints the layer.
-void PlayTime_invalidate(void);
-
-// Lyrics GPU rendering functions
-void Lyrics_setGPUPosition(int x, int y, int max_w);
-void Lyrics_renderGPU(void);
-bool Lyrics_GPUneedsRefresh(void);
-void Lyrics_clearGPU(void);
-
-// Drop the cached lyric lines so the next render repaints the layer.
-void Lyrics_invalidateGPU(void);
 
 #endif

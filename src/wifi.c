@@ -7,15 +7,17 @@
 #include "wifi.h"
 #include "ui_fonts.h"
 #include "ui_theme.h"
-#include "ui_podcast.h"  // For Podcast_clearTitleScroll
+#include "ui_layers.h"
+#include "module_common.h"
 
 // WiFi connection timeout (in 500ms intervals)
 #define WIFI_CONNECT_TIMEOUT_INTERVALS 10  // 5 seconds total
 
-// Render a simple "Connecting..." screen
+// Render a simple "Connecting..." screen. The wait for the network blocks
+// after it, thus the screen presents its frame here.
 static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
-    // Clear GPU scroll text layer to prevent bleeding through
-    Podcast_clearTitleScroll();
+    // The marquee of the list under it leaves the layer
+    UiLayer_clear(UI_LAYER_ANIMATION);
     GFX_clear(scr);
 
     int hw = scr->w;
@@ -33,7 +35,8 @@ static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
     // This screen draws the status group at each width. The wifi indicator in it is
     // what reports the connection, thus the screen loses its subject without it.
     GFX_blitHardwareGroup(scr, show_setting);
-    GFX_flip(scr);
+    ModuleCommon_markSurfaceDrawn();
+    ModuleCommon_frameEnd(scr);
 }
 
 // Check if WiFi is currently connected

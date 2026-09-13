@@ -32,6 +32,14 @@
 # height, the viewport and the rows come in, and the scroll comes out. Its test
 # links list_nav.c for the wrap of the cursor.
 #
+# frame_state.c is the record of what a frame changed: two flags in, and the
+# presentation that the frame needs out. The calls of the platform stay in
+# module_common.c.
+#
+# lyric_window.c is the timing and the layout of the lyric window: the lines and
+# the position come in, and the current index and the rows come out. It reads
+# the line type from lyrics.h, which holds no platform include.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -46,7 +54,8 @@ BIN      = bin
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
-           $(BIN)/test_podcast_episode_layout
+           $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
+           $(BIN)/test_lyric_window
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -66,6 +75,10 @@ TESTS   += $(BIN)/test_ui_utils
 # the tree.
 TESTS   += $(BIN)/test_ui_fonts
 
+# ui_music_playing.c draws with SDL_ttf, thus its test links the objects of the
+# desktop build as the two above do.
+TESTS   += $(BIN)/test_ui_music_playing
+
 .PHONY: all build check run clean
 all: run
 
@@ -74,6 +87,7 @@ build: $(TESTS)
 
 check:
 	./check_color_calls.py
+	./check_present_calls.py
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -93,6 +107,13 @@ $(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/scree
 $(BIN)/test_podcast_episode_layout: test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c \
                                     $(SRC)/podcast_episode_layout.h $(SRC)/list_nav.c test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_podcast_episode_layout.c $(SRC)/podcast_episode_layout.c $(SRC)/list_nav.c
+
+$(BIN)/test_frame_state: test_frame_state.c $(SRC)/frame_state.c $(SRC)/frame_state.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_frame_state.c $(SRC)/frame_state.c
+
+$(BIN)/test_lyric_window: test_lyric_window.c $(SRC)/lyric_window.c $(SRC)/lyric_window.h \
+                          $(SRC)/lyrics.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_lyric_window.c $(SRC)/lyric_window.c
 
 $(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c
@@ -138,6 +159,12 @@ $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h
 
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_fonts.c \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
+
+$(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
+	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_music_playing.c \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)

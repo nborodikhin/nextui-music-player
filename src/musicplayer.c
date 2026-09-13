@@ -155,7 +155,9 @@ int main(int argc, char* argv[]) {
             });
             SDL_FreeSurface(loading);
         }
-        GFX_flip(screen);
+        // The init that follows blocks, thus the splash presents its frame here
+        ModuleCommon_markSurfaceDrawn();
+        ModuleCommon_frameEnd(screen);
     }
 
     InitSettings();

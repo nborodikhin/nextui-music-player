@@ -22,25 +22,30 @@ typedef struct {
     uint32_t start_time;    // Animation start time
     bool needs_scroll;      // True if text is wider than max_width
     int scroll_offset;      // Current pixel offset for smooth scrolling
-    bool use_gpu_scroll;    // True = use GPU layer (for lists), False = software (for player)
+    bool use_gpu_scroll;    // True where the marquee goes on the animation layer
     int last_x, last_y;     // Last render position (for animate-only mode)
     TTF_Font* last_font;    // Last font used (for animate-only mode)
     SDL_Color last_color;   // Last color used (for animate-only mode)
     ThemeRole role;         // Role of the cached text
     bool selected;          // True where the text sits on a selection pill
     SDL_Surface* cached_scroll_surface;  // Cached surface for GPU scroll (no bg)
-    bool scroll_active;     // True once GPU scroll has actually started (after delay)
 } ScrollTextState;
 
-// Reset scroll state for new text
-// use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
+// Reset scroll state for new text. Pass true in `use_gpu` to build the cached
+// marquee for the animation layer; with false a text wider than its space stays
+// at rest.
 void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
                       int max_width, ThemeRole role, bool selected, bool use_gpu);
+
+// Forgets the text and frees the cached marquee. Call on the way out of a
+// screen, thus the next text starts from rest and no surface leaks.
+void ScrollText_forget(ScrollTextState* state);
 
 // Check if scrolling is active (text needs to scroll)
 bool ScrollText_isScrolling(ScrollTextState* state);
 
-// Check if scroll needs a render to transition from delay to active
+// True where the delay of a text that is too wide has ended and the marquee
+// waits for one render to start.
 bool ScrollText_needsRender(ScrollTextState* state);
 
 // Activate scrolling after delay (for player screens that bypass ScrollText_render)
@@ -50,21 +55,22 @@ void ScrollText_activateAfterDelay(ScrollTextState* state);
 // Call this when dirty=0 but scrolling is active - uses saved position from last render
 void ScrollText_animateOnly(ScrollTextState* state);
 
-// Render scrolling text (call every frame)
+// Draws the text of a row: at rest on the surface where it fits or waits, and
+// as a marquee on the animation layer where it moves. Call every frame that
+// renders the row.
 void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
                        SDL_Surface* screen, int x, int y);
 
 // Unified update: checks for text change, resets if needed, and renders
-// use_gpu: true for lists (GPU layer with pill bg), false for player (software, no bg)
 void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
                        int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
                        int x, int y, bool use_gpu);
 
-// Draw the scrolling text at its current offset onto `layer`, and advance it. Does not
-// clear the layer or flip: the caller owns the layer and decides what else goes
-// on it.
+// Draws the marquee of a playing title at its offset on the animation layer,
+// and moves it for the next frame. Does not clear the layer: the painter of
+// the layer of the screen owns the clear and the z order.
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
-                         SDL_Color color, int x, int y, int layer);
+                         SDL_Color color, int x, int y);
 
 // The y of the top of the chip of a playing screen. The chip shares the line of the
 // status group, thus it takes the top margin where the platform draws none. It then
@@ -94,8 +100,8 @@ bool screen_has_status_group(SDL_Surface* screen);
 SDL_Rect screen_title_area(SDL_Surface* screen, int status_w, int text_h);
 
 // Paints `title` at rest in `area` of the surface and returns true. A title that
-// moves is not painted here, and false comes back: its marquee goes on
-// LAYER_SCROLLTEXT, thus a frame of the marquee costs no redraw of the surface.
+// moves is not painted here, and false comes back: its marquee goes on the
+// animation layer, thus a frame of the marquee costs no redraw of the surface.
 bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
                         SDL_Color color, SDL_Rect area, uint32_t now);
 
@@ -106,14 +112,15 @@ bool paint_screen_title(SDL_Surface* screen, ScreenTitle* title, TTF_Font* font,
 // again with that mode when it returns.
 bool ScreenTitle_start(bool defer);
 
-// Call at the start of each frame, before any paint of LAYER_SCROLLTEXT.
+// Call at the start of each frame, before any paint of the animation layer.
 void ScreenTitle_frameBegin(void);
 
-// Call once at the end of each frame of a module loop, after its flip. Pass true
-// in `has_header` where the screen of this frame draws a standard header. Sets
-// `dirty` where the title needs a frame of the surface, and paints the marquee
-// on LAYER_SCROLLTEXT where the row of the list did not paint the layer this
-// frame. A screen with no header leaves the layer to its own painter.
+// Call once at the end of each frame of a module loop, before the presentation
+// of the frame. Pass true in `has_header` where the screen of this frame draws
+// a standard header. Sets `dirty` where the title needs a frame of the surface,
+// and paints the marquee on the animation layer where the row of the list did
+// not paint the layer this frame. A screen with no header leaves the layer to
+// its own painter.
 void ScreenTitle_frameEnd(int* dirty, bool has_header);
 
 // Draws the status group and the screen title `text`. The title of a module is
