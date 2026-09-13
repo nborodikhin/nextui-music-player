@@ -5,6 +5,7 @@
 #include "api.h"
 #include "help_screen.h"
 #include "module_common.h"
+#include "ui_layers.h"
 #include "module_menu.h"
 #include "display_helper.h"
 #include "ui_main.h"
@@ -99,7 +100,7 @@ MenuSelection MenuModule_run(DisplayContext* display) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -108,13 +109,13 @@ MenuSelection MenuModule_run(DisplayContext* display) {
         ListNavChange ch = ListNav_step(&nav, ListNavPad_read());
         if (ch.moved) {
             last_selection = MenuRows_selectionAt(&rows, nav.selected);
-            GFX_clearLayers(LAYER_SCROLLTEXT);
+            UiLayer_clear(UI_LAYER_ANIMATION);
             dirty = 1;
         }
         else if (PAD_justPressed(BTN_A)) {
             MenuSelection selection = MenuRows_selectionAt(&rows, nav.selected);
             if (selection == MENU_NONE) continue;  // cursor off the end; ignore
-            GFX_clearLayers(LAYER_SCROLLTEXT);
+            UiLayer_clear(UI_LAYER_ANIMATION);
             last_selection = selection;
             return selection;
         }
@@ -126,7 +127,7 @@ MenuSelection MenuModule_run(DisplayContext* display) {
                 } else {
                     Resume_clear();
                 }
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 nav.selected = 0;
                 last_selection = MenuRows_selectionAt(&rows, 0);
                 dirty = 1;
@@ -134,7 +135,7 @@ MenuSelection MenuModule_run(DisplayContext* display) {
         }
         else if (PAD_justPressed(BTN_B)) {
             if (Toast_isShowing(exit_prompt)) {
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 exiting = 1;
                 // Unbound: it has to outlive the menu as the last frame on screen.
                 Toast_show("Exiting...", TOAST_DURATION);
@@ -156,20 +157,20 @@ MenuSelection MenuModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-
-            if (exiting) {
-                // Give the "Exiting..." toast a moment on screen before NextUI
-                // takes over and starts rendering its own UI.
-                SDL_Delay(EXIT_TOAST_DELAY_MS);
-                return MENU_QUIT;
-            }
         } else {
             // Software scroll needs continuous redraws
             if (menu_needs_scroll_redraw()) dirty = 1;
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, true);
+        ModuleCommon_frameEnd(screen);
+
+        if (exiting) {
+            // Give the "Exiting..." toast a moment on screen before NextUI
+            // takes over and starts rendering its own UI.
+            SDL_Delay(EXIT_TOAST_DELAY_MS);
+            return MENU_QUIT;
+        }
     }
 }

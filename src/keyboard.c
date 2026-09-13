@@ -256,7 +256,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
             // once the state alone would not say so
             if (global.dirty) force_render = true;
             swallow_buttons = true;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -264,7 +264,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
         if (swallow_buttons) {
             if (PAD_isPressed(BTN_A) || PAD_isPressed(BTN_B) || PAD_isPressed(BTN_X) ||
                 PAD_isPressed(BTN_Y) || PAD_isPressed(BTN_SELECT)) {
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
             swallow_buttons = false;
@@ -332,7 +332,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
                 holding = false;
                 cancelled = false;
                 close_variants_panel(&state);
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
 
@@ -415,18 +415,17 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
             !UIKeyboard_stateEquals(&ui_state, &last_ui_state)
         ) {
             UIKeyboard_render(screen, &ui_state);
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
 
             memcpy(&last_ui_state, &ui_state, sizeof last_ui_state);
             last_text_version = state.text_version;
             force_render = false;
-        } else {
-            GFX_sync();
         }
         // A title that needs a surface frame asks for it through the redraw flag
         int title_frame = 0;
         ScreenTitle_frameEnd(&title_frame, true);
         if (title_frame) force_render = true;
+        ModuleCommon_frameEnd(screen);
     }
 
     ScreenTitle_start(outer_title_defer);

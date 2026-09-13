@@ -58,7 +58,7 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -255,11 +255,10 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, true);
+        ModuleCommon_frameEnd(screen);
     }
 }

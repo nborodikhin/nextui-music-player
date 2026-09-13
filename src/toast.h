@@ -14,6 +14,7 @@
 //
 // The toast is not part of the screen surface, so it neither needs nor causes a
 // module redraw: it is painted once when shown and cleared once when it ends.
+// The presenter of the frame gives the layer to the display.
 
 // ============================================
 // Toast API

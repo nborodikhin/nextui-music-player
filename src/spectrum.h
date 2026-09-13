@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "ui_layers.h"
 
 #define SPECTRUM_FFT_SIZE 512
 #define SPECTRUM_BARS 64
@@ -27,10 +28,13 @@ void Spectrum_reset(void);
 void Spectrum_setPosition(int x, int y, int w, int h);
 bool Spectrum_needsRefresh(void);
 
-// Returns true while the spectrum has something on the overlay layer of a playing
-// screen. The painter of that layer asks this before it draws the bars.
+// Returns true while the spectrum has something on the animation layer of a
+// playing screen. The painter of that layer asks this before it draws the bars.
 bool Spectrum_isShowing(void);
-void Spectrum_paint(int layer);
+
+// Draws the bars on `layer`. Does not clear the layer: the painter of the layer
+// of the screen owns the clear and the z order.
+void Spectrum_paint(UiLayer layer);
 
 // Rotate through each style and then off. The only control of the spectrum.
 void Spectrum_cycleNext(void);

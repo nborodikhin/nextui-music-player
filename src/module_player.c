@@ -15,6 +15,8 @@
 #include "browser.h"
 #include "playlist.h"
 #include "ui_music.h"
+#include "ui_music_playing.h"
+#include "ui_layers.h"
 #include "ui_album_art.h"
 #include "ui_main.h"
 #include "lyrics.h"
@@ -64,36 +66,10 @@ static char resume_playlist_path[512] = "";
 // Resume: last save timestamp for periodic updates
 static uint32_t last_resume_save = 0;
 
-// A display recreate drops every GPU layer. The scrolling title and spectrum
-// come back with the next render of the playing screen, and the elapsed time
-// repaints as soon as the position moves again - but the lyric cache would still
-// match the vanished layer, so drop both caches to force one repaint.
+// A display recreate drops every GPU layer. The next frame paints each one
+// again, whatever the caches of the screen say.
 static void display_recreated(void) {
-    PlayTime_invalidate();
-    Lyrics_invalidateGPU();
-}
-
-
-// Clear all player GPU overlay layers
-static void clear_gpu_layers(void) {
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_PLAYTIME);
-    PLAT_clearLayers(LAYER_LYRICS);
-    PLAT_GPU_Flip();
-
-    // The layer holds the play time no more, thus the next render of the screen
-    // draws it again whatever the position says.
-    PlayTime_invalidate();
-}
-
-// The playing screen draws its spectrum and its scrolling title onto one GPU
-// layer, so both are painted together after a single clear - neither can wipe
-// the other. Call order is z order: the scrolling title sits on top.
-static void paint_player_layer(void) {
-    PLAT_clearLayers(LAYER_SCROLLTEXT);
-    if (Spectrum_isShowing())          Spectrum_paint(LAYER_SCROLLTEXT);
-    if (player_title_scroll_showing()) player_title_scroll_paint(LAYER_SCROLLTEXT);
-    PLAT_GPU_Flip();
+    MusicPlaying_invalidate();
 }
 
 // Helper to load directory
@@ -134,6 +110,9 @@ static bool try_load_and_play(const char *path) {
                 album_art_fetch(artist, title);
             }
         }
+        // The lyrics belong to the track, thus a new track takes the old ones
+        // away, and fetches its own where the lyrics are on
+        Lyrics_clear();
         if (Settings_getLyricsEnabled() && info) {
             Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
         }
@@ -216,32 +195,12 @@ static bool handle_track_ended(void) {
     return browser_pick_next();
 }
 
+// The layers of the playing screen, once for each frame of the loop. A frame
+// that redraws the screen paints them after that redraw, thus this one leaves
+// them to the render block.
 static void refresh_gpu_layers(int* dirty) {
     if (ModuleCommon_isScreenOffHintActive()) return;
-
-    bool repaint_layer = false;
-
-    if (player_needs_scroll_refresh()) repaint_layer = true;
-    if (player_title_scroll_needs_render()) *dirty = 1;
-    if (Spectrum_needsRefresh()) {
-        Spectrum_update();
-
-        // The bars move on each frame while they draw, and the frame after the
-        // last one takes them away. A spectrum that draws nothing needs neither.
-        static bool was_showing = false;
-        bool showing = Spectrum_isShowing();
-        if (showing || was_showing) repaint_layer = true;
-        was_showing = showing;
-    }
-    // A frame that redraws the screen paints the layer after that redraw, thus
-    // the bars and the title do not reach the display before the rest of the
-    // screen. This frame therefore leaves the layer to the render block.
-    if (repaint_layer && !*dirty) paint_player_layer();
-
-    // The play time gives its layer to the display as soon as it draws, thus a
-    // frame that redraws the screen leaves it to the render block as well.
-    if (!*dirty && PlayTime_needsRefresh()) PlayTime_renderGPU();
-    if (Lyrics_GPUneedsRefresh()) Lyrics_renderGPU();
+    if (MusicPlaying_frame(*dirty != 0)) *dirty = 1;
 }
 
 // Start playback of a track (load + play + init spectrum)
@@ -262,9 +221,7 @@ static bool start_playback(const char* path) {
 // Clean up playback state. Pass true in `quit_spectrum` where the playing screen
 // goes as well, thus the spectrum releases its FFT and its layer.
 static void cleanup_playback(bool quit_spectrum) {
-    clear_gpu_layers();
-    PlayTime_clear();
-    Lyrics_clearGPU();
+    MusicPlaying_leave();
     Lyrics_clear();
     if (quit_spectrum) {
         Spectrum_quit();
@@ -274,12 +231,10 @@ static void cleanup_playback(bool quit_spectrum) {
     ModuleCommon_setAutosleepDisabled(false);
 }
 
-// Clean up playback UI only (audio keeps playing in background)
+// Clean up playback UI only (audio keeps playing in background). The lyrics
+// stay with the track, thus the screen shows them again on the way back.
 static void cleanup_playback_ui(void) {
-    clear_gpu_layers();
-    PlayTime_clear();
-    Lyrics_clearGPU();
-    Lyrics_clear();
+    MusicPlaying_leave();
     Spectrum_quit();
 }
 
@@ -300,7 +255,7 @@ static bool build_and_start_playlist(const char* dir_path, const char* start_fil
 // Render delete confirmation dialog
 static void render_delete_dialog(SDL_Surface* screen) {
     render_confirmation_dialog(screen, delete_target_name, NULL);
-    GFX_flip(screen);
+    ModuleCommon_markSurfaceDrawn();
 }
 
 // Handle USB/Bluetooth media button events
@@ -386,7 +341,7 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
             browser_go_up();
             *dirty = 1;
         } else {
-            GFX_clearLayers(LAYER_SCROLLTEXT);
+            UiLayer_clear(UI_LAYER_ANIMATION);
             if (!Background_isPlaying()) {
                 Spectrum_quit();
                 Browser_freeEntries(&browser);
@@ -431,7 +386,7 @@ static bool handle_browser_input(PlayerInternalState *state, int *dirty) {
                 snprintf(delete_target_path, sizeof(delete_target_path), "%s", entry->path);
                 snprintf(delete_target_name, sizeof(delete_target_name), "%s", entry->name);
                 show_delete_confirm = true;
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 *dirty = 1;
             }
         }
@@ -490,9 +445,9 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
             if (ModuleCommon_processScreenOffHintTimeout()) {
                 screen_off = true;
                 GFX_clear(screen);
-                GFX_flip(screen);
+                ModuleCommon_markSurfaceDrawn();
             }
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             return true;
         }
     }
@@ -510,7 +465,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
             ModuleCommon_startScreenOffHint();
             GFX_clear(screen);
             render_screen_off_hint(screen);
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
         }
 
         if (Player_getState() == PLAYER_STATE_STOPPED) {
@@ -525,7 +480,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
                 *dirty = 1;
             }
         }
-        GFX_sync();
+        ModuleCommon_frameEnd(screen);
         return true;
     }
 
@@ -580,11 +535,10 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         *dirty = 1;
     }
     else if (PAD_justPressed(BTN_R3) || PAD_justPressed(BTN_R2)) {
+        // Lyrics that are off hide, and keep their data. Lyrics that come back
+        // fetch only where the track has none.
         Settings_toggleLyrics();
-        if (!Settings_getLyricsEnabled()) {
-            Lyrics_clear();
-        } else {
-            // Re-fetch lyrics for current track
+        if (Settings_getLyricsEnabled()) {
             const TrackInfo* info = Player_getTrackInfo();
             if (info) {
                 Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
@@ -594,7 +548,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
     else if (PAD_tappedSelect(SDL_GetTicks())) {
         ModuleCommon_startScreenOffHint();
-        clear_gpu_layers();
+        MusicPlaying_leave();
         *dirty = 1;
     }
 
@@ -622,7 +576,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
 
     // Auto screen-off after inactivity
     if (Player_getState() == PLAYER_STATE_PLAYING && ModuleCommon_checkAutoScreenOffTimeout()) {
-        clear_gpu_layers();
+        MusicPlaying_leave();
         *dirty = 1;
     }
 
@@ -672,8 +626,8 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
             }
             // Still active, render dialog (covers entire screen)
             AddToPlaylist_render(screen);
-            GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_markSurfaceDrawn();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -698,7 +652,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
             }
             // Render delete dialog
             render_delete_dialog(screen);
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -718,7 +672,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
             }
             if (global.input_consumed) {
                 if (global.dirty) dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
         }
@@ -752,16 +706,14 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
                 int pl_track = playlist_active ? Playlist_getCurrentIndex(&playlist) + 1 : 0;
                 int pl_total = playlist_active ? Playlist_getCount(&playlist) : 0;
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-                paint_player_layer();
-                PlayTime_renderGPU();
+                MusicPlaying_paintLayers();
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else if (!screen_off) {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, state == PLAYER_INTERNAL_BROWSER && !screen_off);
+        ModuleCommon_frameEnd(screen);
     }
 }
 
@@ -863,8 +815,8 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
             }
             // Dialog covers entire screen, no need to render underlying content
             AddToPlaylist_render(screen);
-            GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_markSurfaceDrawn();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -884,7 +836,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
             }
             if (global.input_consumed) {
                 if (global.dirty) dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
         }
@@ -905,10 +857,10 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 if (ModuleCommon_processScreenOffHintTimeout()) {
                     screen_off = true;
                     GFX_clear(screen);
-                    GFX_flip(screen);
+                    ModuleCommon_markSurfaceDrawn();
                 }
                 Player_update();
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
         }
@@ -921,7 +873,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 ModuleCommon_startScreenOffHint();
                 GFX_clear(screen);
                 render_screen_off_hint(screen);
-                GFX_flip(screen);
+                ModuleCommon_markSurfaceDrawn();
             }
             handle_hid_events();
             ModuleCommon_handleHardwareVolume();
@@ -938,7 +890,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                     return MODULE_EXIT_TO_MENU;
                 }
             }
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -992,9 +944,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
         else if (PAD_justPressed(BTN_R3) || PAD_justPressed(BTN_R2)) {
             Settings_toggleLyrics();
-            if (!Settings_getLyricsEnabled()) {
-                Lyrics_clear();
-            } else {
+            if (Settings_getLyricsEnabled()) {
                 const TrackInfo* info = Player_getTrackInfo();
                 if (info) {
                     Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
@@ -1004,7 +954,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
         else if (PAD_tappedSelect(SDL_GetTicks())) {
             ModuleCommon_startScreenOffHint();
-            clear_gpu_layers();
+            MusicPlaying_leave();
             dirty = 1;
         }
 
@@ -1031,7 +981,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
 
         // Auto screen-off after inactivity
         if (Player_getState() == PLAYER_STATE_PLAYING && ModuleCommon_checkAutoScreenOffTimeout()) {
-            clear_gpu_layers();
+            MusicPlaying_leave();
             dirty = 1;
         }
 
@@ -1051,15 +1001,13 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                 int pl_total = Playlist_getCount(&playlist);
                 render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-                paint_player_layer();
-                PlayTime_renderGPU();
+                MusicPlaying_paintLayers();
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else if (!screen_off) {
-            GFX_sync();
         }
+        ModuleCommon_frameEnd(screen);
     }
 }
 
@@ -1124,8 +1072,8 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
                     continue;
                 }
                 AddToPlaylist_render(screen);
-                GFX_flip(screen);
-                GFX_sync();
+                ModuleCommon_markSurfaceDrawn();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
 
@@ -1145,7 +1093,7 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
                 }
                 if (global.input_consumed) {
                     if (global.dirty) dirty = 1;
-                    GFX_sync();
+                    ModuleCommon_frameEnd(screen);
                     continue;
                 }
             }
@@ -1179,15 +1127,13 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
                     int pl_track = Playlist_getCurrentIndex(&playlist) + 1;
                     int pl_total = Playlist_getCount(&playlist);
                     render_playing(screen, show_setting, &browser, shuffle_enabled, repeat_enabled, pl_track, pl_total);
-                    paint_player_layer();
-                    PlayTime_renderGPU();
+                    MusicPlaying_paintLayers();
                 }
 
-                GFX_flip(screen);
+                ModuleCommon_markSurfaceDrawn();
                 dirty = 0;
-            } else if (!screen_off) {
-                GFX_sync();
             }
+            ModuleCommon_frameEnd(screen);
         }
 
     } else if (resume->type == RESUME_TYPE_PLAYLIST) {

@@ -13,8 +13,9 @@
 #include "keyboard.h"
 #include "display_helper.h"
 #include "ui_podcast.h"
+#include "ui_podcast_playing.h"
+#include "ui_layers.h"
 #include "spectrum.h"
-#include "ui_radio.h"
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
@@ -129,68 +130,33 @@ static void handle_hid_events(void) {
     }
 }
 
-// The playing screen draws its spectrum and its scrolling title onto one GPU
-// layer, so both are painted together after a single clear - neither can wipe
-// the other. Call order is z order: the scrolling title sits on top.
-static void paint_podcast_layer(void) {
-    PLAT_clearLayers(LAYER_SCROLLTEXT);
-    if (Spectrum_isShowing())         Spectrum_paint(LAYER_SCROLLTEXT);
-    if (Podcast_playingTitleShowing()) Podcast_paintPlayingTitle(LAYER_SCROLLTEXT);
-    PLAT_GPU_Flip();
-}
-
-// The layers of the playing screen, once for each frame of the loop.
+// The layers of the playing screen, once for each frame of the loop. A frame
+// that redraws the screen paints them after that redraw, thus this one leaves
+// them to the render block.
 static void refresh_gpu_layers(int* dirty) {
     if (ModuleCommon_isScreenOffHintActive()) return;
-
-    bool repaint_layer = false;
-
-    if (Podcast_playingTitleNeedsRefresh()) repaint_layer = true;
-    if (Podcast_titleScrollNeedsRender()) *dirty = 1;
-    if (Spectrum_needsRefresh()) {
-        Spectrum_update();
-
-        // The bars move on each frame while they draw, and the frame after the
-        // last one takes them away. A spectrum that draws nothing needs neither.
-        static bool was_showing = false;
-        bool showing = Spectrum_isShowing();
-        if (showing || was_showing) repaint_layer = true;
-        was_showing = showing;
-    }
-    // A frame that redraws the screen paints the layer after that redraw, thus
-    // the bars and the title do not reach the display before the rest of the
-    // screen. This frame therefore leaves the layer to the render block.
-    if (repaint_layer && !*dirty) paint_podcast_layer();
-
-    // The row of the play time gives its layer to the display as soon as it
-    // draws, thus a frame that redraws the screen leaves it to the render block
-    // as well.
-    if (!*dirty && PodcastProgress_needsRefresh()) PodcastProgress_renderGPU();
+    if (PodcastPlaying_frame(*dirty != 0)) *dirty = 1;
 }
 
-static void clear_and_show_screen_off_hint(SDL_Surface *screen) {
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_BUFFER);
-    PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-    PLAT_GPU_Flip();
+// A display recreate drops every GPU layer. The next frame paints each one
+// again, whatever the caches of the screen say.
+static void display_recreated(void) {
+    PodcastPlaying_invalidate();
+}
 
-    // The layer holds the row no more, thus the next render draws it again
-    // whatever the position says.
-    PodcastProgress_markStale();
+// The screen goes dark after the hint, thus its layers go now and the hint
+// takes the surface. The frame presents at the end of the pass.
+static void clear_and_show_screen_off_hint(SDL_Surface *screen) {
+    PodcastPlaying_leave();
     GFX_clear(screen);
     render_screen_off_hint(screen);
-    GFX_flip(screen);
+    ModuleCommon_markSurfaceDrawn();
 }
 
 static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     Podcast_flushProgress();
-    Podcast_clearArtwork();
+    PodcastPlaying_leave();
     Toast_dismiss(seek_toast);
-    GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_BUFFER);
-    PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-    PLAT_GPU_Flip();
-    PodcastProgress_markStale();
     ModuleCommon_setAutosleepDisabled(false);
     podcast_episodes_nav.selected = podcast_current_episode_index;
     *state = PODCAST_INTERNAL_EPISODES;
@@ -201,6 +167,7 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
 ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
     Keyboard_init();
+    DisplayHelper_addRecreatedCallback(display_recreated);
 
     // Auto-check for new episodes once per app session
     static bool auto_refreshed = false;
@@ -210,6 +177,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     }
 
     PodcastInternalState state = PODCAST_INTERNAL_MENU;
+    ModuleExitReason reason = MODULE_EXIT_TO_MENU;
     int dirty = 1;
     int show_setting = 0;
 
@@ -254,19 +222,19 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 show_confirm = false;
                 Podcast_clearTitleScroll();
                 dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             } else if (PAD_justPressed(BTN_B)) {
                 show_confirm = false;
                 Podcast_clearTitleScroll();
                 dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
             // Render confirmation dialog (covers entire screen)
             render_confirmation_dialog(screen, confirm_podcast_name, "Unsubscribe?");
-            GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_markSurfaceDrawn();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -294,11 +262,12 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
             if (global.should_quit) {
                 Spectrum_quit();
                 Podcast_cleanup();
-                return MODULE_EXIT_QUIT;
+                reason = MODULE_EXIT_QUIT;
+                break;
             }
             if (global.input_consumed) {
                 if (global.dirty) dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
         }
@@ -440,7 +409,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     Podcast_cleanup();
                 }
                 Spectrum_quit();
-                return MODULE_EXIT_TO_MENU;
+                break;
             }
         }
         // =========================================
@@ -534,7 +503,8 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                         } else {
                             Podcast_clearTitleScroll();
                             render_podcast_loading(screen, "Subscribing...");
-                            GFX_flip(screen);
+                            ModuleCommon_markSurfaceDrawn();
+                            ModuleCommon_frameEnd(screen);
                             int sub_result = Podcast_subscribeFromItunes(items[podcast_top_shows_nav.selected].itunes_id);
                             if (sub_result == 0) {
                                 Toast_show("Subscribed!", TOAST_DURATION);
@@ -609,7 +579,8 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                         } else {
                             Podcast_clearTitleScroll();
                             render_podcast_loading(screen, "Subscribing...");
-                            GFX_flip(screen);
+                            ModuleCommon_markSurfaceDrawn();
+                            ModuleCommon_frameEnd(screen);
                             int sub_result;
                             if (results[podcast_search_nav.selected].feed_url[0]) {
                                 sub_result = Podcast_subscribe(results[podcast_search_nav.selected].feed_url);
@@ -888,9 +859,9 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     if (ModuleCommon_processScreenOffHintTimeout()) {
                         screen_off = true;
                         GFX_clear(screen);
-                        GFX_flip(screen);
+                        ModuleCommon_markSurfaceDrawn();
                     }
-                    GFX_sync();
+                    ModuleCommon_frameEnd(screen);
                     continue;
                 }
             }
@@ -906,9 +877,9 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     ModuleCommon_startScreenOffHint();
                     GFX_clear(screen);
                     render_screen_off_hint(screen);
-                    GFX_flip(screen);
+                    ModuleCommon_markSurfaceDrawn();
                 }
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
             else {
@@ -927,12 +898,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     if (Player_getState() == PLAYER_STATE_PLAYING) {
                         // Playing — let audio continue in background
                         Podcast_flushProgress();
-                        Podcast_clearArtwork();
-                        GFX_clearLayers(LAYER_SCROLLTEXT);
-                        PLAT_clearLayers(LAYER_BUFFER);
-                        PLAT_clearLayers(LAYER_PODCAST_PROGRESS);
-                        PLAT_GPU_Flip();
-                        PodcastProgress_markStale();
+                        PodcastPlaying_leave();
                         podcast_episodes_nav.selected = podcast_current_episode_index;
                         state = PODCAST_INTERNAL_EPISODES;
                         dirty = 1;
@@ -946,6 +912,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 else if (PAD_tappedSelect(SDL_GetTicks())) {
                     ModuleCommon_startScreenOffHint();
                     clear_and_show_screen_off_hint(screen);
+                    ModuleCommon_frameEnd(screen);
                     continue;
                 }
                 else if (PAD_justRepeated(BTN_LEFT)) {
@@ -1033,6 +1000,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 // Auto screen-off
                 if (Podcast_isActive() && ModuleCommon_checkAutoScreenOffTimeout()) {
                     clear_and_show_screen_off_hint(screen);
+                    ModuleCommon_frameEnd(screen);
                     continue;
                 }
             }
@@ -1074,8 +1042,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     case PODCAST_INTERNAL_SEEKING:
                     case PODCAST_INTERNAL_PLAYING:
                         render_podcast_playing(screen, show_setting, podcast_current_feed_index, podcast_current_episode_index);
-                        paint_podcast_layer();
-                        PodcastProgress_renderGPU();
+                        PodcastPlaying_paintLayers();
                         break;
                     case PODCAST_INTERNAL_DOWNLOAD_QUEUE:
                         render_podcast_download_queue(screen, show_setting, podcast_queue_nav.selected, &podcast_queue_nav.scroll);
@@ -1087,15 +1054,17 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else if (!screen_off) {
-            GFX_sync();
         }
         // The playing screen and the seek that leads to it have no standard header
         ScreenTitle_frameEnd(&dirty, state != PODCAST_INTERNAL_PLAYING
                                      && state != PODCAST_INTERNAL_SEEKING && !screen_off);
+        ModuleCommon_frameEnd(screen);
     }
+
+    DisplayHelper_removeRecreatedCallback(display_recreated);
+    return reason;
 }
 
 // Check if podcast module is active (playing)

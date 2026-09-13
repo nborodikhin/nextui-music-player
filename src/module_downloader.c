@@ -6,6 +6,7 @@
 #include "api.h"
 #include "help_screen.h"
 #include "module_common.h"
+#include "ui_layers.h"
 #include "toast.h"
 #include "module_downloader.h"
 #include "keyboard.h"
@@ -79,7 +80,7 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -118,12 +119,11 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
             if (*show_setting) {
                 GFX_blitHardwareHints(screen, *show_setting);
             }
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, true);
+        ModuleCommon_frameEnd(screen);
     }
 
     Downloader_refreshVersion();
@@ -197,7 +197,7 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -301,7 +301,7 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
             }
             else if (PAD_justPressed(BTN_B)) {
                 downloader_results_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = DOWNLOADER_INTERNAL_MENU;
                 dirty = 1;
             }
@@ -398,11 +398,10 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, true);
+        ModuleCommon_frameEnd(screen);
     }
 }

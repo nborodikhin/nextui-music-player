@@ -6,6 +6,7 @@
 #include "ui_downloader.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
 #include "ui_icons.h"
 #include "module_common.h"
@@ -417,14 +418,14 @@ void downloader_queue_animate_scroll(void) {
 
 // Clear YouTube queue scroll state (call when queue items are removed)
 void downloader_queue_clear_scroll(void) {
-    memset(&downloader_queue_scroll_text, 0, sizeof(downloader_queue_scroll_text));
-    GFX_clearLayers(LAYER_SCROLLTEXT);
+    ScrollText_forget(&downloader_queue_scroll_text);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
 // Clear YouTube results scroll state
 void downloader_results_clear_scroll(void) {
-    memset(&downloader_results_scroll_text, 0, sizeof(downloader_results_scroll_text));
-    GFX_clearLayers(LAYER_SCROLLTEXT);
+    ScrollText_forget(&downloader_results_scroll_text);
+    UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
 void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {

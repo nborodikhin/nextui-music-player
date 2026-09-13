@@ -5,20 +5,12 @@
 #include <stdbool.h>
 #include "radio.h"
 
-// GPU layer for buffer indicator
-#define LAYER_BUFFER 4
+// The lists and the setup screens of the radio. The playing screen is in
+// ui_radio_playing.h.
 
 // Render the radio station list
 void render_radio_list(SDL_Surface* screen, int show_setting,
                        int radio_selected, int* radio_scroll);
-
-// Pass true in `waiting` while a station waits for its screen, before its stream
-// starts. The playing screen then says that it connects, in place of the metadata
-// of the station that played before. Pass false once the stream starts.
-void RadioUI_setWaitingToStart(bool waiting);
-
-// Render the radio playing screen
-void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selected);
 
 // Render add stations - country selection screen
 void render_radio_add(SDL_Surface* screen, int show_setting,
@@ -32,21 +24,6 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
 
 // Render help/instructions screen
 void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll);
-
-// GPU buffer indicator and status functions (rendered independently like Spectrum/PlayTime)
-// `row_bottom_y` is the bottom margin of the screen. The renderer measures the text
-// that the row holds and puts the foot of the row on that line.
-void RadioStatus_setPosition(int bar_x, int bar_w, int bar_h,
-                              int left_x, int row_bottom_y);
-void RadioStatus_clear(void);
-// Returns true where the row of the state has something new to draw.
-bool RadioStatus_needsRefresh(void);
-bool RadioStatus_renderGPU(void);
-
-// The row of the state, as painted onto the overlay layer of the playing screen.
-// The painter of that layer calls these, and it draws the spectrum first.
-bool RadioStatus_isShowing(void);
-void RadioStatus_paint(int layer);
 
 // True while a title of a list of this module moves.
 bool radio_list_needs_scroll_refresh(void);

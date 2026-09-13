@@ -6,6 +6,7 @@
 #include "api.h"
 #include "help_screen.h"
 #include "module_common.h"
+#include "ui_layers.h"
 #include "toast.h"
 #include "module_playlist.h"
 #include "module_player.h"
@@ -114,8 +115,8 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             // Render confirmation (dialog covers entire screen)
             const char* confirm_title = (confirm_action == 0) ? "Delete Playlist?" : "Remove Track?";
             render_confirmation_dialog(screen, confirm_name, confirm_title);
-            GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_markSurfaceDrawn();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -127,7 +128,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
         }
         if (global.input_consumed) {
             if (global.dirty) dirty = 1;
-            GFX_sync();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -136,7 +137,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             if (ListNav_reconcile(&list_nav, playlist_count).moved) dirty = 1;
 
             if (PAD_justPressed(BTN_B)) {
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 return MODULE_EXIT_TO_MENU;
             }
             else if (ListNav_step(&list_nav, ListNavPad_read()).moved) {
@@ -149,7 +150,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                     refresh_detail();
                     ListNav_scrollToTop(&detail_nav);
                     state = PLAYLIST_INTERNAL_DETAIL;
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    UiLayer_clear(UI_LAYER_ANIMATION);
                     dirty = 1;
                 }
             }
@@ -178,7 +179,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                     confirm_action = 0;
                     confirm_target = list_nav.selected;
                     show_confirm = true;
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    UiLayer_clear(UI_LAYER_ANIMATION);
                     dirty = 1;
                 }
             }
@@ -194,7 +195,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             if (ListNav_reconcile(&detail_nav, detail_track_count).moved) dirty = 1;
 
             if (PAD_justPressed(BTN_B)) {
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 refresh_playlists();  // Refresh counts
                 state = PLAYLIST_INTERNAL_LIST;
                 dirty = 1;
@@ -205,7 +206,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
             else if (PAD_justPressed(BTN_A)) {
                 if (detail_track_count > 0) {
                     // Play the playlist starting from selected track
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    UiLayer_clear(UI_LAYER_ANIMATION);
                     PlayerModule_setResumePlaylistPath(playlists[current_playlist_index].path);
                     PlayerModule_runWithPlaylist(display, detail_tracks, detail_track_count, detail_nav.selected);
                     PlayerModule_setResumePlaylistPath(NULL);
@@ -226,7 +227,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                     confirm_action = 1;
                     confirm_target = detail_nav.selected;
                     show_confirm = true;
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    UiLayer_clear(UI_LAYER_ANIMATION);
                     dirty = 1;
                 }
             }
@@ -261,11 +262,10 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, true);
+        ModuleCommon_frameEnd(screen);
     }
 }

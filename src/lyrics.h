@@ -24,13 +24,16 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec);
 // Clear current lyrics and reset state
 void Lyrics_clear(void);
 
-// Get the current lyric line for the given playback position
-// Returns pointer to lyric text, or NULL if no lyrics available/still fetching
-const char* Lyrics_getCurrentLine(int position_ms);
+// Returns the index of the current lyric at `position_ms`: the last one whose
+// timestamp is not later than the position. Returns -1 before the first
+// timestamp, and where no lyrics are loaded.
+int Lyrics_currentIndex(int position_ms);
 
-// Get the next lyric line after the current one (call after Lyrics_getCurrentLine)
-// Returns pointer to next lyric text, or NULL if no next line
-const char* Lyrics_getNextLine(void);
+// Returns the count of loaded lines, and 0 where none are loaded.
+int Lyrics_lineCount(void);
+
+// Returns the text of the line at `index`, or NULL outside the loaded lines.
+const char* Lyrics_lineText(int index);
 
 // Check if lyrics are available for the current track
 bool Lyrics_isAvailable(void);

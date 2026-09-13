@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "lyrics.h"
+#include "lyric_window.h"
 #include "radio_net.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +19,6 @@
 // Lyrics state (main thread only - written by thread when done)
 static LyricLine lyrics_lines[LYRICS_MAX_LINES];
 static int lyrics_line_count = 0;
-static int lyrics_current_index = 0;
 static bool lyrics_available = false;
 
 // Dedup tracking
@@ -206,7 +206,6 @@ static void* fetch_thread_func(void* arg) {
         if (fetch_generation == my_gen) {
             memcpy(lyrics_lines, tmp_lines, sizeof(LyricLine) * count);
             lyrics_line_count = count;
-            lyrics_current_index = 0;
             lyrics_available = true;
         }
         free(tmp_lines);
@@ -316,7 +315,6 @@ static void* fetch_thread_func(void* arg) {
     if (count > 0 && fetch_generation == my_gen) {
         memcpy(lyrics_lines, tmp_lines, sizeof(LyricLine) * count);
         lyrics_line_count = count;
-        lyrics_current_index = 0;
         lyrics_available = true;
     }
 
@@ -327,7 +325,6 @@ static void* fetch_thread_func(void* arg) {
 
 void Lyrics_init(void) {
     lyrics_line_count = 0;
-    lyrics_current_index = 0;
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
@@ -337,7 +334,6 @@ void Lyrics_init(void) {
 void Lyrics_cleanup(void) {
     fetch_generation++;  // invalidate any running thread
     lyrics_line_count = 0;
-    lyrics_current_index = 0;
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
@@ -346,7 +342,6 @@ void Lyrics_cleanup(void) {
 void Lyrics_clear(void) {
     fetch_generation++;  // invalidate any running thread
     lyrics_line_count = 0;
-    lyrics_current_index = 0;
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
@@ -372,7 +367,6 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
     strncpy(last_title, title, sizeof(last_title) - 1);
     last_title[sizeof(last_title) - 1] = '\0';
     lyrics_line_count = 0;
-    lyrics_current_index = 0;
     lyrics_available = false;
 
     // Prepare thread args
@@ -395,49 +389,18 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
     pthread_attr_destroy(&attr);
 }
 
-const char* Lyrics_getCurrentLine(int position_ms) {
-    if (!lyrics_available || lyrics_line_count == 0) {
-        return NULL;
-    }
-
-    // Optimize: check if current index is still valid
-    int idx = lyrics_current_index;
-    int count = lyrics_line_count;
-
-    if (idx >= 0 && idx < count &&
-        lyrics_lines[idx].time_ms <= position_ms &&
-        (idx + 1 >= count || lyrics_lines[idx + 1].time_ms > position_ms)) {
-        return lyrics_lines[idx].text;
-    }
-
-    // Binary search for the correct line
-    int lo = 0, hi = count - 1;
-    int result = -1;
-
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (lyrics_lines[mid].time_ms <= position_ms) {
-            result = mid;
-            lo = mid + 1;
-        } else {
-            hi = mid - 1;
-        }
-    }
-
-    if (result < 0) {
-        lyrics_current_index = -1;
-        return NULL;
-    }
-
-    lyrics_current_index = result;
-    return lyrics_lines[result].text;
+int Lyrics_currentIndex(int position_ms) {
+    if (!lyrics_available) return -1;
+    return LyricWindow_currentIndex(lyrics_lines, lyrics_line_count, position_ms);
 }
 
-const char* Lyrics_getNextLine(void) {
-    if (!lyrics_available || lyrics_line_count == 0) return NULL;
-    int next = lyrics_current_index + 1;
-    if (next >= lyrics_line_count) return NULL;
-    return lyrics_lines[next].text;
+int Lyrics_lineCount(void) {
+    return lyrics_available ? lyrics_line_count : 0;
+}
+
+const char* Lyrics_lineText(int index) {
+    if (!lyrics_available || index < 0 || index >= lyrics_line_count) return NULL;
+    return lyrics_lines[index].text;
 }
 
 bool Lyrics_isAvailable(void) {

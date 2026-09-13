@@ -16,6 +16,8 @@
 #include "radio_curated.h"
 #include "album_art.h"
 #include "ui_radio.h"
+#include "ui_radio_playing.h"
+#include "ui_layers.h"
 #include "spectrum.h"
 #include "ui_album_art.h"
 #include "ui_main.h"
@@ -157,46 +159,27 @@ static void build_sorted_station_indices(const char* country_code) {
     }
 }
 
-// The playing screen draws its spectrum and the row of the state onto one GPU
-// layer, so both are painted together after a single clear - neither can wipe
-// the other. Call order is z order: the row of the state sits on top.
-static void paint_radio_layer(void) {
-    PLAT_clearLayers(LAYER_BUFFER);
-    if (Spectrum_isShowing())    Spectrum_paint(LAYER_BUFFER);
-    if (RadioStatus_isShowing()) RadioStatus_paint(LAYER_BUFFER);
-    PLAT_GPU_Flip();
+// The layers of the playing screen, once for each frame of the loop. A frame
+// that redraws the screen paints them after that redraw, thus this one leaves
+// them to the render block.
+static void refresh_gpu_layers(int* dirty) {
+    if (ModuleCommon_isScreenOffHintActive()) return;
+    if (RadioPlaying_frame(*dirty != 0)) *dirty = 1;
 }
 
-// The layers of the playing screen, once for each frame of the loop.
-static void refresh_gpu_layers(int dirty) {
-    if (ModuleCommon_isScreenOffHintActive()) return;
-
-    bool repaint_layer = false;
-
-    if (RadioStatus_needsRefresh() && RadioStatus_renderGPU()) repaint_layer = true;
-
-    if (Spectrum_needsRefresh()) {
-        Spectrum_update();
-
-        // The bars move on each frame while they draw, and the frame after the
-        // last one takes them away. A spectrum that draws nothing needs neither.
-        static bool was_showing = false;
-        bool showing = Spectrum_isShowing();
-        if (showing || was_showing) repaint_layer = true;
-        was_showing = showing;
-    }
-
-    // A frame that redraws the screen paints the layer after that redraw, thus
-    // the bars and the row of the state do not reach the display before the rest
-    // of the screen. This frame therefore leaves the layer to the render block.
-    if (repaint_layer && !dirty) paint_radio_layer();
+// A display recreate drops every GPU layer. The next frame paints each one
+// again, whatever the caches of the screen say.
+static void display_recreated(void) {
+    RadioPlaying_invalidate();
 }
 
 
 ModuleExitReason RadioModule_run(DisplayContext* display) {
     Radio_init();
+    DisplayHelper_addRecreatedCallback(display_recreated);
 
     RadioInternalState state = RADIO_INTERNAL_LIST;
+    ModuleExitReason reason = MODULE_EXIT_TO_MENU;
     int dirty = 1;
     int show_setting = 0;
 
@@ -253,18 +236,18 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 }
                 show_confirm = false;
                 dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             } else if (PAD_justPressed(BTN_B)) {
                 show_confirm = false;
                 dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
             // Render confirmation dialog (covers entire screen)
             render_confirmation_dialog(screen, confirm_station_name, "Remove Station?");
-            GFX_flip(screen);
-            GFX_sync();
+            ModuleCommon_markSurfaceDrawn();
+            ModuleCommon_frameEnd(screen);
             continue;
         }
 
@@ -289,13 +272,14 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             if (global.should_quit) {
                 cancel_pending_station();
                 Spectrum_quit();
-                RadioStatus_clear();
+                RadioPlaying_leave();
                 Radio_quit();
-                return MODULE_EXIT_QUIT;
+                reason = MODULE_EXIT_QUIT;
+                break;
             }
             if (global.input_consumed) {
                 if (global.dirty) dirty = 1;
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
         }
@@ -338,26 +322,26 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                     last_rendered_title[0] = '\0';
                     last_art_was_fetching = false;
                     radio_list_clear_scroll();
-                    GFX_clearLayers(LAYER_SCROLLTEXT);
+                    UiLayer_clear(UI_LAYER_ANIMATION);
                     state = RADIO_INTERNAL_PLAYING;
                     dirty = 1;
                 }
             }
             else if (PAD_justPressed(BTN_B)) {
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 if (!Radio_isActive()) {
                     Radio_quit();
                 }
                 cancel_pending_station();
                 Spectrum_quit();
-                RadioStatus_clear();
-                return MODULE_EXIT_TO_MENU;
+                RadioPlaying_leave();
+                break;
             }
             else if (PAD_justPressed(BTN_Y)) {
                 ListNav_scrollToTop(&add_country_nav);
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
@@ -388,9 +372,12 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 // `Radio_play()` holds this thread for the whole of the
                 // connection, thus no frame draws while it runs. Put the row of
                 // the state on the display first, so the screen says that it
-                // connects for that time.
-                RadioStatus_renderGPU();
-                paint_radio_layer();
+                // connects for that time. The frame presents here, before the
+                // block, and the pass that follows presents its own.
+                if (screen_draws) {
+                    RadioPlaying_frame(false);
+                    ModuleCommon_frameEnd(screen);
+                }
 
                 Radio_play(radio_pending_url);
                 radio_pending_url[0] = '\0';
@@ -420,9 +407,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                     if (ModuleCommon_processScreenOffHintTimeout()) {
                         screen_off = true;
                         GFX_clear(screen);
-                        GFX_flip(screen);
+                        ModuleCommon_markSurfaceDrawn();
                     }
-                    GFX_sync();
+                    ModuleCommon_frameEnd(screen);
                     continue;
                 }
             }
@@ -440,9 +427,9 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                     ModuleCommon_startScreenOffHint();
                     GFX_clear(screen);
                     render_screen_off_hint(screen);
-                    GFX_flip(screen);
+                    ModuleCommon_markSurfaceDrawn();
                 }
-                GFX_sync();
+                ModuleCommon_frameEnd(screen);
                 continue;
             }
 
@@ -472,7 +459,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             else if (PAD_justPressed(BTN_B)) {
                 cleanup_album_art_background();
                 cancel_pending_station();
-                RadioStatus_clear();
+                RadioPlaying_leave();
                 if (Radio_isActive()) {
                     Background_setActive(BG_RADIO);
                 } else {
@@ -511,9 +498,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
             else if (PAD_tappedSelect(SDL_GetTicks())) {
                 ModuleCommon_startScreenOffHint();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
-                PLAT_clearLayers(LAYER_BUFFER);
-                PLAT_GPU_Flip();
+                RadioPlaying_leave();
                 dirty = 1;
             }
 
@@ -533,15 +518,13 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
 
             // Auto screen-off after inactivity
             if (Radio_getState() == RADIO_STATE_PLAYING && ModuleCommon_checkAutoScreenOffTimeout()) {
-                GFX_clearLayers(LAYER_SCROLLTEXT);
-                PLAT_clearLayers(LAYER_BUFFER);
-                PLAT_GPU_Flip();
+                RadioPlaying_leave();
                 dirty = 1;
             }
 
             // Animate radio GPU layer
             if (!screen_off) {
-                refresh_gpu_layers(dirty);
+                refresh_gpu_layers(&dirty);
             }
         }
         // =========================================
@@ -561,7 +544,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 ListNav_scrollToTop(&add_station_nav);
                 build_sorted_station_indices(add_selected_country_code);
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_ADD_STATIONS;
                 dirty = 1;
             }
@@ -569,13 +552,13 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 help_return_state = RADIO_INTERNAL_ADD_COUNTRY;
                 help_scroll = 0;
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_HELP;
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_LIST;
                 dirty = 1;
             }
@@ -624,13 +607,13 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 help_return_state = RADIO_INTERNAL_ADD_STATIONS;
                 help_scroll = 0;
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_HELP;
                 dirty = 1;
             }
             else if (PAD_justPressed(BTN_B)) {
                 radio_list_clear_scroll();
-                GFX_clearLayers(LAYER_SCROLLTEXT);
+                UiLayer_clear(UI_LAYER_ANIMATION);
                 state = RADIO_INTERNAL_ADD_COUNTRY;
                 dirty = 1;
             }
@@ -679,7 +662,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                         break;
                     case RADIO_INTERNAL_PLAYING: {
                         render_radio_playing(screen, show_setting, radio_nav.selected);
-                        paint_radio_layer();
+                        RadioPlaying_paintLayers();
                         radio_screen_drawn = true;
                         const RadioMetadata* meta = Radio_getMetadata();
                         strncpy(last_rendered_artist, meta->artist, sizeof(last_rendered_artist) - 1);
@@ -706,11 +689,13 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
                 GFX_blitHardwareHints(screen, show_setting);
             }
 
-            GFX_flip(screen);
+            ModuleCommon_markSurfaceDrawn();
             dirty = 0;
-        } else if (!screen_off) {
-            GFX_sync();
         }
         ScreenTitle_frameEnd(&dirty, state != RADIO_INTERNAL_PLAYING && !screen_off);
+        ModuleCommon_frameEnd(screen);
     }
+
+    DisplayHelper_removeRecreatedCallback(display_recreated);
+    return reason;
 }
