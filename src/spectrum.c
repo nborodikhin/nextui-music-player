@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #define OLD_SPECTRUM_SETTINGS_FILE SHARED_USERDATA_PATH "/spectrum_settings.txt"
 
@@ -72,22 +73,34 @@ static uint32_t bars_fall_last_ms = 0;
 // still there between two callbacks of the audio.
 static uint32_t last_samples_ms = 0;
 
-// Save spectrum settings to file
-static void save_settings(void) {
-    if (!userdata_mkdir("")) return;
+// Returns true after it replaces the spectrum settings file with a complete file.
+static bool save_settings(void) {
+    if (!userdata_mkdir("")) return false;
 
     char path[512];
     int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
-    if (length < 0 || (size_t)length >= sizeof(path)) return;
+    if (length < 0 || (size_t)length >= sizeof(path)) return false;
 
-    FILE* f = fopen(path, "w");
-    if (!f) return;
-    fprintf(f, "%d\n%d\n", (int)current_style, spectrum_visible ? 1 : 0);
-    fclose(f);
+    char temp_path[sizeof(path) + sizeof(".tmp")];
+    length = snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+    if (length < 0 || (size_t)length >= sizeof(temp_path)) return false;
+
+    FILE* f = fopen(temp_path, "w");
+    if (!f) return false;
+
+    bool saved = fprintf(f, "%d\n%d\n", (int)current_style,
+                         spectrum_visible ? 1 : 0) >= 0;
+    if (saved && fflush(f) != 0) saved = false;
+    if (saved && fsync(fileno(f)) != 0) saved = false;
+    if (fclose(f) != 0) saved = false;
+
+    if (saved && rename(temp_path, path) == 0) return true;
+
+    remove(temp_path);
+    return false;
 }
 
-// Load spectrum settings from file
-static void load_settings(void) {
+void Spectrum_initSettings(void) {
     char path[512];
     int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
     if (length < 0 || (size_t)length >= sizeof(path)) return;
@@ -110,7 +123,9 @@ static void load_settings(void) {
     }
     fclose(f);
 
-    if (loaded_old && loaded) save_settings();
+    if (loaded_old && loaded && save_settings()) {
+        remove(OLD_SPECTRUM_SETTINGS_FILE);
+    }
 }
 
 // HSV to RGB conversion (h: 0-360, s: 0-1, v: 0-1)
@@ -255,7 +270,6 @@ void Spectrum_init(void) {
     init_bin_ranges();
     memset(prev_bars, 0, sizeof(prev_bars));
     memset(&spectrum_data, 0, sizeof(spectrum_data));
-    load_settings();
 }
 
 void Spectrum_quit(void) {
