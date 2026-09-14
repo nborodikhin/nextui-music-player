@@ -15,6 +15,35 @@
 void shell_escape(const char* src, char* dst, int dst_size);
 
 /**
+ * Make path and each directory above it.
+ *
+ * @return true if path is a directory when the function returns
+ */
+bool mkdir_p(const char* path);
+
+/**
+ * Return a new path under the user data directory of the app.
+ * The caller must free the returned string.
+ *
+ * @return the path, or NULL if memory allocation fails
+ */
+char* userdata_path(const char* rel);
+
+/**
+ * Write a path under the user data directory of the app to out.
+ *
+ * @return the result that snprintf() returns for the complete path
+ */
+int userdata_snpath(const char* rel, char* out, size_t out_size);
+
+/**
+ * Make a directory under the user data directory of the app.
+ *
+ * @return true if the directory exists when the function returns
+ */
+bool userdata_mkdir(const char* rel);
+
+/**
  * Create a uniquely named directory under /tmp and write its path to out. The
  * name carries the pid and a counter, so neither two threads nor two calls from
  * the same one can land on the same directory.

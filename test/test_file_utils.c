@@ -68,6 +68,61 @@ static void count_copied(const char* rel_path, void* ctx) {
     copied_files++;
 }
 
+// ---------------------------------------------------------------- userdata paths
+
+TEST(userdata_path_resolves_a_relative_path) {
+    char path[512];
+    CHECK_EQ_INT(userdata_snpath("radio/stations.txt", path, sizeof(path)),
+                 strlen(FILE_UTILS_USERDATA_DIR "/radio/stations.txt"));
+    CHECK_EQ_INT(strcmp(path, FILE_UTILS_USERDATA_DIR "/radio/stations.txt"), 0);
+
+    char* allocated = userdata_path("radio/stations.txt");
+    CHECK(allocated != NULL);
+    if (allocated) {
+        CHECK_EQ_INT(strcmp(allocated, path), 0);
+        free(allocated);
+    }
+}
+
+TEST(userdata_path_resolves_an_empty_path) {
+    char path[512];
+    CHECK_EQ_INT(userdata_snpath("", path, sizeof(path)), strlen(FILE_UTILS_USERDATA_DIR));
+    CHECK_EQ_INT(strcmp(path, FILE_UTILS_USERDATA_DIR), 0);
+}
+
+TEST(userdata_path_reports_a_small_buffer) {
+    char path[8];
+    CHECK_EQ_INT(userdata_snpath("radio/stations.txt", path, sizeof(path)),
+                 strlen(FILE_UTILS_USERDATA_DIR "/radio/stations.txt"));
+    CHECK_EQ_INT(path[sizeof(path) - 1], '\0');
+}
+
+TEST(userdata_mkdir_creates_two_levels) {
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+
+    CHECK(userdata_mkdir("podcast/downloads"));
+
+    struct stat st;
+    CHECK_EQ_INT(stat(FILE_UTILS_USERDATA_DIR "/podcast/downloads", &st), 0);
+    CHECK(S_ISDIR(st.st_mode));
+
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+}
+
+TEST(userdata_mkdir_accepts_an_existing_directory) {
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+    CHECK(userdata_mkdir("podcast/downloads"));
+
+    char kept[512];
+    snprintf(kept, sizeof(kept), "%s/podcast/downloads/kept.txt", FILE_UTILS_USERDATA_DIR);
+    write_file(kept, "keep");
+
+    CHECK(userdata_mkdir("podcast/downloads"));
+    CHECK(file_says(kept, "keep"));
+
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+}
+
 // ---------------------------------------------------------------- shell_escape
 
 // The four characters a shell still reads inside double quotes, and nothing
@@ -477,6 +532,11 @@ int main(int argc, char** argv) {
 
     RUN(shell_escape_neutralizes_what_double_quotes_do_not);
     RUN(shell_escape_stays_inside_its_buffer);
+    RUN(userdata_path_resolves_a_relative_path);
+    RUN(userdata_path_resolves_an_empty_path);
+    RUN(userdata_path_reports_a_small_buffer);
+    RUN(userdata_mkdir_creates_two_levels);
+    RUN(userdata_mkdir_accepts_an_existing_directory);
     RUN(mk_tempdir_creates_a_fresh_directory_each_time);
     RUN(mk_tempdir_reports_failure_and_clears_the_path);
     RUN(find_file_walks_the_tree);

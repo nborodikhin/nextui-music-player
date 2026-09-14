@@ -170,7 +170,11 @@ $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h 
 	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
+	mkdir -p ../.codex_tmp
+	$(CC) $(CFLAGS) $(INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(abspath ../.codex_tmp/file-utils-userdata)"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(abspath ../.codex_tmp)"' \
+	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
 run: check $(TESTS)
 	@fail=0; for t in $(TESTS); do echo "== $$t =="; ./$$t || fail=1; echo; done; \

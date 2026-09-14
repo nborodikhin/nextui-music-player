@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "podcast.h"
+#include "file_utils.h"
 #include "wget_fetch.h"
 #include "radio.h"
 #include "player.h"
@@ -256,26 +257,6 @@ static void get_episodes_file_path(const char* feed_id, char* path, int path_siz
     snprintf(path, path_size, "%s/%s/episodes.json", podcast_data_dir, feed_id);
 }
 
-// Create directory recursively
-static void mkdir_recursive(const char* path) {
-    char tmp[512];
-    char* p = NULL;
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (tmp[len - 1] == '/') tmp[len - 1] = '\0';
-
-    for (p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
-}
-
 // ============================================================================
 // Episode Storage (JSON on disk)
 // ============================================================================
@@ -290,10 +271,12 @@ int Podcast_saveEpisodes(int feed_index, PodcastEpisode* episodes, int count) {
 
     set_feed_id(feed);
 
-    // Create feed directory
+    char feed_relative[sizeof(PODCAST_DATA_DIR "/") + sizeof(feed->feed_id)];
+    snprintf(feed_relative, sizeof(feed_relative), PODCAST_DATA_DIR "/%s", feed->feed_id);
+    if (!userdata_mkdir(feed_relative)) return -1;
+
     char feed_dir[512];
     Podcast_getFeedDataPath(feed->feed_id, feed_dir, sizeof(feed_dir));
-    mkdir_recursive(feed_dir);
 
     // Build episodes JSON
     JSON_Value* root = json_value_init_array();
@@ -557,7 +540,9 @@ static void download_feed_artwork(PodcastFeed* feed) {
 int Podcast_init(void) {
     if (podcast_initialized) return 0;  // Already initialized
 
-    snprintf(podcast_data_dir, sizeof(podcast_data_dir), "%s/" PODCAST_DATA_DIR, SHARED_USERDATA_PATH);
+    int data_length = userdata_snpath(PODCAST_DATA_DIR, podcast_data_dir,
+                                      sizeof(podcast_data_dir));
+    if (data_length < 0 || (size_t)data_length >= sizeof(podcast_data_dir)) return -1;
     snprintf(subscriptions_file, sizeof(subscriptions_file), "%s/" PODCAST_SUBSCRIPTIONS_FILE, podcast_data_dir);
     snprintf(progress_file, sizeof(progress_file), "%s/progress.json", podcast_data_dir);
     snprintf(downloads_file, sizeof(downloads_file), "%s/downloads.json", podcast_data_dir);
@@ -565,11 +550,10 @@ int Podcast_init(void) {
     snprintf(continue_listening_file, sizeof(continue_listening_file), "%s/continue_listening.json", podcast_data_dir);
     snprintf(download_dir, sizeof(download_dir), "%s/Podcasts", SDCARD_PATH);
 
-    // Create podcast data directory
-    mkdir_recursive(podcast_data_dir);
+    if (!userdata_mkdir(PODCAST_DATA_DIR)) return -1;
 
     // Create download directory
-    mkdir(download_dir, 0755);
+    if (!mkdir_p(download_dir)) return -1;
 
     // Detect country code from system timezone
     // /etc/localtime symlinks to /tmp/localtime which resolves to the actual timezone
@@ -1805,7 +1789,13 @@ static void* download_thread_func(void* arg) {
 
         char dir_path[512];
         snprintf(dir_path, sizeof(dir_path), "%s/%s", download_dir, safe_feed);
-        mkdir(dir_path, 0755);
+        if (!mkdir_p(dir_path)) {
+            item->status = PODCAST_DOWNLOAD_FAILED;
+            snprintf(download_progress.error_message, sizeof(download_progress.error_message),
+                     "Cannot create download directory");
+            download_progress.failed_count++;
+            continue;
+        }
 
         // Check disk space before downloading
         struct statvfs fs_stat;

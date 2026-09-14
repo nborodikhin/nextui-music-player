@@ -1,12 +1,8 @@
 #include "settings.h"
-#include "defines.h"
+#include "file_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// Settings file path (in shared userdata directory)
-#define SETTINGS_FILE SHARED_USERDATA_PATH "/music-player/settings.cfg"
-#define SETTINGS_DIR SHARED_USERDATA_PATH "/music-player"
 
 // Valid screen off timeout values (in seconds)
 // 0 means off (no auto screen off)
@@ -62,7 +58,11 @@ void Settings_init(void) {
     current_settings.auto_update = true;
 
     // Try to load from file
-    FILE* f = fopen(SETTINGS_FILE, "r");
+    char path[512];
+    int length = userdata_snpath("settings.cfg", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    FILE* f = fopen(path, "r");
     if (!f) return;
 
     char line[256];
@@ -145,12 +145,13 @@ const char* Settings_getScreenOffDisplayStr(void) {
 }
 
 void Settings_save(void) {
-    // Ensure directory exists
-    char mkdir_cmd[512];
-    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", SETTINGS_DIR);
-    system(mkdir_cmd);
+    if (!userdata_mkdir("")) return;
 
-    FILE* f = fopen(SETTINGS_FILE, "w");
+    char path[512];
+    int length = userdata_snpath("settings.cfg", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return;
+
+    FILE* f = fopen(path, "w");
     if (!f) return;
 
     fprintf(f, "screen_off_timeout=%d\n", current_settings.screen_off_timeout);

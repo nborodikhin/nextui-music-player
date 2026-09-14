@@ -1,23 +1,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-
-#include "defines.h"
+#include "file_utils.h"
 #include "resume.h"
-
-#define RESUME_DIR  SHARED_USERDATA_PATH "/music-player"
-#define RESUME_FILE SHARED_USERDATA_PATH "/music-player/resume.cfg"
 
 // In-memory state
 static ResumeState state = { .type = RESUME_TYPE_NONE };
 static char label_buf[300];
 
+static bool resume_path(char* path, size_t path_size) {
+    int length = userdata_snpath("resume.cfg", path, path_size);
+    return length >= 0 && (size_t)length < path_size;
+}
+
 // Write state to disk
 static void save_to_disk(void) {
-    mkdir(RESUME_DIR, 0755);
+    if (!userdata_mkdir("")) return;
 
-    FILE* f = fopen(RESUME_FILE, "w");
+    char path[512];
+    if (!resume_path(path, sizeof(path))) return;
+
+    FILE* f = fopen(path, "w");
     if (!f) return;
 
     fprintf(f, "type=%d\n", (int)state.type);
@@ -34,7 +37,10 @@ void Resume_init(void) {
     memset(&state, 0, sizeof(state));
     state.type = RESUME_TYPE_NONE;
 
-    FILE* f = fopen(RESUME_FILE, "r");
+    char path[512];
+    if (!resume_path(path, sizeof(path))) return;
+
+    FILE* f = fopen(path, "r");
     if (!f) return;
 
     char line[1024];
@@ -131,5 +137,6 @@ void Resume_updatePosition(int position_ms) {
 void Resume_clear(void) {
     memset(&state, 0, sizeof(state));
     state.type = RESUME_TYPE_NONE;
-    remove(RESUME_FILE);
+    char path[512];
+    if (resume_path(path, sizeof(path))) remove(path);
 }

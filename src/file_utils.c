@@ -1,4 +1,7 @@
 #include "file_utils.h"
+#ifndef FILE_UTILS_USERDATA_DIR
+#include "defines.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +13,16 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifdef FILE_UTILS_USERDATA_DIR
+#define USERDATA_DIR FILE_UTILS_USERDATA_DIR
+#else
+#define USERDATA_DIR SHARED_USERDATA_PATH "/music-player"
+#endif
+
+#ifndef FILE_UTILS_TEMP_DIR
+#define FILE_UTILS_TEMP_DIR "/tmp"
+#endif
 
 void shell_escape(const char* src, char* dst, int dst_size) {
     int j = 0;
@@ -24,6 +37,67 @@ void shell_escape(const char* src, char* dst, int dst_size) {
     dst[j] = '\0';
 }
 
+static bool directory_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+bool mkdir_p(const char* path) {
+    if (!path || !path[0]) return false;
+
+    char* work = strdup(path);
+    if (!work) return false;
+
+    size_t length = strlen(work);
+    while (length > 1 && work[length - 1] == '/') work[--length] = '\0';
+
+    bool ok = true;
+    for (char* slash = work + 1; ok && *slash; slash++) {
+        if (*slash != '/') continue;
+        *slash = '\0';
+        if (mkdir(work, 0755) != 0 && errno != EEXIST) ok = false;
+        if (ok && !directory_exists(work)) ok = false;
+        *slash = '/';
+    }
+
+    if (ok && mkdir(work, 0755) != 0 && errno != EEXIST) ok = false;
+    if (ok && !directory_exists(work)) ok = false;
+
+    free(work);
+    return ok;
+}
+
+int userdata_snpath(const char* rel, char* out, size_t out_size) {
+    if (!rel || (!out && out_size > 0)) return -1;
+
+    return rel[0]
+        ? snprintf(out, out_size, "%s/%s", USERDATA_DIR, rel)
+        : snprintf(out, out_size, "%s", USERDATA_DIR);
+}
+
+char* userdata_path(const char* rel) {
+    if (!rel) return NULL;
+
+    size_t size = strlen(USERDATA_DIR) + (rel[0] ? strlen(rel) + 2 : 1);
+    char* path = malloc(size);
+    if (!path) return NULL;
+
+    if (userdata_snpath(rel, path, size) < 0) {
+        free(path);
+        return NULL;
+    }
+    return path;
+}
+
+bool userdata_mkdir(const char* rel) {
+    char* path = userdata_path(rel);
+    if (!path) return false;
+
+    bool ok = mkdir_p(path);
+    free(path);
+    return ok;
+}
+
 // Distinguishes concurrent temp directories from each other: the pid alone is
 // not enough, since several threads stage downloads at once
 static volatile int tempdir_seq = 0;
@@ -32,7 +106,7 @@ bool mk_tempdir(const char* prefix, char* out, size_t out_size) {
     // pid and counter alone repeat: the counter restarts at zero every launch
     // and the kernel reuses pids, so a directory left behind by a crashed run
     // can carry the same name. The clock breaks that tie.
-    snprintf(out, out_size, "/tmp/%s_%d_%ld_%d", prefix, getpid(),
+    snprintf(out, out_size, "%s/%s_%d_%ld_%d", FILE_UTILS_TEMP_DIR, prefix, getpid(),
              (long)time(NULL), __sync_fetch_and_add(&tempdir_seq, 1));
 
     // An existing directory is not ours to use - staging into someone else's
@@ -171,26 +245,6 @@ bool find_file(const char* root, const char* name, char* out, size_t out_size) {
     return found;
 }
 
-// Helper function to create directory path recursively
-static int mkpath(const char* path, mode_t mode) {
-    char tmp[512];
-    char* p = NULL;
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (tmp[len - 1] == '/') tmp[len - 1] = 0;
-
-    for (p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, mode);
-            *p = '/';
-        }
-    }
-    return mkdir(tmp, mode);
-}
-
 // Reject an archive entry that would land outside the directory being extracted
 // into: an absolute path, or one that walks up out of it. A package we build
 // contains neither, so anything that does is not a package we should unpack.
@@ -251,13 +305,13 @@ int extract_zip(const char* zip_path, const char* dest_dir,
         // Check if it's a directory
         size_t name_len = strlen(name);
         if (name_len > 0 && name[name_len - 1] == '/') {
-            mkpath(full_path, 0755);
+            mkdir_p(full_path);
         } else {
             // Create parent directory if needed
             char* last_slash = strrchr(full_path, '/');
             if (last_slash) {
                 *last_slash = '\0';
-                mkpath(full_path, 0755);
+                mkdir_p(full_path);
                 *last_slash = '/';
             }
 

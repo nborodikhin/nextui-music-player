@@ -36,6 +36,7 @@
 #include "resume.h"
 #include "background.h"
 #include "display_helper.h"
+#include "spectrum.h"
 #include "test_control.h"
 
 // Global quit flag
@@ -202,6 +203,7 @@ int main(int argc, char* argv[]) {
 
     // Initialize app-specific settings
     Settings_init();
+    Spectrum_initSettings();
 
     // Startup update check is opt-out; About can still check on demand
     if (Settings_getAutoUpdateEnabled()) {
