@@ -16,7 +16,7 @@ static void set_error(DbStatement* statement, int result, const char* message) {
 bool DbStatement_begin(DbStatement *statement, sqlite3 *database, const char *sql) {
     statement->database = database;
     statement->statement = NULL;
-    statement->has_more = false;
+    statement->has_data = false;
     statement->result = SQLITE_ERROR;
     statement->op = 0;
     statement->error_op = -1;
@@ -102,7 +102,7 @@ bool DbStatement_bind_null(DbStatement *statement, int index) {
 
 const char *DbStatement_get_text(DbStatement *statement, int column) {
     statement->op++;
-    if (!statement->ok || !statement->has_more) {
+    if (!statement->ok || !statement->has_data) {
         return NULL;
     }
 
@@ -120,7 +120,7 @@ char* DbStatement_dup_ext(DbStatement *statement, int column) {
 
 int DbStatement_get_int(DbStatement *statement, int column) {
     statement->op++;
-    if (!statement->ok || !statement->has_more) {
+    if (!statement->ok || !statement->has_data) {
         return 0;
     }
 
@@ -136,21 +136,21 @@ bool DbStatement_step(DbStatement *statement) {
     statement->result = sqlite3_step(statement->statement);
 
     if (statement->result == SQLITE_ROW) {
-        statement->has_more = true;
+        statement->has_data = true;
     } else if (statement->result == SQLITE_DONE) {
-        statement->has_more = false;
+        statement->has_data = false;
     } else {
         set_error(statement, statement->result,
                   sqlite3_errmsg(statement->database));
-        statement->has_more = false;
+        statement->has_data = false;
     }
 
-    return statement->has_more;
+    return statement->has_data;
 }
 
 bool DbStatement_close(DbStatement *statement) {
     statement->op++;
-    statement->has_more = false;
+    statement->has_data = false;
 
     sqlite3_stmt* sqlite_statement = statement->statement;
     statement->statement = NULL;
