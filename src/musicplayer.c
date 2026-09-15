@@ -172,6 +172,11 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, sigHandler);
     signal(SIGTERM, sigHandler);
 
+    // Initialize the database before any application modules.
+    if (!Db_init()) {
+        LOG_error("Database is unavailable, continuing without it\n");
+    }
+
     // Seed random number generator for shuffle
     srand((unsigned int)time(NULL));
 
@@ -202,10 +207,6 @@ int main(int argc, char* argv[]) {
     // Initialize common module (global input handling)
     ModuleCommon_init();
 
-    // Initialize the database before modules that may migrate their data
-    if (!Db_init()) {
-        LOG_error("Database is unavailable, continuing without it\n");
-    }
 #if defined(DEBUG)
     if (Db_scratchSave("startup", "saved")) {
         DbScratchResult* scratch = Db_scratchRead("startup");
