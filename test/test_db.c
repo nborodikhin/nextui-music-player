@@ -168,6 +168,14 @@ TEST(statement_wrapper_reports_state) {
     CHECK(bound && strcmp(bound, "saved") == 0);
     CHECK(DbStatement_close(&statement));
 
+    CHECK(DbStatement_begin(&statement, database, "SELECT ?"));
+    CHECK(DbStatement_bind_text(&statement, 1, "copied"));
+    CHECK(DbStatement_step(&statement));
+    char* copy = DbStatement_dup_ext(&statement, 0);
+    CHECK(DbStatement_close(&statement));
+    CHECK(copy && strcmp(copy, "copied") == 0);
+    free(copy);
+
     CHECK(DbStatement_begin(&statement, database, "SELECT value FROM test_values WHERE value = ?"));
     CHECK(DbStatement_bind_text(&statement, 1, "missing"));
     CHECK(!DbStatement_step(&statement));

@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <sqlite3.h>
+#include <string.h>
 
 #include "db_statement.h"
 
@@ -106,6 +107,15 @@ const char *DbStatement_get_text(DbStatement *statement, int column) {
     }
 
     return (const char *) sqlite3_column_text(statement->statement, column);
+}
+
+char* DbStatement_dup_ext(DbStatement *statement, int column) {
+    const char* value = DbStatement_get_text(statement, column);
+    char* copy = value ? strdup(value) : NULL;
+    if (value && !copy) {
+        set_error(statement, SQLITE_NOMEM, "Out of memory");
+    }
+    return copy;
 }
 
 int DbStatement_get_int(DbStatement *statement, int column) {

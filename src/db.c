@@ -429,14 +429,7 @@ DbScratchResult* Db_scratchRead(const char* key) {
     DbStatement_begin(&statement, database, "SELECT value FROM scratch WHERE key = ? LIMIT 1");
     DbStatement_bind_text(&statement, 1, key);
     if (DbStatement_step(&statement)) {
-        const char* value = DbStatement_get_text(&statement, 0);
-        result->value = value ? strdup(value) : NULL;
-        if (value && !result->value) {
-            LOG_error("[Db] failed to copy scratch value\n");
-            DbStatement_close(&statement);
-            Db_freeResult(result);
-            return NULL;
-        }
+        result->value = DbStatement_dup_ext(&statement, 0);
     }
     DbStatement_close(&statement);
 

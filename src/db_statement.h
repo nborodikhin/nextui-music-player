@@ -25,6 +25,8 @@ bool DbStatement_bind_int(DbStatement* statement, int index, int value);
 bool DbStatement_bind_null(DbStatement* statement, int index);
 /* Returns text in the current row until the next step or close. */
 const char* DbStatement_get_text(DbStatement* statement, int column);
+/* Returns a copy of text in the current row. The caller frees the copy. */
+char* DbStatement_dup_ext(DbStatement* statement, int column);
 /* Returns the integer in the current row. */
 int DbStatement_get_int(DbStatement* statement, int column);
 /* Steps the statement and returns true when a row is available. */
