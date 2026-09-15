@@ -8,11 +8,6 @@ typedef struct DbResult {
     int data_version;
 } DbResult;
 
-typedef struct {
-    DbResult base;
-    char* value;
-} DbScratchResult;
-
 /* Initializes the database at the standard app data path. */
 bool Db_init(void);
 /* Closes the database connections of the process. */
@@ -38,10 +33,14 @@ int Db_dataVersion(void);
 bool Db_resultIsCurrent(const DbResult* result);
 
 // Temp example code
-/* Frees a scratch result. */
-void Db_freeScratchResult(DbScratchResult* result);
+typedef struct {
+    DbResult base;
+    char* value;
+} DbScratchResult;
+
 bool Db_scratchSave(const char* key, const char* value);
 DbScratchResult* Db_scratchRead(const char* key);
+void Db_freeScratchResult(DbScratchResult* result);
 
 // Test support code
 /* Initializes the database at an explicit path for internal tests. */
