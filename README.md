@@ -303,6 +303,7 @@ command and each argument. A `#` starts a comment.
 | `release(BTN)`     | Release a button that `hold(BTN, keep)` put down         |
 | `wait(ms)`         | A delay                                                  |
 | `screenshot(path)` | Take a PNG screenshot and save it into the file          |
+| `sql(sql)`         | Execute SQL on the app thread                            |
 | `quit()`           | Exit the app (also see EOF note below)                   |
 | `keep()`           | End the script, do not exit the app                      |
 

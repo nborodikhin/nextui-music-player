@@ -173,6 +173,7 @@ MBEDTLS_OBJS = $(patsubst %.c,$(MBEDTLS_OBJ_DIR)/%.o,$(MBEDTLS_SRC))
 
 LOCAL_SRC = \
     musicplayer.c player.c playlist.c playlist_m3u.c \
+    db.c db_schema.c db_statement.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
     downloader.c selfupdate.c display_helper.c \
     podcast.c podcast_rss.c podcast_search.c \
@@ -229,7 +230,7 @@ APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
 
 KIND_CFLAGS = -O2 -fomit-frame-pointer
 ifeq ($(KIND), debug)
-KIND_CFLAGS += -g -DTEST_CONTROL
+KIND_CFLAGS += -g -DDEBUG -DTEST_CONTROL
 endif
 
 MY_CFLAGS  = $(KIND_CFLAGS)
@@ -264,7 +265,7 @@ MY_LDFLAGS += -L$(NEXTUI_ROOT)/all/minarch/build/$(PLATFORM)
 
 LDLIBS  = -lopus -lmbedtls
 LDLIBS += -lSDL2_image -lSDL2_ttf
-LDLIBS += -lmsettings -lsamplerate -lzip -lm -lpthread -ldl -lz
+LDLIBS += -lmsettings -lsamplerate -lzip -lsqlite3 -lm -lpthread -ldl -lz
 
 ifeq ($(PLATFORM), desktop)
 # Native desktop build: full OpenGL, and SDL2 provides audio output so there is
@@ -272,6 +273,7 @@ ifeq ($(PLATFORM), desktop)
 # M4A decoding is stubbed out — see fdk_aac_desktop_stub.c, linked via LOCAL_SRC.
 # GL links differently per host: macOS OpenGL is a framework, Linux is -lGL (no
 # gl.pc, so pkg-config falls back). Mirrors desktop/platform/makefile.env.
+MY_CFLAGS += -DPLATFORM_DESKTOP
 ifeq ($(shell uname -s), Darwin)
 LDLIBS += -lSDL2 -framework OpenGL
 else

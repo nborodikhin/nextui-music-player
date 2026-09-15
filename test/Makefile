@@ -55,7 +55,7 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
-           $(BIN)/test_lyric_window
+           $(BIN)/test_lyric_window $(BIN)/test_db
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -127,6 +127,20 @@ $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c \
                               $(SRC)/spectrum.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
+
+DB_INC = $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
+         -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
+DB_TEMP_DIR = $(abspath ../.codex_tmp)
+
+$(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p ../.codex_tmp
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(DB_TEMP_DIR)/db-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(DB_TEMP_DIR)"' \
+	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  -lsqlite3 -lpthread -lzip
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib

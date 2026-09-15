@@ -11,6 +11,7 @@
 #include "defines.h"
 #include "api.h"
 #include "config.h"
+#include "db.h"
 #include "display_helper.h"
 #include "module_common.h"
 #include "test_control.h"
@@ -53,6 +54,7 @@ typedef enum {
     ACT_DOWN,
     ACT_UP,
     ACT_SHOT,
+    ACT_EXECUTE_SQL,
     ACT_KEEP,
     ACT_QUIT,
 } ActionType;
@@ -63,7 +65,10 @@ typedef struct {
     int        btn;
     int        btn_id;
     int        line;                // the line that made the action
-    char       path[MAX_PATH_LEN];
+    union {
+        char path[MAX_PATH_LEN];
+        char sql[MAX_LINE];
+    } data;
 } Action;
 
 typedef struct {
@@ -385,13 +390,41 @@ static char* trim(char* s) {
     return s;
 }
 
+// Find the closing parenthesis of a command argument.
+static char* find_command_close(char* start) {
+    int depth = 1;
+    char quote = '\0';
+    for (char* p = start; *p; p++) {
+        if (quote) {
+            if (*p == quote) {
+                if (p[1] == quote) {
+                    p++;
+                } else {
+                    quote = '\0';
+                }
+            }
+            continue;
+        }
+        if (*p == '\'' || *p == '"' || *p == '`') {
+            quote = *p;
+        } else if (*p == '(') {
+            depth++;
+        } else if (*p == ')' && --depth == 0) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
 // Execute one command of a line. base gives the start time of the step.
 // Returns the end time of the command, or base if the command has no duration.
 static uint32_t schedule_command(const char* name, char* args, uint32_t base, int line) {
     current_line = line;
     char* arg1 = args;
     char* arg2 = NULL;
-    if (args) {
+    bool is_sql = strcmp(name, "sql") == 0;
+    if (is_sql && args) arg1 = trim(args);
+    if (args && !is_sql) {
         char* comma = strchr(args, ',');
         if (comma) {
             *comma = '\0';
@@ -461,6 +494,20 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
         return at;
     }
 
+    if (is_sql) {
+        if (!arg1 || arg1[0] == '\0' || strlen(arg1) >= MAX_LINE) {
+            reply("err %d bad SQL", line);
+            return base;
+        }
+        Action* a = push_action(ACT_EXECUTE_SQL, base);
+        if (!a) {
+            reply("err %d queue is full", line);
+            return base;
+        }
+        strcpy(a->data.sql, arg1);
+        return base;
+    }
+
     if (strcmp(name, "wait") == 0) {
         unsigned long ms = 0;
         if (!parse_number(arg1, MAX_DELAY_MS, &ms)) {
@@ -478,7 +525,7 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
         }
         Action* a = push_action(ACT_SHOT, base);
         if (!a) { reply("err %d queue is full", line); return base; }
-        strcpy(a->path, arg1);
+        strcpy(a->data.path, arg1);
         return base;
     }
 
@@ -524,7 +571,7 @@ static void schedule_line(char* text) {
             *after_name = '\0';
             *p++ = '\0';
             args = p;
-            char* close = strchr(p, ')');
+            char* close = find_command_close(p);
             if (!close) {
                 reply("err %d no ')' in the line", line_no);
                 break;
@@ -630,8 +677,8 @@ static void take_screenshot(const Action* a) {
         SDL_BlitSurface(screen, NULL, image, NULL);
     }
 
-    if (IMG_SavePNG(image, a->path) != 0) {
-        reply("err %d cannot write %s: %s", a->line, a->path, IMG_GetError());
+    if (IMG_SavePNG(image, a->data.path) != 0) {
+        reply("err %d cannot write %s: %s", a->line, a->data.path, IMG_GetError());
     }
     SDL_FreeSurface(image);
 }
@@ -644,6 +691,9 @@ static void run_due_actions(uint32_t now) {
             case ACT_DOWN: button_down(a->btn, a->btn_id); break;
             case ACT_UP:   button_up(a->btn); break;
             case ACT_SHOT: take_screenshot(a); break;
+            case ACT_EXECUTE_SQL:
+                if (!Db_execute(a->data.sql)) reply("err %d SQL failed", a->line);
+                break;
             case ACT_KEEP: keep_open = true; break;
             case ACT_QUIT:
                 quit_asked = true;

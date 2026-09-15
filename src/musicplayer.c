@@ -37,6 +37,7 @@
 #include "background.h"
 #include "display_helper.h"
 #include "spectrum.h"
+#include "db.h"
 #include "test_control.h"
 
 // Global quit flag
@@ -83,7 +84,7 @@ static void print_usage(const char* program) {
         "\n"
         "Commands of the control channel, one step for each line:\n"
         "  press(BTN)  press(BTN, n)  hold(BTN, ms)  hold(BTN, keep)  release(BTN)\n"
-        "  wait(ms)  screenshot(path)  keep()  quit()\n"
+        "  wait(ms)  screenshot(path)  sql(sql)  keep()  quit()\n"
         "\n"
         "BTN is UP, DOWN, LEFT, RIGHT, A, B, X, Y, START, SELECT, L1, R1, L2, R2,\n"
         "MENU, PLUS, MINUS or POWER.\n"
@@ -201,6 +202,20 @@ int main(int argc, char* argv[]) {
     // Initialize common module (global input handling)
     ModuleCommon_init();
 
+    // Initialize the database before modules that may migrate their data
+    if (!Db_init()) {
+        LOG_error("Database is unavailable, continuing without it\n");
+    }
+#if defined(DEBUG)
+    if (Db_scratchSave("startup", "saved")) {
+        DbScratchResult* scratch = Db_scratchRead("startup");
+        LOG_info("Db_scratchSave saved value: saved\n");
+        LOG_info("Db_scratchRead read value: %s\n",
+                 scratch && scratch->value ? scratch->value : "(none)");
+        Db_freeResult(scratch);
+    }
+#endif
+
     // Initialize app-specific settings
     Settings_init();
     Spectrum_initSettings();
@@ -291,6 +306,7 @@ cleanup:
     KeyboardMap_quit();
     Fonts_unload();
 
+    Db_quit();
     QuitSettings();
     TestControl_quit();
     PWR_quit();
