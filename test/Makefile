@@ -147,7 +147,7 @@ DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
 DESKTOP_LIBS = $(DESKTOP_RPATH) -L$(DESKTOP_BUILD) -L/var/tmp/nextui/lib \
                -L../NextUI/workspace/desktop/libmsettings \
                $(shell pkg-config --libs sdl2) -lSDL2_ttf -lSDL2_image -lsamplerate \
-               -lzip -lopus -lmbedtls -lm -lpthread -ldl -lz -lGL -lmsettings
+               -lzip -lsqlite3 -lopus -lmbedtls -lm -lpthread -ldl -lz -lGL -lmsettings
 DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
               -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' \
               -DUSE_SDL2 -DUSE_GL
