@@ -5,9 +5,13 @@
 #include <stdint.h>
 
 typedef struct DbResult {
-    void (*destroy)(struct DbResult*);
     int data_version;
 } DbResult;
+
+typedef struct {
+    DbResult base;
+    char* value;
+} DbScratchResult;
 
 /* Initializes the database at the standard app data path. */
 bool Db_init(void);
@@ -31,16 +35,11 @@ bool Db_markDataMigrationDone(const char* name);
 /* Returns the current process data version. */
 int Db_dataVersion(void);
 /* Returns whether a result has the current data version. */
-bool Db_resultIsCurrent(const void* result);
-/* Frees a result returned by a database query. */
-void Db_freeResult(void* result);
+bool Db_resultIsCurrent(const DbResult* result);
 
 // Temp example code
-
-typedef struct {
-    DbResult base;
-    char* value;
-} DbScratchResult;
+/* Frees a scratch result. */
+void Db_freeScratchResult(DbScratchResult* result);
 bool Db_scratchSave(const char* key, const char* value);
 DbScratchResult* Db_scratchRead(const char* key);
 

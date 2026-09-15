@@ -119,19 +119,19 @@ TEST(scratch_save_read_and_reset) {
     DbScratchResult* saved = Db_scratchRead("key");
     CHECK(saved != NULL);
     CHECK(saved && saved->value && strcmp(saved->value, "value") == 0);
-    Db_freeResult(saved);
+    Db_freeScratchResult(saved);
 
     DbScratchResult* missing = Db_scratchRead("never-saved");
     CHECK(missing != NULL);
     CHECK(missing && missing->value == NULL);
-    Db_freeResult(missing);
+    Db_freeScratchResult(missing);
 
     Db_quit();
     CHECK(Db_initInternal(database_path));
     DbScratchResult* reset = Db_scratchRead("key");
     CHECK(reset != NULL);
     CHECK(reset && reset->value == NULL);
-    Db_freeResult(reset);
+    Db_freeScratchResult(reset);
     stop_test();
 }
 
@@ -202,12 +202,12 @@ TEST(result_is_a_copy_and_tracks_commits) {
     DbScratchResult* result = Db_scratchRead("key");
     CHECK(result != NULL);
     CHECK(result && result->value && strcmp(result->value, "old") == 0);
-    CHECK(result && Db_resultIsCurrent(result));
+    CHECK(result && Db_resultIsCurrent(&result->base));
 
     CHECK(Db_scratchSave("key", "new"));
     CHECK(result && result->value && strcmp(result->value, "old") == 0);
-    CHECK(result && !Db_resultIsCurrent(result));
-    Db_freeResult(result);
+    CHECK(result && !Db_resultIsCurrent(&result->base));
+    Db_freeScratchResult(result);
     stop_test();
 }
 
@@ -223,13 +223,13 @@ TEST(rollback_keeps_data_version_increment) {
     CHECK_EQ_SZ(Db_dataVersion(), before + 1);
     CHECK(Db_rollback());
     CHECK_EQ_SZ(Db_dataVersion(), before + 1);
-    CHECK(result && !Db_resultIsCurrent(result));
-    Db_freeResult(result);
+    CHECK(result && !Db_resultIsCurrent(&result->base));
+    Db_freeScratchResult(result);
 
     DbScratchResult* missing = Db_scratchRead("key");
     CHECK(missing != NULL);
     CHECK(missing && missing->value == NULL);
-    Db_freeResult(missing);
+    Db_freeScratchResult(missing);
     stop_test();
 }
 
@@ -335,7 +335,7 @@ TEST(thread_connection_does_not_share_scratch) {
     DbScratchResult* result = Db_scratchRead("thread");
     CHECK(result != NULL);
     CHECK(result && result->value == NULL);
-    Db_freeResult(result);
+    Db_freeScratchResult(result);
     stop_test();
 }
 

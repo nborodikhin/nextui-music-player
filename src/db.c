@@ -376,20 +376,13 @@ int Db_dataVersion(void) {
     return atomic_load(&data_version);
 }
 
-bool Db_resultIsCurrent(const void* result) {
+bool Db_resultIsCurrent(const DbResult* result) {
     if (!result) return false;
-    const DbResult* base = result;
-    return base->data_version == Db_dataVersion();
+    return result->data_version == Db_dataVersion();
 }
 
-void Db_freeResult(void* result) {
+void Db_freeScratchResult(DbScratchResult* result) {
     if (!result) return;
-    DbResult* base = result;
-    if (base->destroy) base->destroy(base);
-}
-
-static void destroy_scratch_result(DbResult* base) {
-    DbScratchResult* result = (DbScratchResult*)base;
     free(result->value);
     free(result);
 }
@@ -422,7 +415,6 @@ DbScratchResult* Db_scratchRead(const char* key) {
 
     DbScratchResult* result = calloc(1, sizeof(*result));
     if (!result) return NULL;
-    result->base.destroy = destroy_scratch_result;
     result->base.data_version = Db_dataVersion();
 
     DbStatement statement;
@@ -436,7 +428,7 @@ DbScratchResult* Db_scratchRead(const char* key) {
     if (!statement.ok) {
         LOG_error("[Db] failed to finish reading scratch value, op %d\n",
                   statement.error_op);
-        Db_freeResult(result);
+        Db_freeScratchResult(result);
         return NULL;
     }
     return result;

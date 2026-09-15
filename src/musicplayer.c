@@ -212,7 +212,7 @@ int main(int argc, char* argv[]) {
         LOG_info("Db_scratchSave saved value: saved\n");
         LOG_info("Db_scratchRead read value: %s\n",
                  scratch && scratch->value ? scratch->value : "(none)");
-        Db_freeResult(scratch);
+        Db_freeScratchResult(scratch);
     }
 #endif
 
