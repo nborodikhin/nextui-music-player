@@ -202,7 +202,7 @@ static void migrations(void) {
     function(remove_spectrum_settings_file);
     function(copy_settings_data);
     function(remove_settings_file);
-    // 5
+    // 6
 }
 
 DbSchemaAction *DbSchema_getActions(void) {
