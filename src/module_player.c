@@ -113,7 +113,7 @@ static bool try_load_and_play(const char *path) {
         // The lyrics belong to the track, thus a new track takes the old ones
         // away, and fetches its own where the lyrics are on
         Lyrics_clear();
-        if (Settings_getLyricsEnabled() && info) {
+        if (Settings_getBool(&SETTING_LYRICS_ENABLED) && info) {
             Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
         }
 
@@ -537,8 +537,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     else if (PAD_justPressed(BTN_R3) || PAD_justPressed(BTN_R2)) {
         // Lyrics that are off hide, and keep their data. Lyrics that come back
         // fetch only where the track has none.
-        Settings_toggleLyrics();
-        if (Settings_getLyricsEnabled()) {
+        if (Settings_toggleBool(&SETTING_LYRICS_ENABLED)) {
             const TrackInfo* info = Player_getTrackInfo();
             if (info) {
                 Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
@@ -943,8 +942,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
             dirty = 1;
         }
         else if (PAD_justPressed(BTN_R3) || PAD_justPressed(BTN_R2)) {
-            Settings_toggleLyrics();
-            if (Settings_getLyricsEnabled()) {
+            if (Settings_toggleBool(&SETTING_LYRICS_ENABLED)) {
                 const TrackInfo* info = Player_getTrackInfo();
                 if (info) {
                     Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);

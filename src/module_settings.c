@@ -1,5 +1,12 @@
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
 #include "defines.h"
 #include "api.h"
+#include "db.h"
+#include "file_utils.h"
 #include "help_screen.h"
 #include "module_common.h"
 #include "module_settings.h"
@@ -15,6 +22,197 @@
 #include "wifi.h"
 #include "album_art.h"
 #include "list_nav.h"
+
+static const int screen_off_values[] = {60, 90, 120, 0};
+#define SCREEN_OFF_VALUE_COUNT 4
+#define DEFAULT_SCREEN_OFF_INDEX 0
+
+static const int bass_filter_values[] = {0, 80, 100, 120, 150, 200};
+#define BASS_FILTER_VALUE_COUNT 6
+#define DEFAULT_BASS_FILTER_INDEX 3
+
+#define SOFT_LIMITER_VALUE_COUNT 4
+#define DEFAULT_SOFT_LIMITER_INDEX 2
+
+static int screen_off_index(void) {
+    int current = Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT);
+    for (int index = 0; index < SCREEN_OFF_VALUE_COUNT; index++) {
+        if (screen_off_values[index] == current) return index;
+    }
+    return DEFAULT_SCREEN_OFF_INDEX;
+}
+
+static int bass_filter_index(void) {
+    int current = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+    for (int index = 0; index < BASS_FILTER_VALUE_COUNT; index++) {
+        if (bass_filter_values[index] == current) return index;
+    }
+    return DEFAULT_BASS_FILTER_INDEX;
+}
+
+static int soft_limiter_index(void) {
+    int current = Settings_getInt(&SETTING_SOFT_LIMITER);
+    return current >= 0 && current < SOFT_LIMITER_VALUE_COUNT
+               ? current
+               : DEFAULT_SOFT_LIMITER_INDEX;
+}
+
+void SettingsModule_cycleScreenOffNext(void) {
+    int index = (screen_off_index() + 1) % SCREEN_OFF_VALUE_COUNT;
+    Settings_setInt(&SETTING_SCREEN_OFF_TIMEOUT, screen_off_values[index]);
+}
+
+void SettingsModule_cycleScreenOffPrev(void) {
+    int index = (screen_off_index() - 1 + SCREEN_OFF_VALUE_COUNT) % SCREEN_OFF_VALUE_COUNT;
+    Settings_setInt(&SETTING_SCREEN_OFF_TIMEOUT, screen_off_values[index]);
+}
+
+const char* SettingsModule_getScreenOffDisplayStr(void) {
+    switch (Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT)) {
+        case 60:  return "60s";
+        case 90:  return "90s";
+        case 120: return "120s";
+        case 0:   return "Off";
+        default:  return "60s";
+    }
+}
+
+void SettingsModule_cycleBassFilterNext(void) {
+    int index = (bass_filter_index() + 1) % BASS_FILTER_VALUE_COUNT;
+    Settings_setInt(&SETTING_BASS_FILTER_HZ, bass_filter_values[index]);
+}
+
+void SettingsModule_cycleBassFilterPrev(void) {
+    int index = (bass_filter_index() - 1 + BASS_FILTER_VALUE_COUNT) % BASS_FILTER_VALUE_COUNT;
+    Settings_setInt(&SETTING_BASS_FILTER_HZ, bass_filter_values[index]);
+}
+
+const char* SettingsModule_getBassFilterDisplayStr(void) {
+    static char value[16];
+    int current = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+    if (current == 0) return "Off";
+    snprintf(value, sizeof(value), "%d Hz", current);
+    return value;
+}
+
+void SettingsModule_cycleSoftLimiterNext(void) {
+    Settings_setInt(&SETTING_SOFT_LIMITER,
+                    (soft_limiter_index() + 1) % SOFT_LIMITER_VALUE_COUNT);
+}
+
+void SettingsModule_cycleSoftLimiterPrev(void) {
+    Settings_setInt(&SETTING_SOFT_LIMITER,
+                    (soft_limiter_index() - 1 + SOFT_LIMITER_VALUE_COUNT) %
+                    SOFT_LIMITER_VALUE_COUNT);
+}
+
+const char* SettingsModule_getSoftLimiterDisplayStr(void) {
+    switch (Settings_getInt(&SETTING_SOFT_LIMITER)) {
+        case 0: return "Off";
+        case 1: return "Mild";
+        case 2: return "Medium";
+        case 3: return "Strong";
+        default: return "Medium";
+    }
+}
+
+void SettingsModule_toggleAutoUpdate(void) {
+    Settings_toggleBool(&SETTING_AUTO_UPDATE);
+}
+
+const char* SettingsModule_getAutoUpdateDisplayStr(void) {
+    return Settings_getBool(&SETTING_AUTO_UPDATE) ? "On" : "Off";
+}
+
+static bool value_is_in(const int* values, int count, int value) {
+    for (int index = 0; index < count; index++) {
+        if (values[index] == value) return true;
+    }
+    return false;
+}
+
+static void migrate_settings_file(void) {
+    if (!Db_isAvailable() || Db_dataMigrationIsDone("settings.to-db")) return;
+
+    int screen_off_value = -1;
+    int lyrics_value = -1;
+    int bass_filter_value = -1;
+    int soft_limiter_value = -1;
+    int auto_update_value = -1;
+
+    char path[512];
+    int path_length = userdata_snpath("settings.cfg", path, sizeof(path));
+    if (path_length >= 0 && (size_t)path_length < sizeof(path)) {
+        FILE* file = fopen(path, "r");
+        if (file) {
+            char line[256];
+            int value;
+            while (fgets(line, sizeof(line), file)) {
+                if (sscanf(line, "screen_off_timeout=%d", &value) == 1 &&
+                    value_is_in(screen_off_values, SCREEN_OFF_VALUE_COUNT, value)) {
+                    screen_off_value = value;
+                } else if (sscanf(line, "lyrics_enabled=%d", &value) == 1 &&
+                           (value == 0 || value == 1)) {
+                    lyrics_value = value;
+                } else if (sscanf(line, "bass_filter_hz=%d", &value) == 1 &&
+                           value_is_in(bass_filter_values, BASS_FILTER_VALUE_COUNT, value)) {
+                    bass_filter_value = value;
+                } else if (sscanf(line, "soft_limiter=%d", &value) == 1 &&
+                           value >= 0 && value < SOFT_LIMITER_VALUE_COUNT) {
+                    soft_limiter_value = value;
+                } else if (sscanf(line, "auto_update=%d", &value) == 1 &&
+                           (value == 0 || value == 1)) {
+                    auto_update_value = value;
+                }
+            }
+            fclose(file);
+        }
+    }
+
+    if (!Db_begin()) return;
+    if (screen_off_value >= 0) {
+        Settings_setInt(&SETTING_SCREEN_OFF_TIMEOUT, screen_off_value);
+    }
+    if (lyrics_value >= 0) {
+        Settings_setBool(&SETTING_LYRICS_ENABLED, lyrics_value != 0);
+    }
+    if (bass_filter_value >= 0) {
+        Settings_setInt(&SETTING_BASS_FILTER_HZ, bass_filter_value);
+    }
+    if (soft_limiter_value >= 0) {
+        Settings_setInt(&SETTING_SOFT_LIMITER, soft_limiter_value);
+    }
+    if (auto_update_value >= 0) {
+        Settings_setBool(&SETTING_AUTO_UPDATE, auto_update_value != 0);
+    }
+
+    if (!Db_markDataMigrationDone("settings.to-db") || !Db_commit()) {
+        Db_rollback();
+    }
+}
+
+static void remove_settings_file(void) {
+    char path[512];
+    int path_length = userdata_snpath("settings.cfg", path, sizeof(path));
+    if (path_length < 0 || (size_t)path_length >= sizeof(path)) return;
+
+    bool copy_done = Db_dataMigrationIsDone("settings.to-db");
+    bool remove_done = Db_dataMigrationIsDone("settings.remove-files");
+    if (!copy_done || remove_done) return;
+
+    if (remove(path) != 0 && errno != ENOENT) {
+        LOG_error("[Settings] failed to remove settings file: %s\n",
+                  strerror(errno));
+        return;
+    }
+
+    if (!Db_markDataMigrationDone("settings.remove-files")) return;
+}
+
+void SettingsModule_migrateData(void) {
+    migrate_settings_file();
+    remove_settings_file();
+}
 
 // Internal states
 typedef enum {
@@ -81,19 +279,19 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                     bool cycleNext = (in & LIST_NAV_RIGHT) != 0;
                     switch (nav.selected) {
                         case SETTINGS_ITEM_SCREEN_OFF:
-                            cycleNext ? Settings_cycleScreenOffNext() : Settings_cycleScreenOffPrev();
+                            cycleNext ? SettingsModule_cycleScreenOffNext() : SettingsModule_cycleScreenOffPrev();
                             buttonHandledByItem = true;
                             break;
                         case SETTINGS_ITEM_BASS_FILTER:
-                            cycleNext ? Settings_cycleBassFilterNext() : Settings_cycleBassFilterPrev();
+                            cycleNext ? SettingsModule_cycleBassFilterNext() : SettingsModule_cycleBassFilterPrev();
                             buttonHandledByItem = true;
                             break;
                         case SETTINGS_ITEM_SOFT_LIMITER:
-                            cycleNext ? Settings_cycleSoftLimiterNext() : Settings_cycleSoftLimiterPrev();
+                            cycleNext ? SettingsModule_cycleSoftLimiterNext() : SettingsModule_cycleSoftLimiterPrev();
                             buttonHandledByItem = true;
                             break;
                         case SETTINGS_ITEM_AUTO_UPDATE:
-                            Settings_toggleAutoUpdate();
+                            SettingsModule_toggleAutoUpdate();
                             buttonHandledByItem = true;
                             break;
                         default:
@@ -112,19 +310,19 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                     switch (nav.selected) {
                         case SETTINGS_ITEM_SCREEN_OFF:
                             // A also cycles the value (convenience)
-                            Settings_cycleScreenOffNext();
+                            SettingsModule_cycleScreenOffNext();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_BASS_FILTER:
-                            Settings_cycleBassFilterNext();
+                            SettingsModule_cycleBassFilterNext();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_SOFT_LIMITER:
-                            Settings_cycleSoftLimiterNext();
+                            SettingsModule_cycleSoftLimiterNext();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_AUTO_UPDATE:
-                            Settings_toggleAutoUpdate();
+                            SettingsModule_toggleAutoUpdate();
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_CLEAR_CACHE:

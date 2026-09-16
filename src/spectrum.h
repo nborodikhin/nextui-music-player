@@ -16,9 +16,9 @@ typedef enum {
     SPECTRUM_STYLE_COUNT
 } SpectrumStyle;
 
-// Load the spectrum settings and migrate the legacy file.
+// Migrate the legacy spectrum file and load the settings table.
 // Call this function once during app startup.
-void Spectrum_initSettings(void);
+void Spectrum_migrateData(void);
 
 void Spectrum_init(void);
 void Spectrum_quit(void);

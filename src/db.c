@@ -118,13 +118,6 @@ static sqlite3* connection(void) {
         return NULL;
     }
 
-    DbStatement_exec(&statement, database, "CREATE TEMP TABLE scratch (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    if (!statement.ok) {
-        LOG_error("[Db] failed to create scratch table: %s\n", statement.errmsg);
-        sqlite3_close(database);
-        return NULL;
-    }
-
     result = pthread_setspecific(connection_key, database);
     if (result != 0) {
         LOG_error("[Db] failed to store connection: %s\n", strerror(result));
@@ -313,6 +306,10 @@ void Db_quit(void) {
     database_path = NULL;
 }
 
+bool Db_isAvailable(void) {
+    return atomic_load(&database_available) != 0;
+}
+
 bool Db_begin(void) {
     return execute(connection(), "BEGIN");
 }
@@ -381,55 +378,142 @@ bool Db_resultIsCurrent(const DbResult* result) {
     return result->data_version == Db_dataVersion();
 }
 
-void Db_freeScratchResult(DbScratchResult* result) {
+void Db_freeSettingsResult(DbSettingsResult* result) {
     if (!result) return;
-    free(result->value);
+
+    for (int index = 0; index < result->count; index++) {
+        free(result->items[index].name);
+        free(result->items[index].string_value);
+    }
+    free(result->items);
     free(result);
 }
 
-bool Db_scratchSave(const char* key, const char* value) {
-    if (!key || !value) return false;
+static bool append_setting(DbSettingsResult* result, DbSetting* setting) {
+    DbSetting* items = realloc(result->items,
+                               (size_t)(result->count + 1) * sizeof(*items));
+    if (!items) return false;
+
+    result->items = items;
+    result->items[result->count++] = *setting;
+    return true;
+}
+
+DbSettingsResult* Db_readSettings(void) {
+    DbSettingsResult* result = calloc(1, sizeof(*result));
+    if (!result) return NULL;
+    result->base.data_version = Db_dataVersion();
+
+    sqlite3* database = connection();
+    if (!database) {
+        LOG_error("[Db] failed to read settings: no database\n");
+        return result;
+    }
 
     DbStatement statement;
-    DbStatement_begin(&statement, connection(), "INSERT OR REPLACE INTO scratch (key, value) VALUES (?, ?)");
-    DbStatement_bind_text(&statement, 1, key);
-    DbStatement_bind_text(&statement, 2, value);
+    if (!DbStatement_begin(&statement, database,
+                           "SELECT name, type, value FROM settings")) {
+        LOG_error("[Db] failed to start settings read, op %d\n",
+                  statement.error_op);
+        DbStatement_close(&statement);
+        return result;
+    }
+
+    while (DbStatement_step(&statement)) {
+        const char* name = DbStatement_get_text(&statement, 0);
+        const char* type = DbStatement_get_text(&statement, 1);
+        DbSetting setting = {0};
+
+        if (!name || !type) {
+            LOG_error("[Db] skipped setting with no name or type\n");
+            continue;
+        }
+
+        if (strcmp(type, "int") == 0) {
+            setting.type = DB_SETTING_INT;
+            setting.int_value = DbStatement_get_int(&statement, 2);
+        } else if (strcmp(type, "bool") == 0) {
+            setting.type = DB_SETTING_BOOL;
+            setting.bool_value = DbStatement_get_int(&statement, 2) != 0;
+        } else if (strcmp(type, "string") == 0) {
+            setting.type = DB_SETTING_STRING;
+            setting.string_value = DbStatement_dup_ext(&statement, 2);
+            if (!setting.string_value && statement.ok) {
+                LOG_error("[Db] failed to copy setting %s\n", name);
+                statement.ok = false;
+            }
+        } else {
+            LOG_warn("[Db] skipped setting %s with unknown type %s\n", name, type);
+            continue;
+        }
+
+        setting.name = strdup(name);
+        if (!setting.name || !append_setting(result, &setting)) {
+            free(setting.name);
+            free(setting.string_value);
+            LOG_error("[Db] failed to copy setting %s\n", name);
+            statement.ok = false;
+            break;
+        }
+    }
+
+    if (!statement.ok) {
+        LOG_error("[Db] failed to finish settings read, op %d\n",
+                  statement.error_op);
+        DbStatement_close(&statement);
+        Db_freeSettingsResult(result);
+        result = calloc(1, sizeof(*result));
+        if (result) result->base.data_version = Db_dataVersion();
+        return result;
+    }
+
+    if (!DbStatement_close(&statement)) {
+        LOG_error("[Db] failed to close settings read, op %d\n",
+                  statement.error_op);
+        Db_freeSettingsResult(result);
+        result = calloc(1, sizeof(*result));
+        if (result) result->base.data_version = Db_dataVersion();
+    }
+    return result;
+}
+
+static bool save_setting(const char* name, const char* type,
+                         int int_value, const char* string_value) {
+    if (!name || !type) return false;
+
+    DbStatement statement;
+    DbStatement_begin(&statement, connection(),
+                      "INSERT OR REPLACE INTO settings (name, type, value) "
+                      "VALUES (?, ?, ?)");
+    DbStatement_bind_text(&statement, 1, name);
+    DbStatement_bind_text(&statement, 2, type);
+    if (string_value) {
+        DbStatement_bind_text(&statement, 3, string_value);
+    } else {
+        DbStatement_bind_int(&statement, 3, int_value);
+    }
     DbStatement_step(&statement);
     DbStatement_close(&statement);
 
     if (!statement.ok) {
-        LOG_error("[Db] failed to save scratch value, op %d\n", statement.error_op);
+        LOG_error("[Db] failed to save setting %s, op %d\n",
+                  name, statement.error_op);
         return false;
     }
 
     increment_data_version();
-
     return true;
 }
 
-DbScratchResult* Db_scratchRead(const char* key) {
-    if (!key) return NULL;
+bool Db_saveIntSetting(const char* name, int value) {
+    return save_setting(name, "int", value, NULL);
+}
 
-    sqlite3* database = connection();
-    if (!database) return NULL;
+bool Db_saveBoolSetting(const char* name, bool value) {
+    return save_setting(name, "bool", value ? 1 : 0, NULL);
+}
 
-    DbScratchResult* result = calloc(1, sizeof(*result));
-    if (!result) return NULL;
-    result->base.data_version = Db_dataVersion();
-
-    DbStatement statement;
-    DbStatement_begin(&statement, database, "SELECT value FROM scratch WHERE key = ? LIMIT 1");
-    DbStatement_bind_text(&statement, 1, key);
-    if (DbStatement_step(&statement)) {
-        result->value = DbStatement_dup_ext(&statement, 0);
-    }
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] failed to finish reading scratch value, op %d\n",
-                  statement.error_op);
-        Db_freeScratchResult(result);
-        return NULL;
-    }
-    return result;
+bool Db_saveStringSetting(const char* name, const char* value) {
+    if (!value) return false;
+    return save_setting(name, "string", 0, value);
 }

@@ -77,11 +77,30 @@ static bool sqlite_has_data_migrations(const char* path) {
     return exists;
 }
 
+static bool sqlite_has_settings(const char* path) {
+    sqlite3* database = NULL;
+    sqlite3_stmt* statement = NULL;
+    bool exists = false;
+
+    if (sqlite3_open(path, &database) == SQLITE_OK &&
+        sqlite3_prepare_v2(
+            database,
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
+            -1, &statement, NULL) == SQLITE_OK) {
+        exists = sqlite3_step(statement) == SQLITE_ROW;
+    }
+    if (statement) sqlite3_finalize(statement);
+    if (database) sqlite3_close(database);
+    return exists;
+}
+
 TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
-    CHECK_EQ_INT(sqlite_user_version(database_path), 1);
+    CHECK(Db_isAvailable());
+    CHECK_EQ_INT(sqlite_user_version(database_path), 2);
     CHECK(sqlite_has_data_migrations(database_path));
+    CHECK(sqlite_has_settings(database_path));
     stop_test();
 }
 
@@ -90,7 +109,11 @@ TEST(open_failure_disables_database) {
     char missing_path[sizeof(database_path)];
     snprintf(missing_path, sizeof(missing_path), "%s/missing/music-player.db", temp_dir);
     CHECK(!Db_initInternal(missing_path));
-    CHECK(Db_scratchRead("missing") == NULL);
+    CHECK(!Db_isAvailable());
+    DbSettingsResult* result = Db_readSettings();
+    CHECK(result != NULL);
+    CHECK(result && result->count == 0);
+    Db_freeSettingsResult(result);
     stop_test();
 }
 
@@ -111,27 +134,25 @@ TEST(failed_schema_migration_rolls_back) {
     stop_test();
 }
 
-TEST(scratch_save_read_and_reset) {
+TEST(settings_save_read_and_reset) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
-    CHECK(Db_scratchSave("key", "value"));
+    CHECK(Db_saveIntSetting("int", 42));
+    CHECK(Db_saveBoolSetting("bool", true));
+    CHECK(Db_saveStringSetting("string", "value"));
 
-    DbScratchResult* saved = Db_scratchRead("key");
+    DbSettingsResult* saved = Db_readSettings();
     CHECK(saved != NULL);
-    CHECK(saved && saved->value && strcmp(saved->value, "value") == 0);
-    Db_freeScratchResult(saved);
-
-    DbScratchResult* missing = Db_scratchRead("never-saved");
-    CHECK(missing != NULL);
-    CHECK(missing && missing->value == NULL);
-    Db_freeScratchResult(missing);
+    CHECK(saved && saved->count == 3);
+    CHECK(saved && saved->items[0].name != NULL);
+    Db_freeSettingsResult(saved);
 
     Db_quit();
     CHECK(Db_initInternal(database_path));
-    DbScratchResult* reset = Db_scratchRead("key");
-    CHECK(reset != NULL);
-    CHECK(reset && reset->value == NULL);
-    Db_freeScratchResult(reset);
+    DbSettingsResult* restored = Db_readSettings();
+    CHECK(restored != NULL);
+    CHECK(restored && restored->count == 3);
+    Db_freeSettingsResult(restored);
     stop_test();
 }
 
@@ -197,17 +218,20 @@ TEST(statement_wrapper_reports_state) {
 TEST(result_is_a_copy_and_tracks_commits) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
-    CHECK(Db_scratchSave("key", "old"));
+    CHECK(Db_saveStringSetting("key", "old"));
 
-    DbScratchResult* result = Db_scratchRead("key");
+    DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
-    CHECK(result && result->value && strcmp(result->value, "old") == 0);
+    CHECK(result && result->count == 1);
+    CHECK(result && result->items[0].string_value &&
+          strcmp(result->items[0].string_value, "old") == 0);
     CHECK(result && Db_resultIsCurrent(&result->base));
 
-    CHECK(Db_scratchSave("key", "new"));
-    CHECK(result && result->value && strcmp(result->value, "old") == 0);
+    CHECK(Db_saveStringSetting("key", "new"));
+    CHECK(result && result->items[0].string_value &&
+          strcmp(result->items[0].string_value, "old") == 0);
     CHECK(result && !Db_resultIsCurrent(&result->base));
-    Db_freeScratchResult(result);
+    Db_freeSettingsResult(result);
     stop_test();
 }
 
@@ -215,21 +239,21 @@ TEST(rollback_keeps_data_version_increment) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
     int before = Db_dataVersion();
-    DbScratchResult* result = Db_scratchRead("key");
+    DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
 
     CHECK(Db_begin());
-    CHECK(Db_scratchSave("key", "rolled-back"));
+    CHECK(Db_saveStringSetting("key", "rolled-back"));
     CHECK_EQ_SZ(Db_dataVersion(), before + 1);
     CHECK(Db_rollback());
     CHECK_EQ_SZ(Db_dataVersion(), before + 1);
     CHECK(result && !Db_resultIsCurrent(&result->base));
-    Db_freeScratchResult(result);
+    Db_freeSettingsResult(result);
 
-    DbScratchResult* missing = Db_scratchRead("key");
+    DbSettingsResult* missing = Db_readSettings();
     CHECK(missing != NULL);
-    CHECK(missing && missing->value == NULL);
-    Db_freeScratchResult(missing);
+    CHECK(missing && missing->count == 0);
+    Db_freeSettingsResult(missing);
     stop_test();
 }
 
@@ -238,14 +262,14 @@ TEST(writes_in_one_transaction_change_version_per_write) {
     CHECK(Db_initInternal(database_path));
 
     int before = Db_dataVersion();
-    CHECK(Db_scratchSave("single", "write"));
+    CHECK(Db_saveStringSetting("single", "write"));
     CHECK_EQ_SZ(Db_dataVersion(), before + 1);
 
     before = Db_dataVersion();
     CHECK(Db_begin());
-    CHECK(Db_scratchSave("one", "1"));
-    CHECK(Db_scratchSave("two", "2"));
-    CHECK(Db_scratchSave("three", "3"));
+    CHECK(Db_saveIntSetting("one", 1));
+    CHECK(Db_saveIntSetting("two", 2));
+    CHECK(Db_saveIntSetting("three", 3));
     CHECK_EQ_SZ(Db_dataVersion(), before + 3);
     CHECK(Db_commit());
     CHECK_EQ_SZ(Db_dataVersion(), before + 4);
@@ -278,7 +302,7 @@ TEST(data_migration_mark_is_atomic) {
 static pthread_barrier_t worker_ready;
 static pthread_barrier_t worker_release;
 static bool worker_ok;
-static bool scratch_thread_ok;
+static bool settings_thread_ok;
 
 static void* transaction_worker(void* unused) {
     (void)unused;
@@ -289,9 +313,9 @@ static void* transaction_worker(void* unused) {
     return NULL;
 }
 
-static void* scratch_worker(void* unused) {
+static void* settings_worker(void* unused) {
     (void)unused;
-    scratch_thread_ok = Db_scratchSave("thread", "value");
+    settings_thread_ok = Db_saveStringSetting("thread", "value");
     return NULL;
 }
 
@@ -323,19 +347,21 @@ TEST(thread_connections_isolate_uncommitted_rows) {
     stop_test();
 }
 
-TEST(thread_connection_does_not_share_scratch) {
+TEST(thread_connection_shares_settings) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
 
     pthread_t worker;
-    scratch_thread_ok = false;
-    CHECK(pthread_create(&worker, NULL, scratch_worker, NULL) == 0);
+    settings_thread_ok = false;
+    CHECK(pthread_create(&worker, NULL, settings_worker, NULL) == 0);
     CHECK(pthread_join(worker, NULL) == 0);
-    CHECK(scratch_thread_ok);
-    DbScratchResult* result = Db_scratchRead("thread");
+    CHECK(settings_thread_ok);
+    DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
-    CHECK(result && result->value == NULL);
-    Db_freeScratchResult(result);
+    CHECK(result && result->count == 1);
+    CHECK(result && result->items[0].string_value &&
+          strcmp(result->items[0].string_value, "value") == 0);
+    Db_freeSettingsResult(result);
     stop_test();
 }
 
@@ -344,7 +370,7 @@ int main(void) {
     RUN(open_failure_disables_database);
     RUN(newer_database_is_not_changed);
     RUN(failed_schema_migration_rolls_back);
-    RUN(scratch_save_read_and_reset);
+    RUN(settings_save_read_and_reset);
     RUN(execute_sql);
     RUN(statement_wrapper_reports_state);
     RUN(result_is_a_copy_and_tracks_commits);
@@ -352,6 +378,6 @@ int main(void) {
     RUN(writes_in_one_transaction_change_version_per_write);
     RUN(data_migration_mark_is_atomic);
     RUN(thread_connections_isolate_uncommitted_rows);
-    RUN(thread_connection_does_not_share_scratch);
+    RUN(thread_connection_shares_settings);
     return test_summary();
 }

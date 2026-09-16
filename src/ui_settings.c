@@ -8,6 +8,7 @@
 #include "ui_utils.h"
 #include "ui_theme.h"
 #include "settings.h"
+#include "module_settings.h"
 #include "album_art.h"
 #include "selfupdate.h"
 #include "downloader.h"
@@ -50,19 +51,19 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
         switch (i) {
             case SETTINGS_ITEM_SCREEN_OFF:
                 label = "Auto Screen Off";
-                value_str = Settings_getScreenOffDisplayStr();
+                value_str = SettingsModule_getScreenOffDisplayStr();
                 break;
             case SETTINGS_ITEM_BASS_FILTER:
                 label = "Bass Filter";
-                value_str = Settings_getBassFilterDisplayStr();
+                value_str = SettingsModule_getBassFilterDisplayStr();
                 break;
             case SETTINGS_ITEM_SOFT_LIMITER:
                 label = "Soft Limiter";
-                value_str = Settings_getSoftLimiterDisplayStr();
+                value_str = SettingsModule_getSoftLimiterDisplayStr();
                 break;
             case SETTINGS_ITEM_AUTO_UPDATE:
                 label = "Auto Update Check";
-                value_str = Settings_getAutoUpdateDisplayStr();
+                value_str = SettingsModule_getAutoUpdateDisplayStr();
                 break;
             case SETTINGS_ITEM_CLEAR_CACHE: {
                 long cache_size = album_art_get_cache_size();

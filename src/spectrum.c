@@ -3,9 +3,12 @@
 #include "ui_theme.h"
 #include "player.h"
 #include "file_utils.h"
+#include "db.h"
+#include "settings.h"
 #include "defines.h"
 #include "api.h"
 #include "audio/kiss_fftr.h"
+#include <errno.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -59,6 +62,16 @@ static float freq_compensation[SPECTRUM_BARS];  // Per-band gain compensation
 static int spec_x = 0, spec_y = 0, spec_w = 0, spec_h = 0;
 static bool position_set = false;
 
+static const IntSetting SPECTRUM_STYLE = {
+    .name     = "spectrum_style",
+    .fallback = SPECTRUM_STYLE_VERTICAL,
+};
+
+static const BoolSetting SPECTRUM_VISIBLE = {
+    .name     = "spectrum_visible",
+    .fallback = true,
+};
+
 static SpectrumStyle current_style = SPECTRUM_STYLE_VERTICAL;
 static bool spectrum_visible = true;
 
@@ -73,59 +86,67 @@ static uint32_t bars_fall_last_ms = 0;
 // still there between two callbacks of the audio.
 static uint32_t last_samples_ms = 0;
 
-// Returns true after it replaces the spectrum settings file with a complete file.
-static bool save_settings(void) {
-    if (!userdata_mkdir("")) return false;
-
-    char path[512];
-    int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
-    if (length < 0 || (size_t)length >= sizeof(path)) return false;
-
-    char temp_path[sizeof(path) + sizeof(".tmp")];
-    length = snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
-    if (length < 0 || (size_t)length >= sizeof(temp_path)) return false;
-
-    FILE* f = fopen(temp_path, "w");
-    if (!f) return false;
-
-    bool saved = fprintf(f, "%d\n%d\n", (int)current_style,
-                         spectrum_visible ? 1 : 0) >= 0;
-    if (saved && fflush(f) != 0) saved = false;
-    if (saved && fsync(fileno(f)) != 0) saved = false;
-    if (fclose(f) != 0) saved = false;
-
-    if (saved && rename(temp_path, path) == 0) return true;
-
-    remove(temp_path);
-    return false;
+static void read_settings(void) {
+    int style = Settings_getInt(&SPECTRUM_STYLE);
+    current_style = (style >= 0 && style < SPECTRUM_STYLE_COUNT)
+                         ? (SpectrumStyle)style
+                         : SPECTRUM_STYLE_VERTICAL;
+    spectrum_visible = Settings_getBool(&SPECTRUM_VISIBLE);
 }
 
-void Spectrum_initSettings(void) {
+static bool settings_file_exists(void) {
     char path[512];
-    int length = userdata_snpath("spectrum_settings.txt", path, sizeof(path));
-    if (length < 0 || (size_t)length >= sizeof(path)) return;
+    int length = userdata_snpath("settings.cfg", path, sizeof(path));
+    return length >= 0 && (size_t)length < sizeof(path) && access(path, F_OK) == 0;
+}
 
-    bool loaded_old = false;
-    FILE* f = fopen(path, "r");
-    if (!f) {
-        f = fopen(OLD_SPECTRUM_SETTINGS_FILE, "r");
-        loaded_old = f != NULL;
-    }
-    if (!f) return;
+static void migrate_spectrum_settings(void) {
+    if (!Db_isAvailable() || Db_dataMigrationIsDone("settings.spectrum.to-db")) return;
 
-    int style = 0, visible = 1;
-    bool loaded = fscanf(f, "%d\n%d\n", &style, &visible) == 2;
-    if (loaded) {
-        if (style >= 0 && style < SPECTRUM_STYLE_COUNT) {
-            current_style = (SpectrumStyle)style;
+    FILE* file = fopen(OLD_SPECTRUM_SETTINGS_FILE, "r");
+    int style = -1;
+    int visible = -1;
+    if (file) {
+        if (fscanf(file, "%d\n%d\n", &style, &visible) != 2) {
+            style = -1;
+            visible = -1;
         }
-        spectrum_visible = (visible != 0);
+        fclose(file);
     }
-    fclose(f);
 
-    if (loaded_old && loaded && save_settings()) {
-        remove(OLD_SPECTRUM_SETTINGS_FILE);
+    if (!Db_begin()) return;
+    if (style >= 0 && style < SPECTRUM_STYLE_COUNT) {
+        Settings_setInt(&SPECTRUM_STYLE, style);
     }
+    if (visible == 0 || visible == 1) {
+        Settings_setBool(&SPECTRUM_VISIBLE, visible != 0);
+    }
+
+    if (!Db_markDataMigrationDone("settings.spectrum.to-db") || !Db_commit()) {
+        Db_rollback();
+    }
+}
+
+static void remove_spectrum_settings(void) {
+    bool copy_done = Db_dataMigrationIsDone("settings.spectrum.to-db");
+    bool remove_done = Db_dataMigrationIsDone("settings.spectrum.remove");
+    if (!copy_done || remove_done) return;
+
+    if (remove(OLD_SPECTRUM_SETTINGS_FILE) != 0 && errno != ENOENT) {
+        LOG_error("[Spectrum] failed to remove legacy settings file: %s\n",
+                  strerror(errno));
+        return;
+    }
+
+    if (!Db_markDataMigrationDone("settings.spectrum.remove")) return;
+}
+
+void Spectrum_migrateData(void) {
+    if (settings_file_exists()) {
+        migrate_spectrum_settings();
+        remove_spectrum_settings();
+    }
+    read_settings();
 }
 
 // HSV to RGB conversion (h: 0-360, s: 0-1, v: 0-1)
@@ -452,7 +473,8 @@ void Spectrum_cycleNext(void) {
             current_style = (SpectrumStyle)next;
         }
     }
-    save_settings();
+    Settings_setInt(&SPECTRUM_STYLE, current_style);
+    Settings_setBool(&SPECTRUM_VISIBLE, spectrum_visible);
 }
 
 static void interpolate_gradient(SDL_Color top, SDL_Color bottom, float t,

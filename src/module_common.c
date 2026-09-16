@@ -290,7 +290,7 @@ void ModuleCommon_recordInputTime(void) {
 
 bool ModuleCommon_checkAutoScreenOffTimeout(void) {
     if (screen_off_hint_active) return false;
-    uint32_t screen_timeout_ms = Settings_getScreenOffTimeout() * 1000;
+    uint32_t screen_timeout_ms = Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT) * 1000;
     if (screen_timeout_ms > 0 && SDL_GetTicks() - last_input_time >= screen_timeout_ms) {
         ModuleCommon_startScreenOffHint();
         return true;

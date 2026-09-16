@@ -177,6 +177,10 @@ int main(int argc, char* argv[]) {
         LOG_error("Database is unavailable, continuing without it\n");
     }
 
+    Settings_init();
+    Spectrum_migrateData();
+    SettingsModule_migrateData();
+
     // Seed random number generator for shuffle
     srand((unsigned int)time(NULL));
 
@@ -206,25 +210,6 @@ int main(int argc, char* argv[]) {
 
     // Initialize common module (global input handling)
     ModuleCommon_init();
-
-#if defined(DEBUG)
-    if (Db_scratchSave("startup", "saved")) {
-        DbScratchResult* scratch = Db_scratchRead("startup");
-        LOG_info("Db_scratchSave saved value: saved\n");
-        LOG_info("Db_scratchRead read value: %s\n",
-                 scratch && scratch->value ? scratch->value : "(none)");
-        Db_freeScratchResult(scratch);
-    }
-#endif
-
-    // Initialize app-specific settings
-    Settings_init();
-    Spectrum_initSettings();
-
-    // Startup update check is opt-out; About can still check on demand
-    if (Settings_getAutoUpdateEnabled()) {
-        SelfUpdate_checkForUpdate();
-    }
 
     // Initialize resume state
     Resume_init();
