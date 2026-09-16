@@ -78,6 +78,29 @@ static bool sqlite_has_settings(const char* path) {
     return exists;
 }
 
+static bool sqlite_setting_value(const char* path, const char* name,
+                                 char* value, size_t size) {
+    sqlite3* database = NULL;
+    sqlite3_stmt* statement = NULL;
+    bool found = false;
+
+    if (sqlite3_open(path, &database) == SQLITE_OK &&
+        sqlite3_prepare_v2(database,
+                           "SELECT value FROM settings WHERE name = ?",
+                           -1, &statement, NULL) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_STATIC) == SQLITE_OK &&
+        sqlite3_step(statement) == SQLITE_ROW) {
+        const unsigned char* text = sqlite3_column_text(statement, 0);
+        if (text) {
+            snprintf(value, size, "%s", text);
+            found = true;
+        }
+    }
+    if (statement) sqlite3_finalize(statement);
+    if (database) sqlite3_close(database);
+    return found;
+}
+
 TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
@@ -162,6 +185,11 @@ TEST(settings_save_read_and_reset) {
     CHECK(Db_saveIntSetting("int", 42));
     CHECK(Db_saveBoolSetting("bool", true));
     CHECK(Db_saveStringSetting("string", "value"));
+
+    char bool_value[sizeof("true")];
+    CHECK(sqlite_setting_value(database_path, "bool", bool_value,
+                               sizeof(bool_value)));
+    CHECK(strcmp(bool_value, "true") == 0);
 
     DbSettingsResult* saved = Db_readSettings();
     CHECK(saved != NULL);

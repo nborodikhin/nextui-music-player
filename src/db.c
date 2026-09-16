@@ -414,8 +414,14 @@ DbSettingsResult* Db_readSettings(void) {
             setting.type = DB_SETTING_INT;
             setting.int_value = DbStatement_get_int(&statement, 2);
         } else if (strcmp(type, "bool") == 0) {
+            const char* value = DbStatement_get_text(&statement, 2);
+            if (!value || (strcmp(value, "true") != 0 &&
+                           strcmp(value, "false") != 0)) {
+                LOG_warn("[Db] skipped bool setting %s with invalid value\n", name);
+                continue;
+            }
             setting.type = DB_SETTING_BOOL;
-            setting.bool_value = DbStatement_get_int(&statement, 2) != 0;
+            setting.bool_value = strcmp(value, "true") == 0;
         } else if (strcmp(type, "string") == 0) {
             setting.type = DB_SETTING_STRING;
             setting.string_value = DbStatement_dup_ext(&statement, 2);
@@ -491,7 +497,7 @@ bool Db_saveIntSetting(const char* name, int value) {
 }
 
 bool Db_saveBoolSetting(const char* name, bool value) {
-    return save_setting(name, "bool", value ? 1 : 0, NULL);
+    return save_setting(name, "bool", 0, value ? "true" : "false");
 }
 
 bool Db_saveStringSetting(const char* name, const char* value) {
