@@ -2,19 +2,13 @@
 #include "ui_layers.h"
 #include "ui_theme.h"
 #include "player.h"
-#include "file_utils.h"
-#include "db.h"
 #include "settings.h"
 #include "defines.h"
 #include "api.h"
 #include "audio/kiss_fftr.h"
-#include <errno.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
-#include <unistd.h>
-
-#define OLD_SPECTRUM_SETTINGS_FILE SHARED_USERDATA_PATH "/spectrum_settings.txt"
 
 #define SMOOTHING_FACTOR 0.7f
 
@@ -92,61 +86,6 @@ static void read_settings(void) {
                          ? (SpectrumStyle)style
                          : SPECTRUM_STYLE_VERTICAL;
     spectrum_visible = Settings_getBool(&SPECTRUM_VISIBLE);
-}
-
-static bool settings_file_exists(void) {
-    char path[512];
-    int length = userdata_snpath("settings.cfg", path, sizeof(path));
-    return length >= 0 && (size_t)length < sizeof(path) && access(path, F_OK) == 0;
-}
-
-static void migrate_spectrum_settings(void) {
-    if (!Db_isAvailable() || Db_dataMigrationIsDone("settings.spectrum.to-db")) return;
-
-    FILE* file = fopen(OLD_SPECTRUM_SETTINGS_FILE, "r");
-    int style = -1;
-    int visible = -1;
-    if (file) {
-        if (fscanf(file, "%d\n%d\n", &style, &visible) != 2) {
-            style = -1;
-            visible = -1;
-        }
-        fclose(file);
-    }
-
-    if (!Db_begin()) return;
-    if (style >= 0 && style < SPECTRUM_STYLE_COUNT) {
-        Settings_setInt(&SPECTRUM_STYLE, style);
-    }
-    if (visible == 0 || visible == 1) {
-        Settings_setBool(&SPECTRUM_VISIBLE, visible != 0);
-    }
-
-    if (!Db_markDataMigrationDone("settings.spectrum.to-db") || !Db_commit()) {
-        Db_rollback();
-    }
-}
-
-static void remove_spectrum_settings(void) {
-    bool copy_done = Db_dataMigrationIsDone("settings.spectrum.to-db");
-    bool remove_done = Db_dataMigrationIsDone("settings.spectrum.remove");
-    if (!copy_done || remove_done) return;
-
-    if (remove(OLD_SPECTRUM_SETTINGS_FILE) != 0 && errno != ENOENT) {
-        LOG_error("[Spectrum] failed to remove legacy settings file: %s\n",
-                  strerror(errno));
-        return;
-    }
-
-    if (!Db_markDataMigrationDone("settings.spectrum.remove")) return;
-}
-
-void Spectrum_migrateData(void) {
-    if (settings_file_exists()) {
-        migrate_spectrum_settings();
-        remove_spectrum_settings();
-    }
-    read_settings();
 }
 
 // HSV to RGB conversion (h: 0-360, s: 0-1, v: 0-1)
@@ -275,6 +214,8 @@ static void init_bin_ranges(void) {
 }
 
 void Spectrum_init(void) {
+    read_settings();
+
     // The bars rise from nothing on each visit
     SpectrumCeiling_clear(&ceiling);
     last_samples_ms = 0;

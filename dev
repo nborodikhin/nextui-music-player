@@ -1987,8 +1987,16 @@ def command_build(args):
 
 
 def command_test(_args):
-    run_command(["make", "-C", str(ROOT / "test")])
-    return 0
+    test_tmp_root = ROOT / ".test_tmp"
+    test_tmp_root.mkdir(parents=True, exist_ok=True)
+    test_tmp_dir = Path(tempfile.mkdtemp(prefix="run-", dir=test_tmp_root))
+    try:
+        env = os.environ.copy()
+        env["TEST_TEMP_DIR"] = str(test_tmp_dir)
+        run_command(["make", "-C", str(ROOT / "test")], env=env)
+        return 0
+    finally:
+        shutil.rmtree(test_tmp_dir, ignore_errors=True)
 
 
 def command_clean(args):

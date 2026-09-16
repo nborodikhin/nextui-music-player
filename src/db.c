@@ -162,10 +162,6 @@ static bool execute(sqlite3* database, const char* sql) {
     return false;
 }
 
-static bool rollback_quiet(sqlite3* database) {
-    return sqlite3_exec(database, "ROLLBACK", NULL, NULL, NULL) == SQLITE_OK;
-}
-
 static bool read_schema_version(sqlite3* database, int* version) {
     DbStatement statement;
     DbStatement_begin(&statement, database, "PRAGMA user_version");
@@ -182,63 +178,83 @@ static bool read_schema_version(sqlite3* database, int* version) {
     return true;
 }
 
-static bool validate_migrations(int* schema_version) {
-    int expected_version = 0;
-    for (size_t index = 0; index < db_migrations_count; index++) {
-        const DbSchemaMigration* migration = &db_migrations[index];
-        if (!migration->sql || migration->from_version != expected_version ||
-            migration->to_version <= migration->from_version) {
-            LOG_error("[Db] invalid schema migration %zu\n", index);
+static bool validate_actions(const DbSchemaAction* actions,
+                             size_t* action_count, int* schema_version) {
+    size_t index = 0;
+    for (; actions[index].version >= 0; index++) {
+        const DbSchemaAction* action = &actions[index];
+        if (action->version != (int)index + 1) {
+            LOG_error("[Db] invalid schema action %zu\n", index);
             return false;
         }
-        expected_version = migration->to_version;
+
+        bool valid_sql = action->type == DB_SCHEMA_SQL && action->sql;
+        bool valid_function = action->type == DB_SCHEMA_FUNCTION &&
+                              action->function;
+        bool valid_text = action->text && action->text[0] != '\0';
+
+        bool valid_action = (valid_sql || valid_function) && valid_text;
+        if (!valid_action) {
+            LOG_error("[Db] invalid schema action %zu\n", index);
+            return false;
+        }
     }
-    *schema_version = expected_version;
+    *action_count = index;
+    *schema_version = (int)index;
+    return true;
+}
+
+static bool run_action(sqlite3* database, const DbSchemaAction* action) {
+    char pragma[64];
+    snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d", action->version);
+
+    bool success = true;
+
+    // begin/execute/update_version/commit
+    success = success && Db_begin();
+    if (action->type == DB_SCHEMA_SQL) {
+        success = success && execute(database, action->sql);
+    } else {
+        success = success && action->function();
+    }
+    success = success && execute(database, pragma);
+    success = success && Db_commit();
+    if (!success) {
+        Db_rollback();
+        LOG_error("[Db] failed schema action %d \"%s\"\n", action->version,
+                  action->text);
+        return false;
+    }
     return true;
 }
 
 static bool migrate(sqlite3* database) {
     int version = 0;
     if (!read_schema_version(database, &version)) return false;
+    DbSchemaAction* actions = DbSchema_getActions();
+    if (!actions) return false;
+    size_t action_count = 0;
     int schema_version = 0;
-    if (!validate_migrations(&schema_version)) return false;
+    if (!validate_actions(actions, &action_count, &schema_version)) {
+        free(actions);
+        return false;
+    }
     if (version < 0 || version > schema_version) {
         LOG_error("[Db] database schema version %d is newer than binary version %d\n",
                   version, schema_version);
+        free(actions);
         return false;
     }
 
-    for (size_t index = 0;
-         index < db_migrations_count && version < schema_version;
-         index++) {
-        const DbSchemaMigration* migration = &db_migrations[index];
-        if (migration->to_version <= version) continue;
-        if (migration->from_version != version) {
-            LOG_error("[Db] no schema migration from version %d\n", version);
-            return false;
+    for (size_t index = (size_t)version; index < action_count; index++) {
+        if (!run_action(database, &actions[index])) {
+            break;
         }
-
-        if (!execute(database, "BEGIN")) return false;
-        if (!execute(database, migration->sql)) {
-            rollback_quiet(database);
-            return false;
-        }
-
-        char pragma[64];
-        snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d",
-                 migration->to_version);
-        if (!execute(database, pragma)) {
-            rollback_quiet(database);
-            return false;
-        }
-        if (!execute(database, "COMMIT")) {
-            rollback_quiet(database);
-            return false;
-        }
-        version = migration->to_version;
-        increment_data_version();
+        version = actions[index].version;
     }
-    return version == schema_version;
+    bool success = version == schema_version;
+    free(actions);
+    return success;
 }
 
 bool Db_init(void) {
@@ -329,41 +345,6 @@ bool Db_execute(const char* sql) {
     if (!sql || !sql[0]) return false;
 
     if (!execute(connection(), sql)) return false;
-
-    increment_data_version();
-    return true;
-}
-
-bool Db_dataMigrationIsDone(const char* name) {
-    if (!name) return false;
-
-    DbStatement statement;
-    DbStatement_begin(&statement, connection(), "SELECT 1 FROM data_migrations WHERE name = ?");
-    DbStatement_bind_text(&statement, 1, name);
-    bool done = DbStatement_step(&statement);
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] failed to read data migration, op %d\n", statement.error_op);
-        return false;
-    }
-
-    return done;
-}
-
-bool Db_markDataMigrationDone(const char* name) {
-    if (!name) return false;
-
-    DbStatement statement;
-    DbStatement_begin(&statement, connection(), "INSERT OR IGNORE INTO data_migrations (name) VALUES (?)");
-    DbStatement_bind_text(&statement, 1, name);
-    DbStatement_step(&statement);
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] write failed, op %d\n", statement.error_op);
-        return false;
-    }
 
     increment_data_version();
     return true;

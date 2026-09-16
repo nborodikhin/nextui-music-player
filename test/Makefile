@@ -130,15 +130,15 @@ $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c 
 
 DB_INC = $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
          -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
-DB_TEMP_DIR = $(abspath ../.codex_tmp)
+TEST_TEMP_DIR ?= $(abspath ../.test_tmp/manual)
 
 $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                 $(SRC)/db_statement.c $(SRC)/db_statement.h \
                 $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	mkdir -p ../.codex_tmp
+	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
-	  -DFILE_UTILS_USERDATA_DIR='"$(DB_TEMP_DIR)/db-userdata"' \
-	  -DFILE_UTILS_TEMP_DIR='"$(DB_TEMP_DIR)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  -lsqlite3 -lpthread -lzip
 
@@ -146,10 +146,10 @@ $(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
                       $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                       $(SRC)/db_statement.c $(SRC)/db_statement.h \
                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	mkdir -p ../.codex_tmp
+	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
-	  -DFILE_UTILS_USERDATA_DIR='"$(DB_TEMP_DIR)/settings-userdata"' \
-	  -DFILE_UTILS_TEMP_DIR='"$(DB_TEMP_DIR)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
 	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
 
@@ -195,10 +195,10 @@ $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h 
 	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	mkdir -p ../.codex_tmp
+	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(INC) \
-	  -DFILE_UTILS_USERDATA_DIR='"$(abspath ../.codex_tmp/file-utils-userdata)"' \
-	  -DFILE_UTILS_TEMP_DIR='"$(abspath ../.codex_tmp)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/file-utils-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
 run: check $(TESTS)

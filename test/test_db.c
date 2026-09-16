@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <sqlite3.h>
 
@@ -60,23 +61,6 @@ static int sqlite_user_version(const char* path) {
     return version;
 }
 
-static bool sqlite_has_data_migrations(const char* path) {
-    sqlite3* database = NULL;
-    sqlite3_stmt* statement = NULL;
-    bool exists = false;
-
-    if (sqlite3_open(path, &database) == SQLITE_OK &&
-        sqlite3_prepare_v2(
-            database,
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'",
-            -1, &statement, NULL) == SQLITE_OK) {
-        exists = sqlite3_step(statement) == SQLITE_ROW;
-    }
-    if (statement) sqlite3_finalize(statement);
-    if (database) sqlite3_close(database);
-    return exists;
-}
-
 static bool sqlite_has_settings(const char* path) {
     sqlite3* database = NULL;
     sqlite3_stmt* statement = NULL;
@@ -98,9 +82,43 @@ TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
     CHECK(Db_isAvailable());
-    CHECK_EQ_INT(sqlite_user_version(database_path), 2);
-    CHECK(sqlite_has_data_migrations(database_path));
+    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
     CHECK(sqlite_has_settings(database_path));
+    stop_test();
+}
+
+TEST(settings_file_migration_runs_ordered_actions) {
+    CHECK(start_test());
+    CHECK(userdata_mkdir(""));
+
+    char settings_path[512];
+    CHECK(userdata_snpath("settings.cfg", settings_path, sizeof(settings_path)) >= 0);
+    FILE* file = fopen(settings_path, "w");
+    CHECK(file != NULL);
+    if (file) {
+        fputs("screen_off_timeout=90\n"
+              "lyrics_enabled=0\n"
+              "bass_filter_hz=200\n"
+              "soft_limiter=3\n"
+              "auto_update=0\n", file);
+        CHECK(fclose(file) == 0);
+    }
+
+    CHECK(sqlite_exec(database_path,
+                      "CREATE TABLE settings (name TEXT PRIMARY KEY, type TEXT NOT NULL, value);"
+                      "PRAGMA user_version = 1"));
+    CHECK(Db_initInternal(database_path));
+
+    DbSettingsResult* result = Db_readSettings();
+    CHECK(result != NULL);
+    CHECK(result && result->count == 5);
+    Db_freeSettingsResult(result);
+    CHECK(access(settings_path, F_OK) != 0);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
+
+    Db_quit();
+    CHECK(Db_initInternal(database_path));
+    CHECK(access(settings_path, F_OK) != 0);
     stop_test();
 }
 
@@ -122,21 +140,25 @@ TEST(newer_database_is_not_changed) {
     CHECK(sqlite_exec(database_path, "PRAGMA user_version = 99"));
     CHECK(!Db_initInternal(database_path));
     CHECK_EQ_INT(sqlite_user_version(database_path), 99);
-    CHECK(!sqlite_has_data_migrations(database_path));
+    CHECK(!sqlite_has_settings(database_path));
     stop_test();
 }
 
 TEST(failed_schema_migration_rolls_back) {
     CHECK(start_test());
-    CHECK(sqlite_exec(database_path, "CREATE TABLE data_migrations (wrong INTEGER)"));
+    CHECK(sqlite_exec(database_path, "CREATE TABLE settings (wrong INTEGER)"));
     CHECK(!Db_initInternal(database_path));
     CHECK_EQ_INT(sqlite_user_version(database_path), 0);
+    CHECK(sqlite_exec(database_path, "DROP TABLE settings"));
+    CHECK(Db_initInternal(database_path));
+    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
     stop_test();
 }
 
 TEST(settings_save_read_and_reset) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
+    CHECK(Db_execute("DELETE FROM settings"));
     CHECK(Db_saveIntSetting("int", 42));
     CHECK(Db_saveBoolSetting("bool", true));
     CHECK(Db_saveStringSetting("string", "value"));
@@ -161,12 +183,9 @@ TEST(execute_sql) {
     CHECK(Db_initInternal(database_path));
 
     int before = Db_dataVersion();
-    CHECK(Db_execute(
-        "INSERT INTO data_migrations (name) VALUES ('execute-one'); "
-        "INSERT INTO data_migrations (name) VALUES ('execute-two')"));
-    CHECK_EQ_INT(Db_dataVersion(), before + 1);
-    CHECK(Db_dataMigrationIsDone("execute-one"));
-    CHECK(Db_dataMigrationIsDone("execute-two"));
+    CHECK(Db_execute("CREATE TABLE execute_values (value TEXT)"));
+    CHECK(Db_execute("INSERT INTO execute_values (value) VALUES ('execute')"));
+    CHECK_EQ_INT(Db_dataVersion(), before + 2);
     CHECK(!Db_execute("INSERT INTO missing_table (name) VALUES ('execute')"));
 
     stop_test();
@@ -218,6 +237,7 @@ TEST(statement_wrapper_reports_state) {
 TEST(result_is_a_copy_and_tracks_commits) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
+    CHECK(Db_execute("DELETE FROM settings"));
     CHECK(Db_saveStringSetting("key", "old"));
 
     DbSettingsResult* result = Db_readSettings();
@@ -238,6 +258,7 @@ TEST(result_is_a_copy_and_tracks_commits) {
 TEST(rollback_keeps_data_version_increment) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
+    CHECK(Db_execute("DELETE FROM settings"));
     int before = Db_dataVersion();
     DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
@@ -276,29 +297,6 @@ TEST(writes_in_one_transaction_change_version_per_write) {
     stop_test();
 }
 
-TEST(data_migration_mark_is_atomic) {
-    CHECK(start_test());
-    CHECK(Db_initInternal(database_path));
-    CHECK(!Db_dataMigrationIsDone("settings.to-db"));
-
-    int before = Db_dataVersion();
-    CHECK(Db_begin());
-    CHECK(Db_markDataMigrationDone("settings.to-db"));
-    CHECK_EQ_SZ(Db_dataVersion(), before + 1);
-    CHECK(Db_dataMigrationIsDone("settings.to-db"));
-    CHECK(Db_rollback());
-    CHECK_EQ_SZ(Db_dataVersion(), before + 1);
-    CHECK(!Db_dataMigrationIsDone("settings.to-db"));
-
-    CHECK(Db_begin());
-    CHECK(Db_markDataMigrationDone("settings.to-db"));
-    CHECK_EQ_SZ(Db_dataVersion(), before + 2);
-    CHECK(Db_commit());
-    CHECK_EQ_SZ(Db_dataVersion(), before + 3);
-    CHECK(Db_dataMigrationIsDone("settings.to-db"));
-    stop_test();
-}
-
 static pthread_barrier_t worker_ready;
 static pthread_barrier_t worker_release;
 static bool worker_ok;
@@ -306,7 +304,7 @@ static bool settings_thread_ok;
 
 static void* transaction_worker(void* unused) {
     (void)unused;
-    worker_ok = Db_begin() && Db_markDataMigrationDone("worker");
+    worker_ok = Db_begin() && Db_saveStringSetting("worker", "value");
     pthread_barrier_wait(&worker_ready);
     pthread_barrier_wait(&worker_release);
     if (worker_ok) worker_ok = Db_commit();
@@ -332,7 +330,10 @@ TEST(thread_connections_isolate_uncommitted_rows) {
     struct timespec started;
     struct timespec finished;
     clock_gettime(CLOCK_MONOTONIC, &started);
-    CHECK(!Db_dataMigrationIsDone("worker"));
+    DbSettingsResult* pending = Db_readSettings();
+    CHECK(pending != NULL);
+    CHECK(pending && pending->count == 0);
+    Db_freeSettingsResult(pending);
     clock_gettime(CLOCK_MONOTONIC, &finished);
     double elapsed = (double)(finished.tv_sec - started.tv_sec) +
                      (double)(finished.tv_nsec - started.tv_nsec) / 1000000000.0;
@@ -341,7 +342,11 @@ TEST(thread_connections_isolate_uncommitted_rows) {
     pthread_barrier_wait(&worker_release);
     CHECK(pthread_join(worker, NULL) == 0);
     CHECK(worker_ok);
-    CHECK(Db_dataMigrationIsDone("worker"));
+    DbSettingsResult* committed = Db_readSettings();
+    CHECK(committed != NULL);
+    CHECK(committed && committed->count == 1);
+    CHECK(committed && strcmp(committed->items[0].name, "worker") == 0);
+    Db_freeSettingsResult(committed);
     CHECK(pthread_barrier_destroy(&worker_ready) == 0);
     CHECK(pthread_barrier_destroy(&worker_release) == 0);
     stop_test();
@@ -350,6 +355,7 @@ TEST(thread_connections_isolate_uncommitted_rows) {
 TEST(thread_connection_shares_settings) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
+    CHECK(Db_execute("DELETE FROM settings"));
 
     pthread_t worker;
     settings_thread_ok = false;
@@ -367,6 +373,7 @@ TEST(thread_connection_shares_settings) {
 
 int main(void) {
     RUN(fresh_database_gets_schema);
+    RUN(settings_file_migration_runs_ordered_actions);
     RUN(open_failure_disables_database);
     RUN(newer_database_is_not_changed);
     RUN(failed_schema_migration_rolls_back);
@@ -376,7 +383,6 @@ int main(void) {
     RUN(result_is_a_copy_and_tracks_commits);
     RUN(rollback_keeps_data_version_increment);
     RUN(writes_in_one_transaction_change_version_per_write);
-    RUN(data_migration_mark_is_atomic);
     RUN(thread_connections_isolate_uncommitted_rows);
     RUN(thread_connection_shares_settings);
     return test_summary();

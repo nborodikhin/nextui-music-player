@@ -24,11 +24,6 @@ bool Db_rollback(void);
 /* Executes SQL without returning rows. */
 bool Db_execute(const char* sql);
 
-/* Returns whether a data migration is marked as done. */
-bool Db_dataMigrationIsDone(const char* name);
-/* Marks a data migration as done. */
-bool Db_markDataMigrationDone(const char* name);
-
 /* Returns the current process data version. */
 int Db_dataVersion(void);
 /* Returns whether a result has the current data version. */

@@ -59,6 +59,11 @@ TEST(empty_table_returns_fallbacks) {
     CHECK(start_test());
     Settings_init();
 
+    CHECK_EQ_INT(Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT), 60);
+    CHECK(Settings_getBool(&SETTING_LYRICS_ENABLED));
+    CHECK_EQ_INT(Settings_getInt(&SETTING_BASS_FILTER_HZ), 120);
+    CHECK_EQ_INT(Settings_getInt(&SETTING_SOFT_LIMITER), 2);
+    CHECK(Settings_getBool(&SETTING_AUTO_UPDATE));
     CHECK_EQ_INT(Settings_getInt(&test_int), 7);
     CHECK(Settings_getBool(&test_bool));
     char* string = Settings_getString(&test_string);

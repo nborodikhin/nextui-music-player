@@ -21,6 +21,7 @@ bin/*/.kind
 # Libraries the build copies out of a toolchain image
 bin/*/*.so*
 test/bin/
+.test_tmp/
 dist/
 __pycache__/
 # Downloaded on the device on first use, not shipped

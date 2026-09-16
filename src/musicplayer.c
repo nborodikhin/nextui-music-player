@@ -178,8 +178,6 @@ int main(int argc, char* argv[]) {
     }
 
     Settings_init();
-    Spectrum_migrateData();
-    SettingsModule_migrateData();
 
     // Seed random number generator for shuffle
     srand((unsigned int)time(NULL));

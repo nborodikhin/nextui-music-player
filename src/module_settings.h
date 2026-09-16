@@ -9,7 +9,6 @@
 // Run the settings module
 // Handles: Settings menu, About screen, app updates
 ModuleExitReason SettingsModule_run(DisplayContext* display);
-void SettingsModule_migrateData(void);
 
 void SettingsModule_cycleScreenOffNext(void);
 void SettingsModule_cycleScreenOffPrev(void);
