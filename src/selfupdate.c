@@ -15,6 +15,7 @@
 #include "include/parson/parson.h"
 #include "defines.h"
 #include "api.h"
+#include "settings.h"
 
 #define RELEASE_JSON_MAX 32768
 
@@ -220,6 +221,10 @@ int SelfUpdate_init(const char* path) {
 
     memset(&update_status, 0, sizeof(update_status));
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
+
+    if (Settings_getBool(&SETTING_AUTO_UPDATE)) {
+        SelfUpdate_checkForUpdate();
+    }
 
     return 0;
 }

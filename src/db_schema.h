@@ -1,15 +1,24 @@
 #ifndef DB_SCHEMA_H
 #define DB_SCHEMA_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
-typedef struct {
-    int from_version;
-    int to_version;
-    const char* sql;
-} DbSchemaMigration;
+typedef enum {
+    DB_SCHEMA_SQL,
+    DB_SCHEMA_FUNCTION,
+} DbSchemaActionType;
 
-extern const DbSchemaMigration db_migrations[];
-extern const size_t db_migrations_count;
+typedef bool (*DbSchemaActionFunction)(void);
+
+typedef struct {
+    int                    version;
+    DbSchemaActionType     type;
+    const char*            sql;
+    DbSchemaActionFunction function;
+    const char*            text;
+} DbSchemaAction;
+
+DbSchemaAction* DbSchema_getActions(void);
 
 #endif

@@ -132,6 +132,18 @@ static inline int16_t speaker_soft_limit(int16_t sample, float threshold) {
     return (int16_t)(sign * compressed * 32767.0f);
 }
 
+static const float soft_limiter_thresholds[] = {0.0f, 0.7f, 0.6f, 0.5f};
+#define SOFT_LIMITER_VALUE_COUNT 4
+#define DEFAULT_SOFT_LIMITER_INDEX 2
+
+static float speaker_soft_limiter_threshold(void) {
+    int index = Settings_getInt(&SETTING_SOFT_LIMITER);
+    if (index < 0 || index >= SOFT_LIMITER_VALUE_COUNT) {
+        index = DEFAULT_SOFT_LIMITER_INDEX;
+    }
+    return soft_limiter_thresholds[index];
+}
+
 // High-pass biquad filter for built-in speaker to remove sub-bass
 // that the tiny speaker can't reproduce (just wastes amp headroom)
 typedef struct {
@@ -1291,8 +1303,8 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
 
             // Speaker processing: high-pass filter + soft limiter
             if (!bluetooth_audio_active && !usbdac_audio_active) {
-                int bass_hz = Settings_getBassFilterHz();
-                float limiter_thresh = Settings_getSoftLimiterThreshold();
+                int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+                float limiter_thresh = speaker_soft_limiter_threshold();
                 if (bass_hz != speaker_hpf_last_hz) {
                     if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
                     speaker_hpf_last_hz = bass_hz;
@@ -1355,8 +1367,8 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
 
         // Speaker processing: high-pass filter + soft limiter
         if (!bluetooth_audio_active && !usbdac_audio_active) {
-            int bass_hz = Settings_getBassFilterHz();
-            float limiter_thresh = Settings_getSoftLimiterThreshold();
+            int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
+            float limiter_thresh = speaker_soft_limiter_threshold();
             if (bass_hz != speaker_hpf_last_hz) {
                 if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
                 speaker_hpf_last_hz = bass_hz;
@@ -1523,7 +1535,7 @@ int Player_init(void) {
     player.audio_initialized = true;
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
 
@@ -1570,7 +1582,7 @@ static int reconfigure_audio_device(int new_sample_rate) {
 
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
     return 0;
@@ -1609,7 +1621,7 @@ static void reopen_audio_device(void) {
 
     current_sample_rate = have.freq;
     {
-        int bass_hz = Settings_getBassFilterHz();
+        int bass_hz = Settings_getInt(&SETTING_BASS_FILTER_HZ);
         if (bass_hz > 0) speaker_hpf_init(current_sample_rate, (float)bass_hz);
     }
 

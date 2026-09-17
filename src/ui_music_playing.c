@@ -207,7 +207,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
 
     // The lyric window takes the room between the title and the spectrum. The
     // album name takes its first row where the lyrics are off.
-    if (Settings_getLyricsEnabled()) {
+    if (Settings_getBool(&SETTING_LYRICS_ENABLED)) {
         draw_lyric_window(screen, SCALE1(PADDING), info_y, spec_y - SCALE1(PADDING), max_w_text);
     } else {
         lyrics_shown_current = -1;
@@ -240,7 +240,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     label_x -= SCALE1(12);
     label_x -= draw_mode_indicator(screen, "SHUFFLE", shuffle_enabled, label_x, bottom_y);
     label_x -= SCALE1(12);
-    draw_mode_indicator(screen, "LYRICS", Settings_getLyricsEnabled(), label_x, bottom_y);
+    draw_mode_indicator(screen, "LYRICS", Settings_getBool(&SETTING_LYRICS_ENABLED), label_x, bottom_y);
 }
 
 // True while the marquee of the title has something to draw on the layer
@@ -329,7 +329,7 @@ bool MusicPlaying_frame(bool surface_renders) {
     }
 
     // The window follows the current lyric, and it fills when the lyrics arrive
-    if (Settings_getLyricsEnabled()) {
+    if (Settings_getBool(&SETTING_LYRICS_ENABLED)) {
         if (Lyrics_currentIndex(Player_getPosition()) != lyrics_shown_current ||
             Lyrics_lineCount() != lyrics_shown_count) {
             needs_surface = true;

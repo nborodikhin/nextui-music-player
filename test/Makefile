@@ -55,7 +55,7 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
-           $(BIN)/test_lyric_window $(BIN)/test_db
+           $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -130,17 +130,28 @@ $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c 
 
 DB_INC = $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
          -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
-DB_TEMP_DIR = $(abspath ../.codex_tmp)
+TEST_TEMP_DIR ?= $(abspath ../.test_tmp/manual)
 
 $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                 $(SRC)/db_statement.c $(SRC)/db_statement.h \
                 $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	mkdir -p ../.codex_tmp
+	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
-	  -DFILE_UTILS_USERDATA_DIR='"$(DB_TEMP_DIR)/db-userdata"' \
-	  -DFILE_UTILS_TEMP_DIR='"$(DB_TEMP_DIR)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  -lsqlite3 -lpthread -lzip
+
+$(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
+                      $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                      $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                      $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
+	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib
@@ -184,10 +195,10 @@ $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h 
 	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
-	mkdir -p ../.codex_tmp
+	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(INC) \
-	  -DFILE_UTILS_USERDATA_DIR='"$(abspath ../.codex_tmp/file-utils-userdata)"' \
-	  -DFILE_UTILS_TEMP_DIR='"$(abspath ../.codex_tmp)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/file-utils-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
 run: check $(TESTS)

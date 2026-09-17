@@ -118,13 +118,6 @@ static sqlite3* connection(void) {
         return NULL;
     }
 
-    DbStatement_exec(&statement, database, "CREATE TEMP TABLE scratch (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    if (!statement.ok) {
-        LOG_error("[Db] failed to create scratch table: %s\n", statement.errmsg);
-        sqlite3_close(database);
-        return NULL;
-    }
-
     result = pthread_setspecific(connection_key, database);
     if (result != 0) {
         LOG_error("[Db] failed to store connection: %s\n", strerror(result));
@@ -169,10 +162,6 @@ static bool execute(sqlite3* database, const char* sql) {
     return false;
 }
 
-static bool rollback_quiet(sqlite3* database) {
-    return sqlite3_exec(database, "ROLLBACK", NULL, NULL, NULL) == SQLITE_OK;
-}
-
 static bool read_schema_version(sqlite3* database, int* version) {
     DbStatement statement;
     DbStatement_begin(&statement, database, "PRAGMA user_version");
@@ -189,63 +178,83 @@ static bool read_schema_version(sqlite3* database, int* version) {
     return true;
 }
 
-static bool validate_migrations(int* schema_version) {
-    int expected_version = 0;
-    for (size_t index = 0; index < db_migrations_count; index++) {
-        const DbSchemaMigration* migration = &db_migrations[index];
-        if (!migration->sql || migration->from_version != expected_version ||
-            migration->to_version <= migration->from_version) {
-            LOG_error("[Db] invalid schema migration %zu\n", index);
+static bool validate_actions(const DbSchemaAction* actions,
+                             size_t* action_count, int* schema_version) {
+    size_t index = 0;
+    for (; actions[index].version >= 0; index++) {
+        const DbSchemaAction* action = &actions[index];
+        if (action->version != (int)index + 1) {
+            LOG_error("[Db] invalid schema action %zu\n", index);
             return false;
         }
-        expected_version = migration->to_version;
+
+        bool valid_sql = action->type == DB_SCHEMA_SQL && action->sql;
+        bool valid_function = action->type == DB_SCHEMA_FUNCTION &&
+                              action->function;
+        bool valid_text = action->text && action->text[0] != '\0';
+
+        bool valid_action = (valid_sql || valid_function) && valid_text;
+        if (!valid_action) {
+            LOG_error("[Db] invalid schema action %zu\n", index);
+            return false;
+        }
     }
-    *schema_version = expected_version;
+    *action_count = index;
+    *schema_version = (int)index;
+    return true;
+}
+
+static bool run_action(sqlite3* database, const DbSchemaAction* action) {
+    char pragma[64];
+    snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d", action->version);
+
+    bool success = true;
+
+    // begin/execute/update_version/commit
+    success = success && Db_begin();
+    if (action->type == DB_SCHEMA_SQL) {
+        success = success && execute(database, action->sql);
+    } else {
+        success = success && action->function();
+    }
+    success = success && execute(database, pragma);
+    success = success && Db_commit();
+    if (!success) {
+        Db_rollback();
+        LOG_error("[Db] failed schema action %d \"%s\"\n", action->version,
+                  action->text);
+        return false;
+    }
     return true;
 }
 
 static bool migrate(sqlite3* database) {
     int version = 0;
     if (!read_schema_version(database, &version)) return false;
+    DbSchemaAction* actions = DbSchema_getActions();
+    if (!actions) return false;
+    size_t action_count = 0;
     int schema_version = 0;
-    if (!validate_migrations(&schema_version)) return false;
+    if (!validate_actions(actions, &action_count, &schema_version)) {
+        free(actions);
+        return false;
+    }
     if (version < 0 || version > schema_version) {
         LOG_error("[Db] database schema version %d is newer than binary version %d\n",
                   version, schema_version);
+        free(actions);
         return false;
     }
 
-    for (size_t index = 0;
-         index < db_migrations_count && version < schema_version;
-         index++) {
-        const DbSchemaMigration* migration = &db_migrations[index];
-        if (migration->to_version <= version) continue;
-        if (migration->from_version != version) {
-            LOG_error("[Db] no schema migration from version %d\n", version);
-            return false;
+    for (size_t index = (size_t)version; index < action_count; index++) {
+        if (!run_action(database, &actions[index])) {
+            break;
         }
-
-        if (!execute(database, "BEGIN")) return false;
-        if (!execute(database, migration->sql)) {
-            rollback_quiet(database);
-            return false;
-        }
-
-        char pragma[64];
-        snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d",
-                 migration->to_version);
-        if (!execute(database, pragma)) {
-            rollback_quiet(database);
-            return false;
-        }
-        if (!execute(database, "COMMIT")) {
-            rollback_quiet(database);
-            return false;
-        }
-        version = migration->to_version;
-        increment_data_version();
+        version = actions[index].version;
     }
-    return version == schema_version;
+    bool success = version == schema_version;
+    free(actions);
+    return success;
 }
 
 bool Db_init(void) {
@@ -313,6 +322,10 @@ void Db_quit(void) {
     database_path = NULL;
 }
 
+bool Db_isAvailable(void) {
+    return atomic_load(&database_available) != 0;
+}
+
 bool Db_begin(void) {
     return execute(connection(), "BEGIN");
 }
@@ -337,41 +350,6 @@ bool Db_execute(const char* sql) {
     return true;
 }
 
-bool Db_dataMigrationIsDone(const char* name) {
-    if (!name) return false;
-
-    DbStatement statement;
-    DbStatement_begin(&statement, connection(), "SELECT 1 FROM data_migrations WHERE name = ?");
-    DbStatement_bind_text(&statement, 1, name);
-    bool done = DbStatement_step(&statement);
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] failed to read data migration, op %d\n", statement.error_op);
-        return false;
-    }
-
-    return done;
-}
-
-bool Db_markDataMigrationDone(const char* name) {
-    if (!name) return false;
-
-    DbStatement statement;
-    DbStatement_begin(&statement, connection(), "INSERT OR IGNORE INTO data_migrations (name) VALUES (?)");
-    DbStatement_bind_text(&statement, 1, name);
-    DbStatement_step(&statement);
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] write failed, op %d\n", statement.error_op);
-        return false;
-    }
-
-    increment_data_version();
-    return true;
-}
-
 int Db_dataVersion(void) {
     return atomic_load(&data_version);
 }
@@ -381,55 +359,148 @@ bool Db_resultIsCurrent(const DbResult* result) {
     return result->data_version == Db_dataVersion();
 }
 
-void Db_freeScratchResult(DbScratchResult* result) {
+void Db_freeSettingsResult(DbSettingsResult* result) {
     if (!result) return;
-    free(result->value);
+
+    for (int index = 0; index < result->count; index++) {
+        free(result->items[index].name);
+        free(result->items[index].string_value);
+    }
+    free(result->items);
     free(result);
 }
 
-bool Db_scratchSave(const char* key, const char* value) {
-    if (!key || !value) return false;
+static bool append_setting(DbSettingsResult* result, DbSetting* setting) {
+    DbSetting* items = realloc(result->items,
+                               (size_t)(result->count + 1) * sizeof(*items));
+    if (!items) return false;
+
+    result->items = items;
+    result->items[result->count++] = *setting;
+    return true;
+}
+
+DbSettingsResult* Db_readSettings(void) {
+    DbSettingsResult* result = calloc(1, sizeof(*result));
+    if (!result) return NULL;
+    result->base.data_version = Db_dataVersion();
+
+    sqlite3* database = connection();
+    if (!database) {
+        LOG_error("[Db] failed to read settings: no database\n");
+        return result;
+    }
 
     DbStatement statement;
-    DbStatement_begin(&statement, connection(), "INSERT OR REPLACE INTO scratch (key, value) VALUES (?, ?)");
-    DbStatement_bind_text(&statement, 1, key);
-    DbStatement_bind_text(&statement, 2, value);
+    if (!DbStatement_begin(&statement, database,
+                           "SELECT name, type, value FROM settings")) {
+        LOG_error("[Db] failed to start settings read, op %d\n",
+                  statement.error_op);
+        DbStatement_close(&statement);
+        return result;
+    }
+
+    while (DbStatement_step(&statement)) {
+        const char* name = DbStatement_get_text(&statement, 0);
+        const char* type = DbStatement_get_text(&statement, 1);
+        DbSetting setting = {0};
+
+        if (!name || !type) {
+            LOG_error("[Db] skipped setting with no name or type\n");
+            continue;
+        }
+
+        if (strcmp(type, "int") == 0) {
+            setting.type = DB_SETTING_INT;
+            setting.int_value = DbStatement_get_int(&statement, 2);
+        } else if (strcmp(type, "bool") == 0) {
+            const char* value = DbStatement_get_text(&statement, 2);
+            if (!value || (strcmp(value, "true") != 0 &&
+                           strcmp(value, "false") != 0)) {
+                LOG_warn("[Db] skipped bool setting %s with invalid value\n", name);
+                continue;
+            }
+            setting.type = DB_SETTING_BOOL;
+            setting.bool_value = strcmp(value, "true") == 0;
+        } else if (strcmp(type, "string") == 0) {
+            setting.type = DB_SETTING_STRING;
+            setting.string_value = DbStatement_dup_ext(&statement, 2);
+            if (!setting.string_value && statement.ok) {
+                LOG_error("[Db] failed to copy setting %s\n", name);
+                statement.ok = false;
+            }
+        } else {
+            LOG_warn("[Db] skipped setting %s with unknown type %s\n", name, type);
+            continue;
+        }
+
+        setting.name = strdup(name);
+        if (!setting.name || !append_setting(result, &setting)) {
+            free(setting.name);
+            free(setting.string_value);
+            LOG_error("[Db] failed to copy setting %s\n", name);
+            statement.ok = false;
+            break;
+        }
+    }
+
+    if (!statement.ok) {
+        LOG_error("[Db] failed to finish settings read, op %d\n",
+                  statement.error_op);
+        DbStatement_close(&statement);
+        Db_freeSettingsResult(result);
+        result = calloc(1, sizeof(*result));
+        if (result) result->base.data_version = Db_dataVersion();
+        return result;
+    }
+
+    if (!DbStatement_close(&statement)) {
+        LOG_error("[Db] failed to close settings read, op %d\n",
+                  statement.error_op);
+        Db_freeSettingsResult(result);
+        result = calloc(1, sizeof(*result));
+        if (result) result->base.data_version = Db_dataVersion();
+    }
+    return result;
+}
+
+static bool save_setting(const char* name, const char* type,
+                         int int_value, const char* string_value) {
+    if (!name || !type) return false;
+
+    DbStatement statement;
+    DbStatement_begin(&statement, connection(),
+                      "INSERT OR REPLACE INTO settings (name, type, value) "
+                      "VALUES (?, ?, ?)");
+    DbStatement_bind_text(&statement, 1, name);
+    DbStatement_bind_text(&statement, 2, type);
+    if (string_value) {
+        DbStatement_bind_text(&statement, 3, string_value);
+    } else {
+        DbStatement_bind_int(&statement, 3, int_value);
+    }
     DbStatement_step(&statement);
     DbStatement_close(&statement);
 
     if (!statement.ok) {
-        LOG_error("[Db] failed to save scratch value, op %d\n", statement.error_op);
+        LOG_error("[Db] failed to save setting %s, op %d\n",
+                  name, statement.error_op);
         return false;
     }
 
     increment_data_version();
-
     return true;
 }
 
-DbScratchResult* Db_scratchRead(const char* key) {
-    if (!key) return NULL;
+bool Db_saveIntSetting(const char* name, int value) {
+    return save_setting(name, "int", value, NULL);
+}
 
-    sqlite3* database = connection();
-    if (!database) return NULL;
+bool Db_saveBoolSetting(const char* name, bool value) {
+    return save_setting(name, "bool", 0, value ? "true" : "false");
+}
 
-    DbScratchResult* result = calloc(1, sizeof(*result));
-    if (!result) return NULL;
-    result->base.data_version = Db_dataVersion();
-
-    DbStatement statement;
-    DbStatement_begin(&statement, database, "SELECT value FROM scratch WHERE key = ? LIMIT 1");
-    DbStatement_bind_text(&statement, 1, key);
-    if (DbStatement_step(&statement)) {
-        result->value = DbStatement_dup_ext(&statement, 0);
-    }
-    DbStatement_close(&statement);
-
-    if (!statement.ok) {
-        LOG_error("[Db] failed to finish reading scratch value, op %d\n",
-                  statement.error_op);
-        Db_freeScratchResult(result);
-        return NULL;
-    }
-    return result;
+bool Db_saveStringSetting(const char* name, const char* value) {
+    if (!value) return false;
+    return save_setting(name, "string", 0, value);
 }
