@@ -9,6 +9,7 @@
 #include "defines.h"
 #include "api.h"
 #include "db.h"
+#include "db_statement.h"
 #include "file_utils.h"
 
 typedef struct {
@@ -50,7 +51,37 @@ static bool value_is_in(const int *values, int count, int value) {
     return false;
 }
 
-static bool copy_settings_data(void) {
+static bool save_v1_setting_sql(sqlite3* database, const char* name, const char* sql) {
+    DbStatement statement;
+    DbStatement_exec(&statement, database, sql);
+    if (!statement.ok) {
+        LOG_error("[Db] failed to save setting %s, op %d\n",
+                  name, statement.error_op);
+    }
+    return statement.ok;
+}
+
+static bool save_v1_setting_int(sqlite3* database, const char* name, int value) {
+    char sql[200];
+    snprintf(
+        sql, sizeof(sql),
+        "INSERT OR REPLACE INTO settings (name, type, value) VALUES ('%s', 'int', '%d')",
+        name, value
+    );
+    return save_v1_setting_sql(database, name, sql);
+}
+
+static bool save_v1_setting_bool(sqlite3* database, const char* name, bool value) {
+    char sql[200];
+    snprintf(
+        sql, sizeof(sql),
+        "INSERT OR REPLACE INTO settings (name, type, value) VALUES ('%s', 'bool', '%s')",
+        name, value ? "true" : "false"
+    );
+    return save_v1_setting_sql(database, name, sql);
+}
+
+static bool copy_settings_data(sqlite3* database) {
     LegacySettings legacy_settings;
     if (!prepare_legacy_settings(&legacy_settings)) {
         return true;
@@ -74,19 +105,19 @@ static bool copy_settings_data(void) {
         while (fgets(line, sizeof(line), file)) {
             if (sscanf(line, "screen_off_timeout=%d", &value) == 1 &&
                 value_is_in(screen_off_values, screen_off_value_count, value)) {
-                success = success && Db_saveIntSetting("screen_off_timeout", value);
+                success = success && save_v1_setting_int(database, "screen_off_timeout", value);
             } else if (sscanf(line, "lyrics_enabled=%d", &value) == 1 &&
                        (value == 0 || value == 1)) {
-                success = success && Db_saveBoolSetting("lyrics_enabled", value != 0);
+                success = success && save_v1_setting_bool(database, "lyrics_enabled", value != 0);
             } else if (sscanf(line, "bass_filter_hz=%d", &value) == 1 &&
                        value_is_in(bass_filter_values, bass_filter_value_count, value)) {
-                success = success && Db_saveIntSetting("bass_filter_hz", value);
+                success = success && save_v1_setting_int(database, "bass_filter_hz", value);
             } else if (sscanf(line, "soft_limiter=%d", &value) == 1 &&
                        value >= 0 && value < soft_limiter_value_count) {
-                success = success && Db_saveIntSetting("soft_limiter", value);
+                success = success && save_v1_setting_int(database, "soft_limiter", value);
             } else if (sscanf(line, "auto_update=%d", &value) == 1 &&
                        (value == 0 || value == 1)) {
-                success = success && Db_saveBoolSetting("auto_update", value != 0);
+                success = success && save_v1_setting_bool(database, "auto_update", value != 0);
             }
         }
         fclose(file);
@@ -94,7 +125,8 @@ static bool copy_settings_data(void) {
     return success;
 }
 
-static bool remove_settings_file(void) {
+static bool remove_settings_file(sqlite3* database) {
+    (void)database;
     LegacySettings legacy_settings;
     if (!prepare_legacy_settings(&legacy_settings)) {
         return true;
@@ -110,7 +142,7 @@ static bool remove_settings_file(void) {
     return true;
 }
 
-static bool copy_spectrum_settings_data(void) {
+static bool copy_spectrum_settings_data(sqlite3* database) {
     LegacySettings legacy_settings;
     if (!prepare_legacy_settings(&legacy_settings)) {
         return true;
@@ -140,12 +172,13 @@ static bool copy_spectrum_settings_data(void) {
     }
 
     bool success = true;
-    success = success && Db_saveIntSetting("spectrum_style", spectrum_style);
-    success = success && Db_saveBoolSetting("spectrum_visible", spectrum_visible != 0);
+    success = success && save_v1_setting_int(database, "spectrum_style", spectrum_style);
+    success = success && save_v1_setting_bool(database, "spectrum_visible", spectrum_visible != 0);
     return success;
 }
 
-static bool remove_spectrum_settings_file(void) {
+static bool remove_spectrum_settings_file(sqlite3* database) {
+    (void)database;
     LegacySettings legacy_settings;
     if (!prepare_legacy_settings(&legacy_settings)) {
         return true;
@@ -160,42 +193,43 @@ static bool remove_spectrum_settings_file(void) {
     return true;
 }
 
-static DbSchemaAction *migration_plan;
+static DbMigrationStep *migration_plan;
 static size_t migration_count;
 static bool count_only;
 
-static void migration(DbSchemaAction action) {
+static void migration(DbMigrationStep step) {
     migration_count++;
     if (count_only) return;
 
-    migration_plan[migration_count - 1] = (DbSchemaAction){
-        .version = (int) migration_count,
-        .type = action.type,
-        .sql = action.sql,
-        .function = action.function,
-        .text = action.text,
+    migration_plan[migration_count - 1] = (DbMigrationStep){
+        .version  = (int) migration_count,
+        .type     = step.type,
+        .sql      = step.sql,
+        .function = step.function,
+        .text     = step.text,
     };
 }
 
 #define stringify_impl(VALUE) #VALUE
 #define stringify(VALUE) stringify_impl(VALUE)
 
-#define sql(TEXT)                         \
-    migration((DbSchemaAction){            \
-        .type = DB_SCHEMA_SQL,             \
-        .sql = (TEXT),                     \
+#define sql(TEXT)                          \
+    migration((DbMigrationStep){           \
+        .type = DB_MIGRATION_SQL,          \
+        .sql  = (TEXT),                    \
         .text = (TEXT),                    \
     })
 
-#define function(FUNCTION)                \
-    migration((DbSchemaAction){            \
-        .type = DB_SCHEMA_FUNCTION,       \
-        .function = (FUNCTION),           \
-        .text = stringify(FUNCTION),       \
+#define function(FUNCTION)                 \
+    migration((DbMigrationStep){           \
+        .type     = DB_MIGRATION_FUNCTION, \
+        .function = (FUNCTION),            \
+        .text     = stringify(FUNCTION),   \
     })
 
 
 static void migrations(void) {
+    // note: each migration step runs in an sqlite transaction
     // 1
     sql("CREATE TABLE settings (name TEXT PRIMARY KEY, type TEXT NOT NULL, value)");
     function(copy_spectrum_settings_data);
@@ -205,13 +239,13 @@ static void migrations(void) {
     // 6
 }
 
-DbSchemaAction *DbSchema_getActions(void) {
+DbMigrationStep *DbSchema_getSteps(void) {
     count_only = true;
     migration_count = 0;
     migrations();
 
-    size_t action_count = migration_count;
-    migration_plan = calloc(action_count + 1, sizeof(*migration_plan));
+    size_t step_count = migration_count;
+    migration_plan = calloc(step_count + 1, sizeof(*migration_plan));
     if (!migration_plan) {
         return NULL;
     }
@@ -221,11 +255,11 @@ DbSchemaAction *DbSchema_getActions(void) {
     migrations();
 
     // add sentinel value to mark the end of migrations
-    migration_plan[action_count].version = -1;
+    migration_plan[step_count].version = -1;
 
-    DbSchemaAction *actions = migration_plan;
+    DbMigrationStep *steps = migration_plan;
     migration_plan = NULL;
-    return actions;
+    return steps;
 }
 
 #undef function

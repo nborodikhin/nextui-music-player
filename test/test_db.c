@@ -61,6 +61,22 @@ static int sqlite_user_version(const char* path) {
     return version;
 }
 
+static int sqlite_settings_count(const char* path) {
+    sqlite3* database = NULL;
+    int count = -1;
+    if (sqlite3_open(path, &database) == SQLITE_OK) {
+        sqlite3_stmt* statement = NULL;
+        if (sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM settings", -1,
+                               &statement, NULL) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            count = sqlite3_column_int(statement, 0);
+        }
+        sqlite3_finalize(statement);
+    }
+    if (database) sqlite3_close(database);
+    return count;
+}
+
 static bool sqlite_has_settings(const char* path) {
     sqlite3* database = NULL;
     sqlite3_stmt* statement = NULL;
@@ -141,6 +157,41 @@ TEST(settings_file_migration_runs_ordered_actions) {
 
     Db_quit();
     CHECK(Db_initInternal(database_path));
+    CHECK(access(settings_path, F_OK) != 0);
+    stop_test();
+}
+
+TEST(failed_settings_migration_keeps_no_partial_rows) {
+    CHECK(start_test());
+    CHECK(userdata_mkdir(""));
+
+    char settings_path[512];
+    CHECK(userdata_snpath("settings.cfg", settings_path, sizeof(settings_path)) >= 0);
+    FILE* file = fopen(settings_path, "w");
+    CHECK(file != NULL);
+    if (file) {
+        fputs("screen_off_timeout=90\n"
+              "bass_filter_hz=200\n", file);
+        CHECK(fclose(file) == 0);
+    }
+
+    // The second write of the settings migration fails.
+    CHECK(sqlite_exec(database_path,
+                      "CREATE TABLE settings (name TEXT PRIMARY KEY, type TEXT NOT NULL, value);"
+                      "CREATE TRIGGER fail_bass BEFORE INSERT ON settings "
+                      "WHEN NEW.name = 'bass_filter_hz' "
+                      "BEGIN SELECT RAISE(ABORT, 'test'); END;"
+                      "PRAGMA user_version = 1"));
+    CHECK(!Db_initInternal(database_path));
+    CHECK_EQ_INT(sqlite_settings_count(database_path), 0);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 3);
+    CHECK(access(settings_path, F_OK) == 0);
+
+    Db_quit();
+    CHECK(sqlite_exec(database_path, "DROP TRIGGER fail_bass"));
+    CHECK(Db_initInternal(database_path));
+    CHECK_EQ_INT(sqlite_settings_count(database_path), 2);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
     CHECK(access(settings_path, F_OK) != 0);
     stop_test();
 }
@@ -402,6 +453,7 @@ TEST(thread_connection_shares_settings) {
 int main(void) {
     RUN(fresh_database_gets_schema);
     RUN(settings_file_migration_runs_ordered_actions);
+    RUN(failed_settings_migration_keeps_no_partial_rows);
     RUN(open_failure_disables_database);
     RUN(newer_database_is_not_changed);
     RUN(failed_schema_migration_rolls_back);
