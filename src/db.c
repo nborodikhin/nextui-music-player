@@ -178,82 +178,81 @@ static bool read_schema_version(sqlite3* database, int* version) {
     return true;
 }
 
-static bool validate_actions(const DbSchemaAction* actions,
-                             size_t* action_count, int* schema_version) {
+static bool validate_steps(const DbMigrationStep* steps,
+                           size_t* step_count, int* schema_version) {
     size_t index = 0;
-    for (; actions[index].version >= 0; index++) {
-        const DbSchemaAction* action = &actions[index];
-        if (action->version != (int)index + 1) {
-            LOG_error("[Db] invalid schema action %zu\n", index);
+    for (; steps[index].version >= 0; index++) {
+        const DbMigrationStep* step = &steps[index];
+        if (step->version != (int)index + 1) {
+            LOG_error("[Db] invalid migration step %zu\n", index);
             return false;
         }
 
-        bool valid_sql = action->type == DB_SCHEMA_SQL && action->sql;
-        bool valid_function = action->type == DB_SCHEMA_FUNCTION &&
-                              action->function;
-        bool valid_text = action->text && action->text[0] != '\0';
+        bool valid_sql = step->type == DB_MIGRATION_SQL && step->sql;
+        bool valid_function = step->type == DB_MIGRATION_FUNCTION &&
+                              step->function;
+        bool valid_text = step->text && step->text[0] != '\0';
 
         bool valid_action = (valid_sql || valid_function) && valid_text;
         if (!valid_action) {
-            LOG_error("[Db] invalid schema action %zu\n", index);
+            LOG_error("[Db] invalid migration step %zu\n", index);
             return false;
         }
     }
-    *action_count = index;
+    *step_count = index;
     *schema_version = (int)index;
     return true;
 }
 
-static bool run_action(sqlite3* database, const DbSchemaAction* action) {
+static bool run_step(sqlite3* database, const DbMigrationStep* step) {
     char pragma[64];
-    snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d", action->version);
+    snprintf(pragma, sizeof(pragma), "PRAGMA user_version = %d", step->version);
 
     bool success = true;
 
     // begin/execute/update_version/commit
     success = success && Db_begin();
-    if (action->type == DB_SCHEMA_SQL) {
-        success = success && execute(database, action->sql);
+    if (step->type == DB_MIGRATION_SQL) {
+        success = success && execute(database, step->sql);
     } else {
-        success = success && action->function();
+        success = success && step->function(database);
     }
     success = success && execute(database, pragma);
     success = success && Db_commit();
     if (!success) {
         Db_rollback();
-        LOG_error("[Db] failed schema action %d \"%s\"\n", action->version,
-                  action->text);
-        return false;
+        LOG_error("[Db] failed migration step %d \"%s\"\n", step->version,
+                  step->text);
     }
-    return true;
+    return success;
 }
 
 static bool migrate(sqlite3* database) {
     int version = 0;
     if (!read_schema_version(database, &version)) return false;
-    DbSchemaAction* actions = DbSchema_getActions();
-    if (!actions) return false;
-    size_t action_count = 0;
+    DbMigrationStep* steps = DbSchema_getSteps();
+    if (!steps) return false;
+    size_t step_count = 0;
     int schema_version = 0;
-    if (!validate_actions(actions, &action_count, &schema_version)) {
-        free(actions);
+    if (!validate_steps(steps, &step_count, &schema_version)) {
+        free(steps);
         return false;
     }
     if (version < 0 || version > schema_version) {
         LOG_error("[Db] database schema version %d is newer than binary version %d\n",
                   version, schema_version);
-        free(actions);
+        free(steps);
         return false;
     }
 
-    for (size_t index = (size_t)version; index < action_count; index++) {
-        if (!run_action(database, &actions[index])) {
+    for (size_t index = (size_t)version; index < step_count; index++) {
+        if (!run_step(database, &steps[index])) {
             break;
         }
-        version = actions[index].version;
+        version = steps[index].version;
     }
     bool success = version == schema_version;
-    free(actions);
+    free(steps);
     return success;
 }
 

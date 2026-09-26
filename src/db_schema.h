@@ -3,22 +3,23 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sqlite3.h>
 
 typedef enum {
-    DB_SCHEMA_SQL,
-    DB_SCHEMA_FUNCTION,
-} DbSchemaActionType;
+    DB_MIGRATION_SQL,
+    DB_MIGRATION_FUNCTION,
+} DbMigrationStepType;
 
-typedef bool (*DbSchemaActionFunction)(void);
+typedef bool (*DbMigrationStepFunction)(sqlite3* database);
 
 typedef struct {
-    int                    version;
-    DbSchemaActionType     type;
-    const char*            sql;
-    DbSchemaActionFunction function;
-    const char*            text;
-} DbSchemaAction;
+    int                     version;
+    DbMigrationStepType     type;
+    const char*             sql;
+    DbMigrationStepFunction function;
+    const char*             text;
+} DbMigrationStep;
 
-DbSchemaAction* DbSchema_getActions(void);
+DbMigrationStep* DbSchema_getSteps(void);
 
 #endif
