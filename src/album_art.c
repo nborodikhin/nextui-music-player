@@ -12,6 +12,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "include/parson/parson.h"
 
 #include <SDL2/SDL.h>

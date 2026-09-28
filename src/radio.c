@@ -24,6 +24,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "file_utils.h"
 
 // SDL for rendering

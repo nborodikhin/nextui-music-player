@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef void (*DbResultDestructor)(void* data);
+
 typedef struct DbResult {
     int data_version;
+    DbResultDestructor free;
 } DbResult;
 
 /* Initializes the database at the standard app data path. */
@@ -26,8 +29,11 @@ bool Db_execute(const char* sql);
 
 /* Returns the current process data version. */
 int Db_dataVersion(void);
+
 /* Returns whether a result has the current data version. */
 bool Db_resultIsCurrent(const DbResult* result);
+/* Free a result - any result based on a DbResult */
+void Db_freeResult(void* result);
 
 typedef enum {
     DB_SETTING_INT,
@@ -50,7 +56,6 @@ typedef struct {
 } DbSettingsResult;
 
 DbSettingsResult* Db_readSettings(void);
-void               Db_freeSettingsResult(DbSettingsResult* result);
 bool               Db_saveIntSetting(const char* name, int value);
 bool               Db_saveBoolSetting(const char* name, bool value);
 bool               Db_saveStringSetting(const char* name, const char* value);

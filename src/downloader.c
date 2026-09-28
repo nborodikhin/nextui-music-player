@@ -16,6 +16,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
 #include "include/parson/parson.h"

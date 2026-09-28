@@ -74,7 +74,7 @@ TEST(empty_table_returns_fallbacks) {
     DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
     CHECK(result && result->count == 0);
-    Db_freeSettingsResult(result);
+    Db_freeResult(result);
     stop_test();
 }
 
@@ -102,7 +102,7 @@ TEST(setter_reaches_all_threads) {
     const DbSetting* setting = find_setting(result, "test_int");
     CHECK(setting != NULL);
     CHECK(setting && setting->type == DB_SETTING_INT && setting->int_value == 42);
-    Db_freeSettingsResult(result);
+    Db_freeResult(result);
     stop_test();
 }
 
@@ -115,7 +115,7 @@ TEST(zero_int_is_stored) {
     const DbSetting* setting = find_setting(result, "test_int");
     CHECK(setting != NULL);
     CHECK(setting && setting->type == DB_SETTING_INT && setting->int_value == 0);
-    Db_freeSettingsResult(result);
+    Db_freeResult(result);
     stop_test();
 }
 
@@ -139,7 +139,7 @@ TEST(toggle_writes_opposite_of_fallback) {
     const DbSetting* setting = find_setting(result, "test_bool");
     CHECK(setting != NULL);
     CHECK(setting && setting->type == DB_SETTING_BOOL && !setting->bool_value);
-    Db_freeSettingsResult(result);
+    Db_freeResult(result);
     stop_test();
 }
 

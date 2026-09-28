@@ -10,6 +10,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "config.h"
 #include "db.h"
 #include "display_helper.h"

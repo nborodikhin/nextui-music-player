@@ -1,6 +1,7 @@
 #include "db.h"
 
 #include <pthread.h>
+#include <stdarg.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "file_utils.h"
 #include "db_schema.h"
 #include "db_statement.h"
@@ -52,6 +54,13 @@ static void connection_destroy(void* value) {
     atomic_decrement(&open_connection_count);
 }
 
+static int wait_for_database_lock(void* context, int previous_attempts) {
+    (void)context;
+    (void)previous_attempts;
+    sqlite3_sleep(5);
+    return 1;
+}
+
 static void create_connection_key(void) {
     int result = pthread_key_create(&connection_key, connection_destroy);
     if (result != 0) {
@@ -87,9 +96,9 @@ static sqlite3* connection(void) {
         return NULL;
     }
 
-    result = sqlite3_busy_timeout(database, 2000);
+    result = sqlite3_busy_handler(database, wait_for_database_lock, NULL);
     if (result != SQLITE_OK) {
-        LOG_error("[Db] failed to set busy timeout: %s\n", sqlite3_errmsg(database));
+        LOG_error("[Db] failed to set busy handler: %s\n", sqlite3_errmsg(database));
         sqlite3_close(database);
         return NULL;
     }
@@ -114,6 +123,13 @@ static sqlite3* connection(void) {
     if (!statement.ok) {
         LOG_error("[Db] failed to disable automatic checkpoints: %s\n",
                   statement.errmsg);
+        sqlite3_close(database);
+        return NULL;
+    }
+
+    DbStatement_exec(&statement, database, "PRAGMA foreign_keys=ON");
+    if (!statement.ok) {
+        LOG_error("[Db] failed to enable foreign keys: %s\n", statement.errmsg);
         sqlite3_close(database);
         return NULL;
     }
@@ -171,7 +187,7 @@ static bool read_schema_version(sqlite3* database, int* version) {
     DbStatement_close(&statement);
 
     if (!statement.ok) {
-        LOG_error("[Db] failed to read schema version, stop %d\n", statement.error_op);
+        LOG_error("[Db] failed to read schema version: %s\n", statement.errmsg);
         return false;
     }
 
@@ -358,9 +374,37 @@ bool Db_resultIsCurrent(const DbResult* result) {
     return result->data_version == Db_dataVersion();
 }
 
-void Db_freeSettingsResult(DbSettingsResult* result) {
-    if (!result) return;
+void Db_freeResult(void* value) {
+    if (!value) return;
 
+    DbResult* result = value;
+    if (!result->free) {
+        LOG_error("[Db] result has no free function\n");
+        return;
+    }
+    result->free(value);
+}
+
+// Snapshot reads
+
+// Starts a savepoint. Outside a transaction it starts a read transaction, thus each query
+// until the release sees the same data. Returns false when the savepoint did not start; the
+// connection then cannot read either.
+static bool begin_snapshot(const char* name) {
+    char sql[64];
+    snprintf(sql, sizeof(sql), "SAVEPOINT %s", name);
+    return execute(connection(), sql);
+}
+
+static void end_snapshot(const char* name) {
+    char sql[64];
+    snprintf(sql, sizeof(sql), "RELEASE %s", name);
+    execute(connection(), sql);
+}
+
+// Settings
+
+static void free_settings_result(DbSettingsResult* result) {
     for (int index = 0; index < result->count; index++) {
         free(result->items[index].name);
         free(result->items[index].string_value);
@@ -369,96 +413,77 @@ void Db_freeSettingsResult(DbSettingsResult* result) {
     free(result);
 }
 
-static bool append_setting(DbSettingsResult* result, DbSetting* setting) {
-    DbSetting* items = realloc(result->items,
-                               (size_t)(result->count + 1) * sizeof(*items));
-    if (!items) return false;
+static DbSettingsResult* allocate_settings_result(void) {
+    DbSettingsResult* result = calloc(1, sizeof(*result));
+    if (result) {
+        result->base.data_version = Db_dataVersion();
+        result->base.free = (DbResultDestructor) free_settings_result;
+    }
+    return result;
+}
 
-    result->items = items;
-    result->items[result->count++] = *setting;
-    return true;
+// Returns -1 for a type name that is not known.
+static DbSettingType setting_type_from_name(const char* name) {
+    if (!name) return (DbSettingType) -1;
+    if (strcmp(name, "int") == 0) return DB_SETTING_INT;
+    if (strcmp(name, "bool") == 0) return DB_SETTING_BOOL;
+    if (strcmp(name, "string") == 0) return DB_SETTING_STRING;
+    return (DbSettingType) -1;
 }
 
 DbSettingsResult* Db_readSettings(void) {
-    DbSettingsResult* result = calloc(1, sizeof(*result));
+    DbSettingsResult* result = allocate_settings_result();
     if (!result) return NULL;
-    result->base.data_version = Db_dataVersion();
 
-    sqlite3* database = connection();
-    if (!database) {
-        LOG_error("[Db] failed to read settings: no database\n");
+    if (!begin_snapshot("read_settings")) {
+        LOG_error("[Db] failed to read settings: no snapshot\n");
         return result;
     }
 
     DbStatement statement;
-    if (!DbStatement_begin(&statement, database,
-                           "SELECT name, type, value FROM settings")) {
-        LOG_error("[Db] failed to start settings read, op %d\n",
-                  statement.error_op);
-        DbStatement_close(&statement);
-        return result;
-    }
+    int count = DbStatement_query_int(&statement, connection(),
+                                      "SELECT COUNT(*) FROM settings");
 
-    while (DbStatement_step(&statement)) {
-        const char* name = DbStatement_get_text(&statement, 0);
-        const char* type = DbStatement_get_text(&statement, 1);
-        DbSetting setting = {0};
-
-        if (!name || !type) {
-            LOG_error("[Db] skipped setting with no name or type\n");
-            continue;
-        }
-
-        if (strcmp(type, "int") == 0) {
-            setting.type = DB_SETTING_INT;
-            setting.int_value = DbStatement_get_int(&statement, 2);
-        } else if (strcmp(type, "bool") == 0) {
-            const char* value = DbStatement_get_text(&statement, 2);
-            if (!value || (strcmp(value, "true") != 0 &&
-                           strcmp(value, "false") != 0)) {
-                LOG_warn("[Db] skipped bool setting %s with invalid value\n", name);
+    if (statement.ok && count > 0) {
+        DbStatement_begin(&statement, connection(), "SELECT name, type, value FROM settings");
+        result->items = DbStatement_calloc(&statement, (size_t)count * sizeof(*result->items));
+        for (int row = 0; row < count && DbStatement_step(&statement); row++) {
+            const char* type_name = DbStatement_get_text(&statement, 1);
+            DbSettingType type = setting_type_from_name(type_name);
+            if (type == (DbSettingType) -1) {
+                if (statement.ok) {
+                    LOG_warn("[Db] skipped setting %s with unknown type %s\n",
+                             DbStatement_get_text(&statement, 0), type_name);
+                }
                 continue;
             }
-            setting.type = DB_SETTING_BOOL;
-            setting.bool_value = strcmp(value, "true") == 0;
-        } else if (strcmp(type, "string") == 0) {
-            setting.type = DB_SETTING_STRING;
-            setting.string_value = DbStatement_dup_ext(&statement, 2);
-            if (!setting.string_value && statement.ok) {
-                LOG_error("[Db] failed to copy setting %s\n", name);
-                statement.ok = false;
-            }
-        } else {
-            LOG_warn("[Db] skipped setting %s with unknown type %s\n", name, type);
-            continue;
-        }
 
-        setting.name = strdup(name);
-        if (!setting.name || !append_setting(result, &setting)) {
-            free(setting.name);
-            free(setting.string_value);
-            LOG_error("[Db] failed to copy setting %s\n", name);
-            statement.ok = false;
-            break;
+            DbSetting* setting = &result->items[result->count++];
+            setting->name = DbStatement_dup_text(&statement, 0);
+            setting->type = type;
+            switch (type) {
+                case DB_SETTING_INT:
+                    setting->int_value = DbStatement_get_int(&statement, 2);
+                    break;
+                case DB_SETTING_BOOL: {
+                    const char* value = DbStatement_get_text(&statement, 2);
+                    setting->bool_value = value && strcmp(value, "true") == 0;
+                    break;
+                }
+                case DB_SETTING_STRING:
+                    setting->string_value = DbStatement_dup_text(&statement, 2);
+                    break;
+            }
         }
+        DbStatement_close(&statement);
     }
+
+    end_snapshot("read_settings");
 
     if (!statement.ok) {
-        LOG_error("[Db] failed to finish settings read, op %d\n",
-                  statement.error_op);
-        DbStatement_close(&statement);
-        Db_freeSettingsResult(result);
-        result = calloc(1, sizeof(*result));
-        if (result) result->base.data_version = Db_dataVersion();
-        return result;
-    }
-
-    if (!DbStatement_close(&statement)) {
-        LOG_error("[Db] failed to close settings read, op %d\n",
-                  statement.error_op);
-        Db_freeSettingsResult(result);
-        result = calloc(1, sizeof(*result));
-        if (result) result->base.data_version = Db_dataVersion();
+        free_settings_result(result);
+        result = allocate_settings_result();
+        LOG_error("[Db] failed to read settings: %s\n", statement.errmsg);
     }
     return result;
 }
@@ -482,8 +507,8 @@ static bool save_setting(const char* name, const char* type,
     DbStatement_close(&statement);
 
     if (!statement.ok) {
-        LOG_error("[Db] failed to save setting %s, op %d\n",
-                  name, statement.error_op);
+        LOG_error("[Db] failed to save setting %s: %s\n",
+                  name, statement.errmsg);
         return false;
     }
 

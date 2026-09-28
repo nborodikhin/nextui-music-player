@@ -10,6 +10,7 @@
 #include "psa/crypto.h"
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "utils.h"
 #include "config.h"
 #include "player.h"
@@ -96,6 +97,8 @@ static void print_usage(const char* program) {
 }
 
 int main(int argc, char* argv[]) {
+    Debug_init();
+
     // Read the options before anything else, so --help gives its text without a
     // display, and an option that is not correct stops the app at once.
     for (int i = 1; i < argc; i++) {

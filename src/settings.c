@@ -7,6 +7,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "db.h"
 
 #define SETTINGS_CACHE_CAPACITY 32
@@ -195,7 +196,7 @@ void Settings_init(void) {
     }
     pthread_mutex_unlock(&cache_mutex);
 
-    Db_freeSettingsResult(result);
+    Db_freeResult(result);
 }
 
 void Settings_quit(void) {

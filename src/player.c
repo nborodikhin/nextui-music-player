@@ -34,6 +34,7 @@ struct input_event_raw {
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "msettings.h"
 
 // Include dr_libs for audio decoding (header-only libraries)

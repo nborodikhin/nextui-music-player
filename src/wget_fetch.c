@@ -13,6 +13,7 @@
 #include "file_utils.h"
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 
 // curl is part of the firmware on every supported device, so no HTTP client is
 // bundled - only the CA bundle it has nowhere else to get. -L follows redirects,
