@@ -6,6 +6,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "playlist.h"
 #include "player.h"
 

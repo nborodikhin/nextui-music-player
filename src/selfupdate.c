@@ -15,6 +15,7 @@
 #include "include/parson/parson.h"
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "settings.h"
 
 #define RELEASE_JSON_MAX 32768

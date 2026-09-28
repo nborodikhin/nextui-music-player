@@ -8,6 +8,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 
 // JSON library
 #include "include/parson/parson.h"

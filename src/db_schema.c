@@ -8,6 +8,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "db.h"
 #include "db_statement.h"
 #include "file_utils.h"
@@ -55,8 +56,8 @@ static bool save_v1_setting_sql(sqlite3* database, const char* name, const char*
     DbStatement statement;
     DbStatement_exec(&statement, database, sql);
     if (!statement.ok) {
-        LOG_error("[Db] failed to save setting %s, op %d\n",
-                  name, statement.error_op);
+        LOG_error("[Db] failed to save setting %s: %s\n",
+                  name, statement.errmsg);
     }
     return statement.ok;
 }
@@ -231,7 +232,8 @@ static void migration(DbMigrationStep step) {
 static void migrations(void) {
     // note: each migration step runs in an sqlite transaction
     // 1
-    sql("CREATE TABLE settings (name TEXT PRIMARY KEY, type TEXT NOT NULL, value)");
+    sql("CREATE TABLE settings (name TEXT PRIMARY KEY NOT NULL, type TEXT NOT NULL, "
+        "value NOT NULL)");
     function(copy_spectrum_settings_data);
     function(remove_spectrum_settings_file);
     function(copy_settings_data);

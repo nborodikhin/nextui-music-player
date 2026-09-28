@@ -18,6 +18,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "wifi.h"
 #include "ui_podcast.h"
 #include "module_common.h"

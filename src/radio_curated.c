@@ -7,6 +7,7 @@
 
 #include "defines.h"
 #include "api.h"
+#include "debug.h"
 #include "include/parson/parson.h"
 
 // Maximum limits
