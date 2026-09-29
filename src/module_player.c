@@ -114,7 +114,8 @@ static bool try_load_and_play(const char *path) {
         // away, and fetches its own where the lyrics are on
         Lyrics_clear();
         if (Settings_getBool(&SETTING_LYRICS_ENABLED) && info) {
-            Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
+            Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000,
+                         Player_getCurrentFile(), Player_getEmbeddedLyrics());
         }
 
         // Save resume state on every track change
@@ -540,7 +541,8 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         if (Settings_toggleBool(&SETTING_LYRICS_ENABLED)) {
             const TrackInfo* info = Player_getTrackInfo();
             if (info) {
-                Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
+                Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000,
+                             Player_getCurrentFile(), Player_getEmbeddedLyrics());
             }
         }
         *dirty = 1;
@@ -945,7 +947,8 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
             if (Settings_toggleBool(&SETTING_LYRICS_ENABLED)) {
                 const TrackInfo* info = Player_getTrackInfo();
                 if (info) {
-                    Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000);
+                    Lyrics_fetch(info->artist, info->title, info->duration_ms / 1000,
+                                 Player_getCurrentFile(), Player_getEmbeddedLyrics());
                 }
             }
             dirty = 1;
