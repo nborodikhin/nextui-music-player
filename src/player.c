@@ -84,6 +84,7 @@ typedef struct {
     int channels;
     int frame_size;             // PCM frames per AAC frame (1024 or 2048 for HE-AAC)
     int64_t file_size;
+    int64_t audio_start;        // byte offset of the first ADTS frame (after an ID3v2 tag)
     // File read buffer
     uint8_t* read_buf;
     int read_buf_size;
@@ -92,6 +93,20 @@ typedef struct {
     size_t leftover_count;
     size_t leftover_capacity;
 } AACFileDecoder;
+
+// Size in bytes of the ID3v2 tag at the start of a file, or 0 if the file has none.
+// Raw ADTS files often carry one, and it can be larger than the first read.
+static int64_t id3v2_tag_bytes(FILE* f) {
+    uint8_t h[10];
+    if (fseek(f, 0, SEEK_SET) != 0 || fread(h, 1, sizeof(h), f) != sizeof(h)) return 0;
+    if (h[0] != 'I' || h[1] != 'D' || h[2] != '3') return 0;
+
+    int64_t size = ((int64_t)(h[6] & 0x7F) << 21) | ((h[7] & 0x7F) << 14) |
+                   ((h[8] & 0x7F) << 7) | (h[9] & 0x7F);
+    size += 10;                     // header
+    if (h[5] & 0x10) size += 10;    // footer (ID3v2.4)
+    return size;
+}
 
 // minimp4 read callback - returns 0 on success, non-zero on failure
 static int m4a_read_callback(int64_t offset, void* buffer, size_t size, void* token) {
@@ -376,7 +391,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_FLAC: {
-            drflac* flac = drflac_open_file_with_metadata(filepath, flac_metadata_callback, NULL, NULL);
+            drflac* flac = drflac_open_file(filepath, NULL);
             if (!flac) {
                 LOG_error("Stream: Failed to open FLAC: %s\n", filepath);
                 return -1;
@@ -546,7 +561,9 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             // Get file size
             fseek(aac->file, 0, SEEK_END);
             aac->file_size = ftell(aac->file);
-            fseek(aac->file, 0, SEEK_SET);
+            aac->audio_start = id3v2_tag_bytes(aac->file);
+            if (aac->audio_start >= aac->file_size) aac->audio_start = 0;
+            fseek(aac->file, (long)aac->audio_start, SEEK_SET);
 
             // Open FDK-AAC decoder with ADTS transport (handles sync internally)
             aac->aac_decoder = aacDecoder_Open(TT_MP4_ADTS, 1);
@@ -598,11 +615,11 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             // Estimate total PCM frames from bitrate
             CStreamInfo* aac_info = aacDecoder_GetStreamInfo(aac->aac_decoder);
             if (aac_info && aac_info->bitRate > 0) {
-                double duration_sec = (double)aac->file_size * 8.0 / (double)aac_info->bitRate;
+                double duration_sec = (double)(aac->file_size - aac->audio_start) * 8.0 / (double)aac_info->bitRate;
                 sd->total_frames = (int64_t)(duration_sec * aac->sample_rate);
             } else {
                 // Fallback: assume 128kbps
-                sd->total_frames = (int64_t)((double)aac->file_size * 8.0 / 128000.0 * aac->sample_rate);
+                sd->total_frames = (int64_t)((double)(aac->file_size - aac->audio_start) * 8.0 / 128000.0 * aac->sample_rate);
             }
 
             // Don't seek back — continue from where we are with remaining buffered data
@@ -999,12 +1016,12 @@ static int stream_decoder_seek(StreamDecoder* sd, int64_t frame) {
             // Estimate byte position from frame position
             if (sd->total_frames > 0 && aac->file_size > 0) {
                 double ratio = (double)frame / (double)sd->total_frames;
-                int64_t byte_pos = (int64_t)(ratio * aac->file_size);
+                int64_t byte_pos = aac->audio_start + (int64_t)(ratio * (aac->file_size - aac->audio_start));
                 if (byte_pos >= aac->file_size) byte_pos = aac->file_size - 1;
-                if (byte_pos < 0) byte_pos = 0;
+                if (byte_pos < aac->audio_start) byte_pos = aac->audio_start;
                 fseek(aac->file, (long)byte_pos, SEEK_SET);
             } else {
-                fseek(aac->file, 0, SEEK_SET);
+                fseek(aac->file, (long)aac->audio_start, SEEK_SET);
             }
             // Clear decoder state and buffers
             aac->read_buf_size = 0;
@@ -1717,6 +1734,25 @@ void Player_quit(void) {
 
 // ============ METADATA PARSING ============
 
+// Decode an embedded image (JPEG, PNG) into the album art, if the track has none yet
+static void set_album_art(const void* data, size_t size) {
+    if (player.album_art || !data || size == 0) return;
+
+    SDL_RWops* rw = SDL_RWFromConstMem(data, (int)size);
+    if (!rw) return;
+    player.album_art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
+}
+
+// Keep a lyrics tag of the track, if it has none yet. `len` is the text length in bytes.
+static void set_embedded_lyrics(const char* text, size_t len) {
+    if (player.lyrics || !text) return;
+    while (len > 0 && (text[len - 1] == '\0' || text[len - 1] == '\n' || text[len - 1] == '\r' ||
+                       text[len - 1] == ' ')) len--;
+    if (len == 0) return;
+
+    player.lyrics = strndup(text, len);
+}
+
 // Helper: read syncsafe integer (ID3v2)
 static uint32_t read_syncsafe_int(const uint8_t* data) {
     return ((uint32_t)(data[0] & 0x7F) << 21) |
@@ -1944,6 +1980,50 @@ static void parse_id3v2(const char* filepath) {
                 copy_metadata_string(player.track_info.album, temp, sizeof(player.track_info.album));
             }
         }
+        // Process USLT frame (unsynced lyrics): encoding, language(3), description, text
+        else if (strcmp(frame_id, "USLT") == 0 && frame_size > 4 && player.lyrics == NULL) {
+            const uint8_t* frame_data = &tag_data[pos];
+            uint8_t encoding = frame_data[0];
+            bool utf16 = (encoding == 1 || encoding == 2);
+            size_t offset = 4;
+
+            // Skip the description: a null of 1 byte, or of 2 bytes at a 2-byte step for UTF-16
+            if (utf16) {
+                while (offset + 1 < frame_size &&
+                       (frame_data[offset] != 0 || frame_data[offset + 1] != 0)) offset += 2;
+                offset += 2;
+            } else {
+                while (offset < frame_size && frame_data[offset] != 0) offset++;
+                offset++;
+            }
+
+            if (offset < frame_size) {
+                const uint8_t* text = &frame_data[offset];
+                size_t text_len = frame_size - offset;
+
+                if (!utf16) {
+                    set_embedded_lyrics((const char*)text, text_len);
+                } else {
+                    // Encoding 1 starts with a BOM; encoding 2 is big-endian without one
+                    bool is_be = (encoding == 2);
+                    if (encoding == 1 && text_len >= 2) {
+                        is_be = (text[0] == 0xFE && text[1] == 0xFF);
+                        if (is_be || (text[0] == 0xFF && text[1] == 0xFE)) {
+                            text += 2;
+                            text_len -= 2;
+                        }
+                    }
+                    size_t max_len = text_len / 2 + 1;
+                    char* converted = malloc(max_len);
+                    if (converted) {
+                        if (is_be) utf16be_to_ascii(converted, text, text_len, max_len);
+                        else utf16le_to_ascii(converted, text, text_len, max_len);
+                        set_embedded_lyrics(converted, strlen(converted));
+                        free(converted);
+                    }
+                }
+            }
+        }
         // Process APIC frame (album art) - only if we don't already have art
         else if (strcmp(frame_id, "APIC") == 0 && frame_size > 10 && player.album_art == NULL) {
             const uint8_t* frame_data = &tag_data[pos];
@@ -1960,13 +2040,15 @@ static void parse_id3v2(const char* filepath) {
 
                 // Skip description (null-terminated, encoding-dependent)
                 if (encoding == 1 || encoding == 2) {
-                    // UTF-16: look for double null
+                    // UTF-16: look for a null code unit, 2 bytes at a time. A byte scan
+                    // would match the high byte of the last character ("r\0" + "\0\0")
+                    // and leave the image one byte early.
                     while (offset + 1 < frame_size) {
                         if (frame_data[offset] == 0 && frame_data[offset + 1] == 0) {
                             offset += 2;
                             break;
                         }
-                        offset++;
+                        offset += 2;
                     }
                 } else {
                     // ISO-8859-1 or UTF-8: single null
@@ -2015,40 +2097,92 @@ static void parse_mp3_metadata(const char* filepath) {
     }
 }
 
-// Parse M4A metadata from the already-opened decoder
-static void parse_m4a_metadata(void) {
-    if (player.stream_decoder.format != AUDIO_FORMAT_M4A || !player.stream_decoder.decoder) {
-        return;
+// Decode base64 in place. Returns the number of bytes, or 0 if the text is not base64.
+static size_t base64_decode_inplace(char* text) {
+    size_t out = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (const char* c = text; *c && *c != '='; c++) {
+        int v;
+        if (*c >= 'A' && *c <= 'Z') v = *c - 'A';
+        else if (*c >= 'a' && *c <= 'z') v = *c - 'a' + 26;
+        else if (*c >= '0' && *c <= '9') v = *c - '0' + 52;
+        else if (*c == '+') v = 62;
+        else if (*c == '/') v = 63;
+        else return 0;
+
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            // Each output byte is written behind the read position, thus in place is safe
+            text[out++] = (char)((acc >> bits) & 0xFF);
+        }
+    }
+    return out;
+}
+
+// Load the image of a FLAC picture structure: the PICTURE block of FLAC, and the
+// decoded METADATA_BLOCK_PICTURE comment of Ogg Vorbis and Opus. All fields are big-endian:
+// type, MIME length, MIME, description length, description, width, height, depth,
+// colors, data length, data.
+static void parse_flac_picture(const uint8_t* p, size_t size) {
+    size_t pos = 4;  // picture type
+
+    for (int i = 0; i < 2; i++) {  // MIME type, then description
+        if (pos + 4 > size) return;
+        uint32_t len = read_be32(&p[pos]);
+        pos += 4;
+        if (len > size - pos) return;
+        pos += len;
     }
 
-    M4ADecoder* m4a = (M4ADecoder*)player.stream_decoder.decoder;
+    pos += 16;  // width, height, depth, colors
+    if (pos + 4 > size) return;
+    uint32_t data_len = read_be32(&p[pos]);
+    pos += 4;
+    if (data_len > size - pos) return;
+
+    set_album_art(&p[pos], data_len);
+}
+
+// Parse M4A metadata (iTunes-style tags in the MP4 container)
+static void parse_m4a_metadata(const char* filepath) {
+    FILE* f = fopen(filepath, "rb");
+    if (!f) return;
+
+    fseek(f, 0, SEEK_END);
+    int64_t file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    // MP4D_close frees and clears each pointer, so it is safe after a failed MP4D_open too
+    MP4D_demux_t mp4;
+    memset(&mp4, 0, sizeof(mp4));
+    MP4D_open(&mp4, m4a_read_callback, f, file_size);
 
     // Copy metadata from minimp4's parsed tags
-    if (m4a->mp4.tag.title && m4a->mp4.tag.title[0]) {
-        copy_metadata_string(player.track_info.title, (const char*)m4a->mp4.tag.title,
+    if (mp4.tag.title && mp4.tag.title[0]) {
+        copy_metadata_string(player.track_info.title, (const char*)mp4.tag.title,
                            sizeof(player.track_info.title));
     }
 
-    if (m4a->mp4.tag.artist && m4a->mp4.tag.artist[0]) {
-        copy_metadata_string(player.track_info.artist, (const char*)m4a->mp4.tag.artist,
+    if (mp4.tag.artist && mp4.tag.artist[0]) {
+        copy_metadata_string(player.track_info.artist, (const char*)mp4.tag.artist,
                            sizeof(player.track_info.artist));
     }
 
-    if (m4a->mp4.tag.album && m4a->mp4.tag.album[0]) {
-        copy_metadata_string(player.track_info.album, (const char*)m4a->mp4.tag.album,
+    if (mp4.tag.album && mp4.tag.album[0]) {
+        copy_metadata_string(player.track_info.album, (const char*)mp4.tag.album,
                            sizeof(player.track_info.album));
     }
 
+    if (mp4.tag.lyrics) set_embedded_lyrics((const char*)mp4.tag.lyrics, strlen((const char*)mp4.tag.lyrics));
+
     // Load cover art if present
-    if (m4a->mp4.tag.cover && m4a->mp4.tag.cover_size > 0 && player.album_art == NULL) {
-        SDL_RWops* rw = SDL_RWFromConstMem(m4a->mp4.tag.cover, m4a->mp4.tag.cover_size);
-        if (rw) {
-            SDL_Surface* art = IMG_Load_RW(rw, 1);  // 1 = auto-close RWops
-            if (art) {
-                player.album_art = art;
-            }
-        }
-    }
+    if (mp4.tag.cover) set_album_art(mp4.tag.cover, mp4.tag.cover_size);
+
+    MP4D_close(&mp4);
+    fclose(f);
 }
 
 // Parse Vorbis comments (for OGG and FLAC)
@@ -2068,12 +2202,29 @@ static void parse_vorbis_comment(const char* comment) {
         copy_metadata_string(player.track_info.artist, value, sizeof(player.track_info.artist));
     } else if (strncasecmp(comment, "ALBUM", key_len) == 0 && key_len == 5) {
         copy_metadata_string(player.track_info.album, value, sizeof(player.track_info.album));
+    } else if ((key_len == 6 && strncasecmp(comment, "LYRICS", key_len) == 0) ||
+               (key_len == 14 && strncasecmp(comment, "UNSYNCEDLYRICS", key_len) == 0)) {
+        set_embedded_lyrics(value, strlen(value));
+    } else if (key_len == 22 && strncasecmp(comment, "METADATA_BLOCK_PICTURE", key_len) == 0 &&
+               player.album_art == NULL) {
+        // A base64 FLAC picture structure
+        char* bytes = strdup(value);
+        if (!bytes) return;
+        size_t size = base64_decode_inplace(bytes);
+        parse_flac_picture((const uint8_t*)bytes, size);
+        free(bytes);
     }
 }
 
 // FLAC metadata callback
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) {
     (void)pUserData;
+
+    if (pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_PICTURE) {
+        // dr_flac has already read the fields; pPictureData is NULL if it could not allocate
+        set_album_art(pMetadata->data.picture.pPictureData, pMetadata->data.picture.pictureDataSize);
+        return;
+    }
 
     if (pMetadata->type == DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) {
         // Parse Vorbis comments
@@ -2101,6 +2252,100 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) 
                 pComments += commentLength;
             }
         }
+    }
+}
+
+// Parse FLAC metadata (Vorbis comment block)
+static void parse_flac_metadata(const char* filepath) {
+    // dr_flac gives the metadata blocks only to a callback while it opens the file
+    drflac* flac = drflac_open_file_with_metadata(filepath, flac_metadata_callback, NULL, NULL);
+    if (flac) drflac_close(flac);
+}
+
+// Parse OGG metadata (Vorbis comment tags)
+static void parse_ogg_metadata(const char* filepath) {
+    int error;
+    stb_vorbis* vorbis = stb_vorbis_open_filename(filepath, &error, NULL);
+    if (!vorbis) return;
+
+    stb_vorbis_comment comments = stb_vorbis_get_comment(vorbis);
+    for (int i = 0; i < comments.comment_list_length; i++)
+        parse_vorbis_comment(comments.comment_list[i]);
+
+    stb_vorbis_close(vorbis);
+}
+
+// Parse Opus metadata (Vorbis comment tags)
+static void parse_opus_metadata(const char* filepath) {
+    // A partial open reads only the headers, and the tags of the first link are available
+    int error;
+    OggOpusFile* of = op_test_file(filepath, &error);
+    if (!of) return;
+
+    const OpusTags* tags = op_tags(of, 0);
+    if (tags) {
+        for (int i = 0; i < tags->comments; i++)
+            parse_vorbis_comment(tags->user_comments[i]);
+    }
+
+    op_free(of);
+}
+
+// Parse WAV metadata (RIFF LIST/INFO chunk)
+static void parse_wav_metadata(const char* filepath) {
+    drwav wav;
+    if (!drwav_init_file_with_metadata(&wav, filepath, 0, NULL)) return;
+
+    for (drwav_uint32 i = 0; i < wav.metadataCount; i++) {
+        const drwav_metadata* md = &wav.pMetadata[i];
+        char* dest;
+        size_t dest_size;
+        if (md->type == drwav_metadata_type_list_info_title) {
+            dest = player.track_info.title;
+            dest_size = sizeof(player.track_info.title);
+        } else if (md->type == drwav_metadata_type_list_info_artist) {
+            dest = player.track_info.artist;
+            dest_size = sizeof(player.track_info.artist);
+        } else if (md->type == drwav_metadata_type_list_info_album) {
+            dest = player.track_info.album;
+            dest_size = sizeof(player.track_info.album);
+        } else {
+            continue;
+        }
+
+        // infoText is the union member only for the list_info types above
+        const char* text = md->data.infoText.pString;
+        if (text && text[0]) copy_metadata_string(dest, text, dest_size);
+    }
+
+    drwav_uninit(&wav);
+}
+
+// Read the tags of a file into track_info, before its decoder opens
+static void parse_metadata(AudioFormat format, const char* filepath) {
+    switch (format) {
+        case AUDIO_FORMAT_MP3:
+        case AUDIO_FORMAT_AAC:  // raw ADTS has no tag format of its own; taggers add ID3 as for MP3
+            parse_mp3_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_WAV:
+            parse_wav_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_FLAC:
+            parse_flac_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_OGG:
+            parse_ogg_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_OPUS:
+            parse_opus_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_M4A:
+            parse_m4a_metadata(filepath);
+            break;
+        case AUDIO_FORMAT_UNKNOWN:
+        case AUDIO_FORMAT_MOD:
+            break;
     }
 }
 
@@ -2229,25 +2474,8 @@ int Player_load(const char* filepath) {
         format == AUDIO_FORMAT_FLAC || format == AUDIO_FORMAT_OGG ||
         format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_AAC ||
         format == AUDIO_FORMAT_OPUS) {
+        parse_metadata(format, filepath);
         result = load_streaming(filepath);
-
-        // Parse metadata for MP3
-        if (result == 0 && format == AUDIO_FORMAT_MP3) {
-            parse_mp3_metadata(filepath);
-        }
-        // Parse metadata for M4A
-        if (result == 0 && format == AUDIO_FORMAT_M4A) {
-            parse_m4a_metadata();
-        }
-        // Parse metadata for Opus (uses Vorbis comment tags)
-        if (result == 0 && format == AUDIO_FORMAT_OPUS) {
-            OggOpusFile* of = (OggOpusFile*)player.stream_decoder.decoder;
-            const OpusTags* tags = op_tags(of, -1);
-            if (tags) {
-                for (int i = 0; i < tags->comments; i++)
-                    parse_vorbis_comment(tags->user_comments[i]);
-            }
-        }
 
         // Album art fetch moved to module_player.c (after Player_play)
         // to avoid blocking playback start
@@ -2337,6 +2565,9 @@ void Player_stop(void) {
         player.album_art = NULL;
     }
 
+    free(player.lyrics);
+    player.lyrics = NULL;
+
     // Clear any internet-fetched album art
     album_art_clear();
 
@@ -2419,6 +2650,10 @@ const TrackInfo* Player_getTrackInfo(void) {
 
 const char* Player_getCurrentFile(void) {
     return player.current_file;
+}
+
+const char* Player_getEmbeddedLyrics(void) {
+    return player.lyrics;
 }
 
 int Player_getVisBuffer(int16_t* buffer, int max_samples) {

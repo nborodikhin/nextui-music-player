@@ -19,11 +19,13 @@
 // Lyrics state (main thread only - written by thread when done)
 static LyricLine lyrics_lines[LYRICS_MAX_LINES];
 static int lyrics_line_count = 0;
+static bool lyrics_synced = false;  // false: plain text with estimated times
 static bool lyrics_available = false;
 
 // Dedup tracking
 static char last_artist[256] = "";
 static char last_title[256] = "";
+static char last_path[512] = "";
 
 // Background thread state - uses generation counter instead of pthread_join
 // to avoid blocking the main thread on network timeouts
@@ -133,11 +135,10 @@ static int parse_lrc_text(const char* lrc_text, LyricLine* lines, int max_lines)
     return count;
 }
 
-// Load cached LRC file from disk into the provided line array.
-// Returns line count, or 0 on failure.
-static int load_cached_lyrics(const char* cache_path, LyricLine* lines, int max_lines) {
-    FILE* f = fopen(cache_path, "r");
-    if (!f) return 0;
+// Read a whole text file. Returns a string that the caller frees, or NULL.
+static char* read_text_file(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return NULL;
 
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
@@ -145,24 +146,124 @@ static int load_cached_lyrics(const char* cache_path, LyricLine* lines, int max_
 
     if (size <= 0 || size > 256 * 1024) {
         fclose(f);
-        return 0;
+        return NULL;
     }
 
     char* data = (char*)malloc(size + 1);
     if (!data) {
         fclose(f);
-        return 0;
+        return NULL;
     }
 
     if (fread(data, 1, size, f) != (size_t)size) {
         free(data);
         fclose(f);
-        return 0;
+        return NULL;
     }
     fclose(f);
     data[size] = '\0';
+    return data;
+}
 
-    int count = parse_lrc_text(data, lines, max_lines);
+// Weight of a plain line: its character count, with a floor so a short line
+// ("Oh", "Yeah") still gets some time
+#define PLAIN_MIN_WEIGHT 8
+// The words of a song usually start after an intro and end before an outro
+#define PLAIN_START_PERMILLE 80
+#define PLAIN_END_PERMILLE   920
+// Time per line where the duration is not known
+#define PLAIN_LINE_MS 4000
+
+// Parse plain lyrics text, and give each line an estimated time: the lines share
+// the middle of the track by their length, and a blank line (a break between
+// verses) takes the time of an average line. Lines like "[Chorus]" are skipped.
+static int parse_plain_text(const char* text, int duration_ms, LyricLine* lines, int max_lines) {
+    // The weight of the lines before each line, and the count of the breaks before it
+    int* lines_before = (int*)malloc(sizeof(int) * max_lines);
+    int* breaks_before = (int*)malloc(sizeof(int) * max_lines);
+    if (!lines_before || !breaks_before) {
+        free(lines_before);
+        free(breaks_before);
+        return 0;
+    }
+
+    int count = 0;
+    int total = 0;
+    int breaks = 0;
+    bool pending_break = false;
+    const char* p = text;
+
+    while (*p && count < max_lines) {
+        const char* end = p;
+        while (*end && *end != '\n') end++;
+        const char* next = *end ? end + 1 : end;
+
+        // Trim the line
+        while (p < end && (*p == ' ' || *p == '\t')) p++;
+        const char* e = end;
+        while (e > p && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r')) e--;
+        int len = (int)(e - p);
+
+        if (len == 0) {
+            pending_break = (count > 0);
+        } else if (p[0] == '[' && e[-1] == ']') {
+            // A section label
+        } else {
+            if (pending_break) {
+                breaks++;
+                pending_break = false;
+            }
+            if (len > 255) len = 255;
+            memcpy(lines[count].text, p, len);
+            lines[count].text[len] = '\0';
+
+            // Count characters, not bytes: skip UTF-8 continuation bytes
+            int chars = 0;
+            for (int i = 0; i < len; i++) {
+                if (((unsigned char)p[i] & 0xC0) != 0x80) chars++;
+            }
+            lines_before[count] = total;
+            breaks_before[count] = breaks;
+            total += chars > PLAIN_MIN_WEIGHT ? chars : PLAIN_MIN_WEIGHT;
+            count++;
+        }
+        p = next;
+    }
+
+    if (count > 0) {
+        int break_weight = total / count;
+        int64_t sum = (int64_t)total + (int64_t)breaks * break_weight;
+        int64_t start = (int64_t)duration_ms * PLAIN_START_PERMILLE / 1000;
+        int64_t span = (int64_t)duration_ms * (PLAIN_END_PERMILLE - PLAIN_START_PERMILLE) / 1000;
+        for (int i = 0; i < count; i++) {
+            int64_t before = lines_before[i] + (int64_t)breaks_before[i] * break_weight;
+            lines[i].time_ms = duration_ms > 0 ? (int)(start + span * before / sum) : i * PLAIN_LINE_MS;
+        }
+    }
+
+    free(lines_before);
+    free(breaks_before);
+    return count;
+}
+
+// Parse lyrics text of either kind: LRC if it has timestamps, else plain text.
+// Sets *synced to tell which one it was.
+static int parse_lyrics_text(const char* text, int duration_ms, LyricLine* lines, int max_lines,
+                             bool* synced) {
+    int count = parse_lrc_text(text, lines, max_lines);
+    *synced = (count > 0);
+    if (count == 0) count = parse_plain_text(text, duration_ms, lines, max_lines);
+    return count;
+}
+
+// Read a lyrics file (a cache entry, or an .lrc file next to the track) into the line array.
+// Returns line count, or 0 on failure.
+static int load_lyrics_file(const char* path, int duration_ms, LyricLine* lines, int max_lines,
+                            bool* synced) {
+    char* data = read_text_file(path);
+    if (!data) return 0;
+
+    int count = parse_lyrics_text(data, duration_ms, lines, max_lines, synced);
     free(data);
     return count;
 }
@@ -179,9 +280,35 @@ static void save_lyrics_to_cache(const char* cache_path, const char* lrc_text) {
 typedef struct {
     char artist[256];
     char title[256];
+    char track_path[512];
+    char* embedded;  // lyrics from the tags of the file, owned (NULL if none)
     int duration_sec;
     int generation;  // to detect if this fetch is still current
 } FetchArgs;
+
+static void free_fetch_args(FetchArgs* args) {
+    free(args->embedded);
+    free(args);
+}
+
+// Put the parsed lines into the shared state, if this fetch is still current
+static void publish_lines(const LyricLine* lines, int count, bool synced, int generation) {
+    if (count <= 0 || fetch_generation != generation) return;
+    memcpy(lyrics_lines, lines, sizeof(LyricLine) * count);
+    lyrics_line_count = count;
+    lyrics_synced = synced;
+    lyrics_available = true;
+}
+
+// The path of the .lrc file next to a track: the extension of the track changed to .lrc
+static void get_sidecar_filepath(const char* track_path, char* path, int path_size) {
+    snprintf(path, path_size, "%s", track_path);
+    char* dot = strrchr(path, '.');
+    char* slash = strrchr(path, '/');
+    if (dot && (!slash || dot > slash)) *dot = '\0';
+    size_t len = strlen(path);
+    snprintf(path + len, path_size - len, ".lrc");
+}
 
 // Background fetch thread function (detached — must not touch shared state if stale)
 static void* fetch_thread_func(void* arg) {
@@ -192,7 +319,28 @@ static void* fetch_thread_func(void* arg) {
     // Temporary buffer for parsing (thread-local, not shared)
     LyricLine* tmp_lines = (LyricLine*)malloc(sizeof(LyricLine) * LYRICS_MAX_LINES);
     if (!tmp_lines) {
-        free(args);
+        free_fetch_args(args);
+        return NULL;
+    }
+
+    int duration_ms = args->duration_sec * 1000;
+    bool synced = false;
+    int count = 0;
+
+    // The lyrics of the file come first: an .lrc file next to the track, then the tags
+    if (args->track_path[0]) {
+        char sidecar_path[768];
+        get_sidecar_filepath(args->track_path, sidecar_path, sizeof(sidecar_path));
+        count = load_lyrics_file(sidecar_path, duration_ms, tmp_lines, LYRICS_MAX_LINES, &synced);
+    }
+    if (count == 0 && args->embedded) {
+        count = parse_lyrics_text(args->embedded, duration_ms, tmp_lines, LYRICS_MAX_LINES, &synced);
+    }
+
+    // The cache and LRCLIB find lyrics by artist and title, thus a track with neither stops here
+    if (count == 0 && !args->artist[0] && !args->title[0]) {
+        free(tmp_lines);
+        free_fetch_args(args);
         return NULL;
     }
 
@@ -200,16 +348,14 @@ static void* fetch_thread_func(void* arg) {
 
     char cache_path[768];
     get_cache_filepath(args->artist, args->title, cache_path, sizeof(cache_path));
-    // Try disk cache first
-    int count = load_cached_lyrics(cache_path, tmp_lines, LYRICS_MAX_LINES);
+    // Then the disk cache of earlier downloads
+    if (count == 0) {
+        count = load_lyrics_file(cache_path, duration_ms, tmp_lines, LYRICS_MAX_LINES, &synced);
+    }
     if (count > 0) {
-        if (fetch_generation == my_gen) {
-            memcpy(lyrics_lines, tmp_lines, sizeof(LyricLine) * count);
-            lyrics_line_count = count;
-            lyrics_available = true;
-        }
+        publish_lines(tmp_lines, count, synced, my_gen);
         free(tmp_lines);
-        free(args);
+        free_fetch_args(args);
         return NULL;
     }
 
@@ -228,7 +374,7 @@ static void* fetch_thread_func(void* arg) {
     uint8_t* response_buf = (uint8_t*)malloc(64 * 1024);
     if (!response_buf) {
         free(tmp_lines);
-        free(args);
+        free_fetch_args(args);
         return NULL;
     }
 
@@ -259,7 +405,7 @@ static void* fetch_thread_func(void* arg) {
         free(response_buf);
         if (root) json_value_free(root);
         free(tmp_lines);
-        free(args);
+        free_fetch_args(args);
         return NULL;
     }
 
@@ -300,7 +446,7 @@ static void* fetch_thread_func(void* arg) {
     if (!synced_lyrics) {
         if (root) json_value_free(root);
         free(tmp_lines);
-        free(args);
+        free_fetch_args(args);
         return NULL;
     }
 
@@ -311,15 +457,10 @@ static void* fetch_thread_func(void* arg) {
     count = parse_lrc_text(synced_lyrics, tmp_lines, LYRICS_MAX_LINES);
     json_value_free(root);
 
-    // Only write to shared state if this fetch is still current
-    if (count > 0 && fetch_generation == my_gen) {
-        memcpy(lyrics_lines, tmp_lines, sizeof(LyricLine) * count);
-        lyrics_line_count = count;
-        lyrics_available = true;
-    }
+    publish_lines(tmp_lines, count, true, my_gen);
 
     free(tmp_lines);
-    free(args);
+    free_fetch_args(args);
     return NULL;
 }
 
@@ -328,6 +469,7 @@ void Lyrics_init(void) {
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
+    last_path[0] = '\0';
     fetch_generation = 0;
 }
 
@@ -337,6 +479,7 @@ void Lyrics_cleanup(void) {
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
+    last_path[0] = '\0';
 }
 
 void Lyrics_clear(void) {
@@ -345,16 +488,25 @@ void Lyrics_clear(void) {
     lyrics_available = false;
     last_artist[0] = '\0';
     last_title[0] = '\0';
+    last_path[0] = '\0';
 }
 
-void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
-    if (!artist || !title || (artist[0] == '\0' && title[0] == '\0')) {
+void Lyrics_fetch(const char* artist, const char* title, int duration_sec,
+                  const char* track_path, const char* embedded) {
+    if (!artist) artist = "";
+    if (!title) title = "";
+    if (!track_path) track_path = "";
+
+    // A track with no tags can still have lyrics in its file, or next to it
+    bool has_tags = artist[0] || title[0];
+    if (!has_tags && !track_path[0] && !embedded) {
         return;
     }
 
     // Dedup check
     if (strcmp(last_artist, artist) == 0 &&
-        strcmp(last_title, title) == 0) {
+        strcmp(last_title, title) == 0 &&
+        strcmp(last_path, track_path) == 0) {
         return;
     }
 
@@ -366,6 +518,7 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
     last_artist[sizeof(last_artist) - 1] = '\0';
     strncpy(last_title, title, sizeof(last_title) - 1);
     last_title[sizeof(last_title) - 1] = '\0';
+    snprintf(last_path, sizeof(last_path), "%s", track_path);
     lyrics_line_count = 0;
     lyrics_available = false;
 
@@ -376,6 +529,8 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
     args->artist[sizeof(args->artist) - 1] = '\0';
     strncpy(args->title, title, sizeof(args->title) - 1);
     args->title[sizeof(args->title) - 1] = '\0';
+    snprintf(args->track_path, sizeof(args->track_path), "%s", track_path);
+    args->embedded = embedded ? strdup(embedded) : NULL;
     args->duration_sec = duration_sec;
     args->generation = fetch_generation;
 
@@ -384,7 +539,7 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec) {
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&thread, &attr, fetch_thread_func, args) != 0) {
-        free(args);
+        free_fetch_args(args);
     }
     pthread_attr_destroy(&attr);
 }
@@ -405,4 +560,8 @@ const char* Lyrics_lineText(int index) {
 
 bool Lyrics_isAvailable(void) {
     return lyrics_available;
+}
+
+bool Lyrics_isSynced(void) {
+    return lyrics_available && lyrics_synced;
 }

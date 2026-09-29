@@ -79,6 +79,9 @@ typedef struct {
     // Album art
     SDL_Surface* album_art;     // Cached album art surface (NULL if none)
 
+    // Lyrics from the tags of the file, synced (LRC) or plain text (NULL if none)
+    char* lyrics;
+
     // Playback
     int position_ms;        // Current position in milliseconds
     float volume;           // 0.0 to 1.0
@@ -171,6 +174,10 @@ const WaveformData* Player_getWaveform(void);
 
 // Get album art surface (NULL if no album art available)
 SDL_Surface* Player_getAlbumArt(void);
+
+// Get the lyrics text from the tags of the current file (NULL if it has none).
+// The text is LRC or plain; it stays valid until the next load or stop.
+const char* Player_getEmbeddedLyrics(void);
 
 // Set playback speed (0.5 to 2.0, default 1.0)
 void Player_setPlaybackSpeed(float speed);

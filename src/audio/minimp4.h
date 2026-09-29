@@ -309,6 +309,7 @@ typedef struct MP4D_demux_tag
         unsigned char *year;
         unsigned char *comment;
         unsigned char *genre;
+        unsigned char *lyrics;
         // Cover art (JPEG or PNG data)
         unsigned char *cover;
         unsigned int cover_size;
@@ -2973,6 +2974,7 @@ broken_android_meta_hack:
         case BOX_cday: ptag = &mp4->tag.year;    break;
         case BOX_ccmt: ptag = &mp4->tag.comment; break;
         case BOX_cgen: ptag = &mp4->tag.genre;   break;
+        case BOX_clyr: ptag = &mp4->tag.lyrics;  break;
 
         case BOX_covr:
             // Cover art: skip 'data' atom header (16 bytes) then read image data
@@ -3342,6 +3344,7 @@ void MP4D_close(MP4D_demux_t *mp4)
     FREE(mp4->tag.year);
     FREE(mp4->tag.comment);
     FREE(mp4->tag.genre);
+    FREE(mp4->tag.lyrics);
     FREE(mp4->tag.cover);
 #endif
 }

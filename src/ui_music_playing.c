@@ -75,7 +75,7 @@ void MusicPlaying_drawLyricRow(SDL_Surface* screen, TTF_Font* font, const char* 
 
 // Draws the lyric window in the room between `top` and `bottom`, and records
 // what it drew. The current lyric takes the primary text role, and each other
-// lyric the secondary one.
+// lyric the secondary one. Plain lyrics all take the secondary role.
 static void draw_lyric_window(SDL_Surface* screen, int x, int top, int bottom, int max_w) {
     TTF_Font* font = Fonts_getSmall();
     int row_h = TTF_FontHeight(font);
@@ -86,8 +86,10 @@ static void draw_lyric_window(SDL_Surface* screen, int x, int top, int bottom, i
     int current = Lyrics_currentIndex(Player_getPosition());
     LyricWindow window = LyricWindow_layout(count, current, rows);
 
+    // Plain lyrics have estimated times only, thus no row is marked as the current one
+    bool synced = Lyrics_isSynced();
     for (int row = 0; row < window.count; row++) {
-        ThemeRole role = (row == window.current_row) ? THEME_ROLE_PRIMARY : THEME_ROLE_SECONDARY;
+        ThemeRole role = (synced && row == window.current_row) ? THEME_ROLE_PRIMARY : THEME_ROLE_SECONDARY;
         MusicPlaying_drawLyricRow(screen, font, Lyrics_lineText(window.first + row),
                                   Theme_getColor(role, false), x, top + row * (row_h + gap), max_w);
     }
