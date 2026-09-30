@@ -54,6 +54,7 @@ struct input_event_raw {
 #define MINIMP4_IMPLEMENTATION
 #include "audio/minimp4.h"
 #include "mp3_seek.h"
+#include "audio/sonic.h"
 #include <fdk-aac/aacdecoder_lib.h>
 #include <opusfile.h>
 
@@ -212,7 +213,9 @@ static inline int16_t speaker_hpf_process(int16_t sample, int channel) {
 
 // Global player context
 static PlayerContext player = {0};
-static int64_t audio_position_samples = 0;  // Track position in samples for precision
+// The time that played, in frames of the output rate at speed 1x. A frame that
+// plays at speed 2x counts as two, thus a change of speed does not scale the past.
+static double audio_position_samples = 0;
 static WaveformData waveform = {0};  // Waveform overview for progress display
 static int current_sample_rate = SAMPLE_RATE_DEFAULT;  // Track current SDL audio device rate
 static bool bluetooth_audio_active = false;  // Track if Bluetooth audio is active
@@ -1176,19 +1179,15 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
                              int src_rate, int dst_rate,
                              int16_t* output, size_t max_output_frames,
                              SRC_STATE* src_state, bool is_last) {
-    // Apply playback speed to the ratio
-    float speed = player.playback_speed;
-    if (speed < 0.5f) speed = 1.0f;  // Safety fallback
-
-    if (src_rate == dst_rate && speed == 1.0f) {
+    // The speed is not here: the time stretch after this changes it, and keeps the pitch
+    if (src_rate == dst_rate) {
         // No resampling needed, just copy
         size_t to_copy = (input_frames < max_output_frames) ? input_frames : max_output_frames;
         memcpy(output, input, to_copy * sizeof(int16_t) * AUDIO_CHANNELS);
         return to_copy;
     }
 
-    // Dividing by speed: >1.0 speed means lower ratio = fewer output samples = faster playback
-    double ratio = ((double)dst_rate / (double)src_rate) / (double)speed;
+    double ratio = (double)dst_rate / (double)src_rate;
 
     // Calculate total input frames (leftover from previous call + new input)
     size_t leftover_count = player.resample_leftover_count;
@@ -1284,6 +1283,55 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
 // Set by reopen_audio_device(), cleared by the stream thread after it resets the resampler
 static volatile bool stream_resampler_reset = false;
 
+// ============ TIME STRETCH ============
+
+// The playback speed, with the pitch kept (Sonic). The stream thread owns the
+// stream: load_streaming() creates it before the thread starts, and
+// Player_stop() frees it after the thread ends.
+static sonicStream time_stretch = NULL;
+static bool time_stretch_active = false;  // the stream holds audio of a speed other than 1x
+
+#define TIME_STRETCH_READ_FRAMES 4096
+
+// Move the audio that the time stretch has ready into the stream buffer
+static void time_stretch_drain(int16_t* scratch) {
+    int frames;
+    while ((frames = sonicReadShortFromStream(time_stretch, scratch, TIME_STRETCH_READ_FRAMES)) > 0) {
+        circular_buffer_write(&player.stream_buffer, scratch, (size_t)frames);
+    }
+}
+
+// Pass a chunk at the output rate through the time stretch, into the stream buffer
+static void time_stretch_write(int16_t* pcm, size_t frames, float speed, int16_t* scratch) {
+    if (!time_stretch) {
+        // No stream (out of memory): the audio plays at 1x
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+    if (speed == 1.0f) {
+        // The audio of the old speed goes out first, then the time stretch is idle
+        if (time_stretch_active) {
+            sonicFlushStream(time_stretch);
+            time_stretch_drain(scratch);
+            time_stretch_active = false;
+        }
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+
+    sonicSetSpeed(time_stretch, speed);
+    sonicWriteShortToStream(time_stretch, pcm, (int)frames);
+    time_stretch_active = true;
+    time_stretch_drain(scratch);
+}
+
+// Drop the audio in the time stretch, after a seek or a new output rate
+static void time_stretch_reset(int sample_rate) {
+    if (time_stretch) sonicDestroyStream(time_stretch);
+    time_stretch = sonicCreateStream(sample_rate, AUDIO_CHANNELS);
+    time_stretch_active = false;
+}
+
 static void* stream_thread_func(void* arg) {
     (void)arg;
 
@@ -1292,11 +1340,13 @@ static void* stream_thread_func(void* arg) {
     // Resample output buffer (allow for 2x expansion)
     size_t resample_buffer_size = DECODE_CHUNK_FRAMES * 3;
     int16_t* resample_buffer = malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* stretch_buffer = malloc(TIME_STRETCH_READ_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
 
-    if (!decode_buffer || !resample_buffer) {
+    if (!decode_buffer || !resample_buffer || !stretch_buffer) {
         LOG_error("Stream thread: Failed to allocate buffers\n");
         free(decode_buffer);
         free(resample_buffer);
+        free(stretch_buffer);
         return NULL;
     }
 
@@ -1310,6 +1360,7 @@ static void* stream_thread_func(void* arg) {
             }
             // Clear resampler leftover buffer to avoid playing stale samples
             player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
             player.stream_eof = false;  // Reset EOF flag on seek
             player.stream_seeking = false;
         }
@@ -1321,6 +1372,7 @@ static void* stream_thread_func(void* arg) {
                 src_reset((SRC_STATE*)player.resampler);
             }
             player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
             stream_resampler_reset = false;
         }
 
@@ -1331,7 +1383,12 @@ static void* stream_thread_func(void* arg) {
             size_t decoded = stream_decoder_read(&player.stream_decoder,
                                                   decode_buffer, DECODE_CHUNK_FRAMES);
             if (decoded == 0) {
-                // Decoder has reached end of file
+                // Decoder has reached end of file. The time stretch gives out what it holds.
+                if (!player.stream_eof && time_stretch_active) {
+                    sonicFlushStream(time_stretch);
+                    time_stretch_drain(stretch_buffer);
+                    time_stretch_active = false;
+                }
                 player.stream_eof = true;
             } else {
                 // Resample chunk to target rate if needed
@@ -1339,19 +1396,20 @@ static void* stream_thread_func(void* arg) {
                 int dst_rate = get_target_sample_rate();
                 bool is_last = (player.stream_decoder.current_frame >= player.stream_decoder.total_frames);
 
-                size_t output_frames;
-                if (src_rate == dst_rate && player.playback_speed == 1.0f) {
-                    // No resampling needed
-                    output_frames = decoded;
-                    circular_buffer_write(&player.stream_buffer, decode_buffer, output_frames);
-                } else {
-                    // Resample
-                    output_frames = resample_chunk(decode_buffer, decoded,
-                                                   src_rate, dst_rate,
-                                                   resample_buffer, resample_buffer_size,
-                                                   (SRC_STATE*)player.resampler, is_last);
-                    circular_buffer_write(&player.stream_buffer, resample_buffer, output_frames);
+                int16_t* pcm = decode_buffer;
+                size_t frames = decoded;
+                if (src_rate != dst_rate) {
+                    frames = resample_chunk(decode_buffer, decoded,
+                                            src_rate, dst_rate,
+                                            resample_buffer, resample_buffer_size,
+                                            (SRC_STATE*)player.resampler, is_last);
+                    pcm = resample_buffer;
                 }
+
+                // Then the speed, with the pitch kept
+                float speed = player.playback_speed;
+                if (speed < 0.5f) speed = 1.0f;  // Safety fallback
+                time_stretch_write(pcm, frames, speed, stretch_buffer);
             }
         } else {
             // Buffer full enough, sleep briefly
@@ -1361,6 +1419,7 @@ static void* stream_thread_func(void* arg) {
 
     free(decode_buffer);
     free(resample_buffer);
+    free(stretch_buffer);
     return NULL;
 }
 
@@ -1483,9 +1542,9 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
         }
 
         // Update position (account for playback speed)
-        audio_position_samples += samples_read;
         float spd = ctx->playback_speed > 0.0f ? ctx->playback_speed : 1.0f;
-        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0 * spd) / current_sample_rate);
+        audio_position_samples += samples_read * (double)spd;
+        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0) / current_sample_rate);
 
         // Check if track ended (decoder reached EOF or frame count)
         if ((ctx->stream_decoder.current_frame >= ctx->stream_decoder.total_frames || ctx->stream_eof) &&
@@ -2487,6 +2546,7 @@ static int load_streaming(const char* filepath) {
             return -1;
         }
     }
+    time_stretch_reset(dst_rate);
 
     // Set track info
     player.track_info.sample_rate = dst_rate;  // Output rate
@@ -2620,6 +2680,11 @@ void Player_stop(void) {
             src_delete((SRC_STATE*)player.resampler);
             player.resampler = NULL;
         }
+        if (time_stretch) {
+            sonicDestroyStream(time_stretch);
+            time_stretch = NULL;
+        }
+        time_stretch_active = false;
         // Free resampler leftover buffer
         if (player.resample_leftover) {
             free(player.resample_leftover);

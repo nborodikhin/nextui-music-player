@@ -190,7 +190,7 @@ LOCAL_SRC = \
     ui_theme_utils.c keyboard_map.c utf8.c \
     spectrum.c \
     spectrum_ceiling.c \
-    audio/kiss_fft.c audio/kiss_fftr.c \
+    audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c
 
