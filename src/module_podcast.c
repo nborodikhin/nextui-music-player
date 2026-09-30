@@ -96,8 +96,9 @@ static void show_seek_toast(int feed_index, int episode_index) {
     PodcastEpisode* ep = Podcast_getEpisode(feed_index, episode_index);
     char msg[64];
     if (ep && ep->progress_sec > 0) {
-        snprintf(msg, sizeof(msg), "Resuming at %d:%02d...",
-                 ep->progress_sec / 60, ep->progress_sec % 60);
+        char position[16];
+        Podcast_formatDuration(position, ep->progress_sec);
+        snprintf(msg, sizeof(msg), "Resuming at %s...", position);
     } else {
         snprintf(msg, sizeof(msg), "Resuming...");
     }
@@ -107,6 +108,10 @@ static void show_seek_toast(int feed_index, int episode_index) {
 // Periodic progress saving
 static uint32_t last_progress_save_time = 0;
 #define PROGRESS_SAVE_INTERVAL_MS 30000  // 30 seconds
+
+// The seek of a short press of LEFT (back) and RIGHT (forward)
+#define PODCAST_SEEK_BACK_MS    10000
+#define PODCAST_SEEK_FORWARD_MS 30000
 
 // Confirmation dialog state
 static bool show_confirm = false;
@@ -883,6 +888,10 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 continue;
             }
             else {
+                if (ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
+                    dirty = 1;
+                }
+
                 if (PAD_justPressed(BTN_A)) {
                     if (Player_getState() == PLAYER_STATE_PAUSED) Player_play();
                     else Player_pause();
@@ -914,19 +923,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                     clear_and_show_screen_off_hint(screen);
                     ModuleCommon_frameEnd(screen);
                     continue;
-                }
-                else if (PAD_justRepeated(BTN_LEFT)) {
-                    int pos_ms = Player_getPosition();
-                    Player_seek(pos_ms - 10000 < 0 ? 0 : pos_ms - 10000);
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
-                }
-                else if (PAD_justRepeated(BTN_RIGHT)) {
-                    int pos_ms = Player_getPosition();
-                    int dur_ms = Player_getDuration();
-                    Player_seek(pos_ms + 30000 > dur_ms ? dur_ms : pos_ms + 30000);
-                    ModuleCommon_recordInputTime();
-                    dirty = 1;
                 }
                 else if (PAD_justPressed(BTN_UP)) {
                     float speed = Player_getPlaybackSpeed();

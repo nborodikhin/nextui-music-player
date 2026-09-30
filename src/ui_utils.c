@@ -16,9 +16,14 @@
 // Format duration as MM:SS
 void format_time(char* buf, int ms) {
     int total_secs = ms / 1000;
-    int mins = total_secs / 60;
+    int hours = total_secs / 3600;
+    int mins = (total_secs % 3600) / 60;
     int secs = total_secs % 60;
-    sprintf(buf, "%02d:%02d", mins, secs);
+    if (hours > 0) {
+        sprintf(buf, "%d:%02d:%02d", hours, mins, secs);
+    } else {
+        sprintf(buf, "%02d:%02d", mins, secs);
+    }
 }
 
 // Get format name string

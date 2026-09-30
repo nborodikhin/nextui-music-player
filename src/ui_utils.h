@@ -9,7 +9,7 @@
 #include "ui_theme.h"
 #include "screen_title.h"
 
-// Format duration as MM:SS
+// Format a time as MM:SS, or as H:MM:SS from one hour
 void format_time(char* buf, int ms);
 
 // Get format name string
