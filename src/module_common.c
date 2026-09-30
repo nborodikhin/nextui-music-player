@@ -471,9 +471,5 @@ void ModuleCommon_handleHardwareVolume(void) {
 
     // Don't increment volume here - keymon already handles SetVolume().
     // We only need to sync software volume for BT/USB DAC output.
-    if (Player_isBluetoothActive() || Player_isUSBDACActive()) {
-        int vol = GetVolume();
-        float v = vol / 20.0f;
-        Player_setVolume(v * v * v);
-    }
+    Player_syncOutputVolume();
 }

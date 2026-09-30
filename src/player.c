@@ -1902,6 +1902,9 @@ void Player_handleAudioSinkChange(void) {
     }
 
     reopen_audio_device();
+
+    // The new output takes the volume in another place (see Player_syncOutputVolume())
+    Player_syncOutputVolume();
 }
 
 void Player_quit(void) {
@@ -2808,6 +2811,18 @@ void Player_seek(int position_ms) {
 
 bool Player_resume(void) {
     return player.stream_seeking;
+}
+
+void Player_syncOutputVolume(void) {
+    if (Player_isBluetoothActive() || Player_isUSBDACActive()) {
+        // The device mixer is at 100%, thus the player applies the system volume.
+        // Cubic curve for perceptual volume (human hearing is logarithmic).
+        float v = GetVolume() / 20.0f;
+        Player_setVolume(v * v * v);
+    } else {
+        // The speaker takes the system volume in hardware
+        Player_setVolume(1.0f);
+    }
 }
 
 void Player_setVolume(float volume) {
