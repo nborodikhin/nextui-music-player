@@ -29,6 +29,7 @@ struct input_event_raw {
     uint16_t code;
     int32_t value;
 };
+#include <errno.h>
 #include <samplerate.h>
 #ifdef HAVE_ALSA_LIB
 #include <alsa/asoundlib.h>
@@ -2934,6 +2935,13 @@ bool Player_isUSBDACActive(void) {
 // USB HID input monitoring
 static int usb_hid_fd = -1;
 
+// The remote of a headset can appear after its audio: BlueZ creates the AVRCP input
+// device a moment after the audio stream. Thus while Bluetooth or a USB DAC is the
+// output and no remote is open, Player_pollUSBHID() looks again at this interval.
+#define HID_RETRY_MS 1000
+static uint32_t hid_retry_at = 0;
+static bool hid_missing_logged = false;
+
 // Find USB audio HID device by scanning /proc/bus/input/devices
 static int find_audio_hid_device(char* event_path, size_t path_size, bool find_bluetooth) {
     FILE* f = fopen("/proc/bus/input/devices", "r");
@@ -3024,21 +3032,34 @@ void Player_initUSBHID(void) {
         if (find_audio_hid_device(event_path, sizeof(event_path), true) == 0) {
             usb_hid_fd = open(event_path, O_RDONLY | O_NONBLOCK);
             if (usb_hid_fd >= 0) {
+                LOG_info("HID: Bluetooth remote at %s\n", event_path);
+                hid_missing_logged = false;
                 return;
             }
+        }
+        if (!hid_missing_logged) {
+            LOG_info("HID: no Bluetooth remote yet, looking again each %d ms\n", HID_RETRY_MS);
+            hid_missing_logged = true;
         }
     }
 }
 
 USBHIDEvent Player_pollUSBHID(void) {
     if (usb_hid_fd < 0) {
-        return USB_HID_EVENT_NONE;
+        uint32_t now = SDL_GetTicks();
+        if ((bluetooth_audio_active || usbdac_audio_active) && (int32_t)(now - hid_retry_at) >= 0) {
+            hid_retry_at = now + HID_RETRY_MS;
+            Player_initUSBHID();
+        }
+        if (usb_hid_fd < 0) return USB_HID_EVENT_NONE;
     }
 
     struct input_event_raw ev;
-    while (read(usb_hid_fd, &ev, sizeof(ev)) == sizeof(ev)) {
+    ssize_t got;
+    while ((got = read(usb_hid_fd, &ev, sizeof(ev))) == sizeof(ev)) {
         // Only handle key press events (value=1), ignore release (0) and repeat (2)
         if (ev.type == EV_KEY && ev.value == 1) {
+            LOG_debug("HID: key %d\n", ev.code);
             switch (ev.code) {
                 case KEY_VOLUMEUP:
                     return USB_HID_EVENT_VOLUME_UP;
@@ -3054,6 +3075,12 @@ USBHIDEvent Player_pollUSBHID(void) {
                     return USB_HID_EVENT_PREV_TRACK;
             }
         }
+    }
+
+    // The remote went away (a disconnect): close it, and the retry finds the next one
+    if (got < 0 && errno == ENODEV) {
+        LOG_info("HID: remote went away\n");
+        Player_quitUSBHID();
     }
 
     return USB_HID_EVENT_NONE;
