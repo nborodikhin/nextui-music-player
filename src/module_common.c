@@ -411,6 +411,9 @@ void ModuleCommon_markLayerDrawn(void) {
 }
 
 void ModuleCommon_frameEnd(SDL_Surface* screen) {
+    // A new audio sink (Bluetooth, USB DAC) moves the audio on the main thread
+    Player_handleAudioSinkChange();
+
     switch (FrameState_take(&frame)) {
         case FRAME_CHANGED_SURFACE: GFX_flip(screen);  break;
         case FRAME_CHANGED_LAYERS:  PLAT_GPU_Flip();   break;

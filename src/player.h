@@ -192,6 +192,10 @@ AudioFormat Player_detectFormat(const char* filepath);
 // Update player (call this in main loop)
 void Player_update(void);
 
+// Apply a change of the audio sink (Bluetooth, USB DAC, speaker) that the watcher
+// saw. Call on the main thread, once each frame.
+void Player_handleAudioSinkChange(void);
+
 // Resume/pause audio device (used by radio module)
 void Player_resumeAudio(void);
 void Player_pauseAudio(void);

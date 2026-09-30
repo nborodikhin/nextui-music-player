@@ -30,6 +30,9 @@ struct input_event_raw {
     int32_t value;
 };
 #include <samplerate.h>
+#ifdef HAVE_ALSA_LIB
+#include <alsa/asoundlib.h>
+#endif
 #include <SDL2/SDL_image.h>
 
 #include "defines.h"
@@ -256,6 +259,15 @@ static int get_target_sample_rate(void) {
 
 // Forward declaration for audio device change callback
 static void audio_device_change_callback(int device_type, int event);
+
+// The watcher thread records a change of the audio sink here; the main thread
+// handles it in Player_handleAudioSinkChange(), because SDL audio must not be
+// restarted from another thread while the main thread uses it
+static volatile bool audio_sink_changed = false;
+static volatile uint32_t audio_sink_changed_at = 0;
+// The sink changes in steps (the file is written, then written again), thus the
+// main thread waits this long after the last event
+#define AUDIO_SINK_SETTLE_MS 300
 
 // Forward declaration for FLAC metadata callback
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
@@ -1770,8 +1782,27 @@ static void reopen_audio_device(void) {
         player.audio_device = 0;
     }
 
+    // alsa-lib reads ~/.asoundrc once and keeps it, thus the "default" device stays
+    // the old sink. Stop SDL audio, which also stops its ALSA hotplug thread, then let
+    // alsa-lib read its configuration again. The player is the only user of SDL audio,
+    // thus one quit stops it.
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (SDL_WasInit(SDL_INIT_AUDIO)) {
+        LOG_error("Audio: SDL audio still runs after the quit; the ALSA configuration stays\n");
+    } else {
+#ifdef HAVE_ALSA_LIB
+        snd_config_update_free_global();
+#endif
+    }
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+        LOG_error("Audio: failed to restart SDL audio: %s\n", SDL_GetError());
+        return;
+    }
+
     // Get target sample rate for the new audio sink
     int target_rate = get_target_sample_rate();
+    LOG_info("Audio: reopen for the new sink: bluetooth %d, USB DAC %d, %d Hz\n",
+             bluetooth_audio_active, usbdac_audio_active, target_rate);
 
     // Reopen with target sample rate
     SDL_AudioSpec want, have;
@@ -1805,6 +1836,14 @@ static void reopen_audio_device(void) {
 static void audio_device_change_callback(int device_type, int event) {
     (void)device_type;
     (void)event;
+    audio_sink_changed_at = SDL_GetTicks();
+    audio_sink_changed = true;
+}
+
+void Player_handleAudioSinkChange(void) {
+    if (!audio_sink_changed || !player.audio_initialized) return;
+    if (SDL_GetTicks() - audio_sink_changed_at < AUDIO_SINK_SETTLE_MS) return;
+    audio_sink_changed = false;
 
     // Re-check if Bluetooth is now active/inactive
     bool was_bluetooth = bluetooth_audio_active;
