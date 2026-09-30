@@ -124,7 +124,7 @@ static int m4a_read_callback(int64_t offset, void* buffer, size_t size, void* to
 }
 
 // Sample rates for different audio outputs
-#define SAMPLE_RATE_BLUETOOTH 44100  // 44.1kHz for Bluetooth A2DP compatibility
+#define SAMPLE_RATE_BLUETOOTH 48000  // 48kHz for Bluetooth where the NextUI setting has no valid rate
 #define SAMPLE_RATE_SPEAKER   48000  // 48kHz for speaker output
 #define SAMPLE_RATE_USB_DAC   48000  // 48kHz for USB DAC output
 #define SAMPLE_RATE_DEFAULT   48000  // Default fallback
@@ -222,15 +222,31 @@ static bool bluetooth_audio_active = false;  // Track if Bluetooth audio is acti
 static bool usbdac_audio_active = false;     // Track if USB DAC is active
 
 // Get target sample rate based on current audio sink
+// The output rate for Bluetooth. This is the value of PLAT_pickSampleRate() of NextUI for
+// a connected device, thus the player and the emulators ask BlueALSA for the same rate.
+// PLAT_pickSampleRate() itself runs `hcitool` to find a connection, which is too slow for
+// the stream thread. A fixed 44.1 kHz stalled SDL: through BlueALSA at 44.1 kHz, the
+// audio callback never ran on a link at 48 kHz.
+// The rate is the limit of the NextUI settings as it is: the Bluetooth stack chooses the
+// profile and the codec, thus any standard rate can be right. A value outside the standard
+// rates (8 to 192 kHz) is not from the settings, and gets 48 kHz.
+#define SAMPLE_RATE_MIN   8000
+#define SAMPLE_RATE_MAX 192000
+static int bluetooth_sample_rate(void) {
+    int limit = CFG_getBluetoothSamplingrateLimit();
+    if (limit < SAMPLE_RATE_MIN || limit > SAMPLE_RATE_MAX) return SAMPLE_RATE_BLUETOOTH;
+    return limit;
+}
+
 static int get_target_sample_rate(void) {
     if (bluetooth_audio_active) {
-        return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz for Bluetooth
+        return bluetooth_sample_rate();
     }
     // Check audio sink from msettings
     int sink = GetAudioSink();
     switch (sink) {
         case AUDIO_SINK_BLUETOOTH:
-            return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz
+            return bluetooth_sample_rate();
         case AUDIO_SINK_USBDAC:
             return SAMPLE_RATE_USB_DAC;    // 48000 Hz
         default:
