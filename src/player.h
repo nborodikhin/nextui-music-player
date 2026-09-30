@@ -196,6 +196,10 @@ void Player_update(void);
 // saw. Call on the main thread, once each frame.
 void Player_handleAudioSinkChange(void);
 
+// A count that grows each time Player_handleAudioSinkChange() handles a change.
+// A screen redraws when it changes, thus the status pill shows the new output.
+unsigned Player_getAudioSinkGeneration(void);
+
 // Resume/pause audio device (used by radio module)
 void Player_resumeAudio(void);
 void Player_pauseAudio(void);

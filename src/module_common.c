@@ -64,6 +64,29 @@ void ModuleCommon_init(void) {
     overlay_release_time = 0;
 }
 
+// The status pill shows Bluetooth, and no event of the platform redraws it when a
+// device connects or goes. Two things do here: a change of the audio sink (at once),
+// and a change of the Bluetooth state that the network poll of the platform caches
+// (each 5 s). The poll also sees a link that outlives its audio stream, as a headset
+// that is switched off does until its supervision timeout.
+static bool audio_sink_status_changed(void) {
+    static unsigned seen_generation = 0;
+    static int seen_bluetooth = -1;
+    bool changed = false;
+
+    unsigned generation = Player_getAudioSinkGeneration();
+    if (generation != seen_generation) {
+        seen_generation = generation;
+        changed = true;
+    }
+    int bluetooth = PLAT_btIsConnected() ? 1 : 0;
+    if (bluetooth != seen_bluetooth) {
+        if (seen_bluetooth != -1) changed = true;
+        seen_bluetooth = bluetooth;
+    }
+    return changed;
+}
+
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
@@ -364,6 +387,7 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
 
     // Call platform PWR_update
     PWR_update(dirty, show_setting, NULL, NULL);
+    if (audio_sink_status_changed()) *dirty = 1;
 
     // After visible period, force hide overlay
     if (overlay_release_time > 0) {

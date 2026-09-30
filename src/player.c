@@ -268,6 +268,8 @@ static volatile uint32_t audio_sink_changed_at = 0;
 // The sink changes in steps (the file is written, then written again), thus the
 // main thread waits this long after the last event
 #define AUDIO_SINK_SETTLE_MS 300
+// Counts the sink changes that the main thread handled, for the redraw of the status pill
+static unsigned audio_sink_generation = 0;
 
 // Forward declaration for FLAC metadata callback
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
@@ -1844,6 +1846,7 @@ void Player_handleAudioSinkChange(void) {
     if (!audio_sink_changed || !player.audio_initialized) return;
     if (SDL_GetTicks() - audio_sink_changed_at < AUDIO_SINK_SETTLE_MS) return;
     audio_sink_changed = false;
+    audio_sink_generation++;
 
     // Re-check if Bluetooth is now active/inactive
     bool was_bluetooth = bluetooth_audio_active;
@@ -2843,6 +2846,10 @@ int Player_getDuration(void) {
 
 const TrackInfo* Player_getTrackInfo(void) {
     return &player.track_info;
+}
+
+unsigned Player_getAudioSinkGeneration(void) {
+    return audio_sink_generation;
 }
 
 const char* Player_getCurrentFile(void) {
