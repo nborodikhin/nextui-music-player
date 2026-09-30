@@ -2128,6 +2128,47 @@ def command_run(args):
     return result
 
 
+def kill_desktop():
+    """Stop every local desktop instance of the app. Gives True when one ran."""
+    result = run_command(
+        ["pkill", "-KILL", "-x", "musicplayer.elf"], capture=True, check=False
+    )
+    return result.returncode == 0
+
+
+def command_kill(args):
+    selectors = []
+    for target in args.targets or ["all"]:
+        if normalize_alias(target) == "all":
+            selectors.append("desktop")
+            selectors.append("all")
+        else:
+            selectors.append(target)
+    kill_all_devices = "all" in selectors
+    selectors = [target for target in selectors if target != "all"]
+
+    only_desktop = not kill_all_devices and all(
+        platform_for_alias(target) == "desktop" for target in selectors
+    )
+    devices = [] if only_desktop else list_devices()
+    platforms, targets = resolve_device_targets(selectors, devices, allow_desktop=True)
+    if kill_all_devices:
+        targets.extend(
+            device
+            for device in devices
+            if device.state == "device" and device.platform in DEVICE_PLATFORMS
+        )
+        targets = list({device.serial: device for device in targets}.values())
+
+    if "desktop" in platforms:
+        state = "Killed" if kill_desktop() else "Not running:"
+        print("{} Music Player on desktop".format(state), flush=True)
+    for device in targets:
+        state = "Killed" if stop_player(device, restart=False) else "Not running:"
+        print("{} Music Player on {}".format(state, device.serial), flush=True)
+    return 0
+
+
 def command_log(args):
     selectors = args.targets or ["device"]
     devices = list_devices()
@@ -2434,6 +2475,23 @@ def create_parser():
         help="package a --strict build against unpinned dependencies",
     )
     dist.set_defaults(handler=command_dist)
+
+    kill = subparsers.add_parser(
+        "kill",
+        help="stop the app",
+        description="stop the app, with no build and no restart",
+        usage="%(prog)s target [-h]",
+    )
+    kill.add_argument(
+        "targets",
+        nargs="*",
+        metavar="target",
+        help=(
+            "one or more of all (default), desktop, tg5040, tg5050, my355, device, "
+            "or an ADB serial; all is desktop and every connected device"
+        ),
+    )
+    kill.set_defaults(handler=command_kill)
 
     log = subparsers.add_parser(
         "log",
