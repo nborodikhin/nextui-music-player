@@ -1281,6 +1281,9 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
 
 // ============ STREAMING DECODE THREAD ============
 
+// Set by reopen_audio_device(), cleared by the stream thread after it resets the resampler
+static volatile bool stream_resampler_reset = false;
+
 static void* stream_thread_func(void* arg) {
     (void)arg;
 
@@ -1309,6 +1312,16 @@ static void* stream_thread_func(void* arg) {
             player.resample_leftover_count = 0;
             player.stream_eof = false;  // Reset EOF flag on seek
             player.stream_seeking = false;
+        }
+
+        // A new output device is a break in the stream, as a seek is: the
+        // resampler starts again, and its leftover samples are for the old rate
+        if (stream_resampler_reset) {
+            if (player.resampler) {
+                src_reset((SRC_STATE*)player.resampler);
+            }
+            player.resample_leftover_count = 0;
+            stream_resampler_reset = false;
         }
 
         // Check if buffer needs more data (< 50% full)
@@ -1671,6 +1684,9 @@ static int reconfigure_audio_device(int new_sample_rate) {
 static void reopen_audio_device(void) {
     // Remember current playback state
     PlayerState prev_state = player.state;
+
+    // The stream thread may be in the resampler now, thus it resets it
+    stream_resampler_reset = true;
 
     // Pause and close existing device
     if (player.audio_device > 0) {
@@ -2457,11 +2473,11 @@ static int load_streaming(const char* filepath) {
         return -1;
     }
 
-    // Initialize resampler for streaming
-    int src_rate = player.stream_decoder.source_sample_rate;
+    // Initialize resampler for streaming. Each track gets one, also where the
+    // rates agree now: a change of the output (Bluetooth) or of the speed makes
+    // the stream thread resample in the middle of the track.
     int dst_rate = get_target_sample_rate();
-
-    if (src_rate != dst_rate) {
+    {
         int error;
         player.resampler = src_new(SRC_SINC_FASTEST, AUDIO_CHANNELS, &error);
         if (!player.resampler) {
