@@ -13,6 +13,12 @@
 #include "lyrics.h"
 #include "lyric_window.h"
 #include "settings.h"
+#include "seek_scan.h"
+
+// The position that the screen shows: the target while LEFT or RIGHT scans
+static int shown_position(void) {
+    return SeekScan_displayPosition(SeekScan_shared(), Player_getPosition());
+}
 
 // The marquee of the title
 static ScrollTextState title_scroll;
@@ -83,7 +89,7 @@ static void draw_lyric_window(SDL_Surface* screen, int x, int top, int bottom, i
     int rows = MusicPlaying_lyricRows(bottom - top, row_h, gap);
 
     int count = Lyrics_lineCount();
-    int current = Lyrics_currentIndex(Player_getPosition());
+    int current = Lyrics_currentIndex(shown_position());
     LyricWindow window = LyricWindow_layout(count, current, rows);
 
     // Plain lyrics have estimated times only, thus no row is marked as the current one
@@ -273,7 +279,7 @@ static void paint_status_layer(void) {
     UiLayer_clear(UI_LAYER_STATUS);
     if (!time_position_set) return;
 
-    int position = Player_getPosition();
+    int position = shown_position();
     int duration = Player_getDuration();
     time_shown_second = position / 1000;
     time_shown_duration = duration;
@@ -332,7 +338,7 @@ bool MusicPlaying_frame(bool surface_renders) {
 
     // The window follows the current lyric, and it fills when the lyrics arrive
     if (Settings_getBool(&SETTING_LYRICS_ENABLED)) {
-        if (Lyrics_currentIndex(Player_getPosition()) != lyrics_shown_current ||
+        if (Lyrics_currentIndex(shown_position()) != lyrics_shown_current ||
             Lyrics_lineCount() != lyrics_shown_count) {
             needs_surface = true;
         }
@@ -354,7 +360,7 @@ bool MusicPlaying_frame(bool surface_renders) {
     // time, after a clear, takes it whatever the position is.
     bool repaint_status = time_position_set &&
                           (time_shown_second < 0 ||
-                           (playing && (Player_getPosition() / 1000 != time_shown_second ||
+                           (playing && (shown_position() / 1000 != time_shown_second ||
                                         Player_getDuration() != time_shown_duration)));
 
     if (layers_stale) {

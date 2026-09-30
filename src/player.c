@@ -53,6 +53,7 @@ struct input_event_raw {
 // For M4A/AAC we use minimp4 for demuxing and FDK-AAC for decoding
 #define MINIMP4_IMPLEMENTATION
 #include "audio/minimp4.h"
+#include "mp3_seek.h"
 #include <fdk-aac/aacdecoder_lib.h>
 #include <opusfile.h>
 
@@ -353,6 +354,63 @@ static size_t circular_buffer_read(CircularBuffer* cb, int16_t* data, size_t fra
 
 // ============ STREAMING DECODER INTERFACE ============
 
+// The seek table of an MP3 file (Info, Xing or VBRI header), and the one point
+// that the next seek binds to the decoder
+typedef struct {
+    Mp3SeekInfo info;
+    FILE* file;
+    int64_t file_size;
+    drmp3_seek_point point;
+} Mp3SeekState;
+
+static int64_t mp3_seek_read(void* ctx, int64_t offset, uint8_t* buf, int64_t len) {
+    FILE* f = (FILE*)ctx;
+    if (fseek(f, (long)offset, SEEK_SET) != 0) return 0;
+    return (int64_t)fread(buf, 1, (size_t)len, f);
+}
+
+// Read the seek table of an MP3 file. Returns NULL where the file has none.
+static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3) {
+    Mp3SeekState* state = calloc(1, sizeof(Mp3SeekState));
+    if (!state) return NULL;
+    state->file = fopen(filepath, "rb");
+    if (state->file) {
+        fseek(state->file, 0, SEEK_END);
+        state->file_size = ftell(state->file);
+        if (Mp3Seek_init(&state->info, mp3_seek_read, state->file, state->file_size,
+                         (int64_t)mp3->streamStartOffset)) {
+            return state;
+        }
+        fclose(state->file);
+    }
+    free(state);
+    return NULL;
+}
+
+static void mp3_seek_close(Mp3SeekState* state) {
+    if (!state) return;
+    Mp3Seek_free(&state->info);
+    fclose(state->file);
+    free(state);
+}
+
+// Seek an MP3 decoder. With a seek table, the decoder starts from a frame near the
+// target; without one, it decodes from the start (a seek backward) or from here.
+static bool mp3_seek_to_frame(drmp3* mp3, Mp3SeekState* state, int64_t frame) {
+    Mp3SeekPoint point;
+    if (state && Mp3Seek_pointFor(&state->info, mp3_seek_read, state->file, state->file_size,
+                                  frame, &point)) {
+        state->point.seekPosInBytes = (drmp3_uint64)point.byte_pos;
+        state->point.pcmFrameIndex = (drmp3_uint64)point.pcm_frame;
+        state->point.mp3FramesToDiscard = (drmp3_uint16)point.frames_to_discard;
+        state->point.pcmFramesToDiscard = 0;
+        drmp3_bind_seek_table(mp3, 1, &state->point);
+    } else {
+        drmp3_bind_seek_table(mp3, 0, NULL);
+    }
+    return drmp3_seek_to_pcm_frame(mp3, (drmp3_uint64)frame);
+}
+
 // Open decoder and read metadata (doesn't decode audio yet)
 static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
     memset(sd, 0, sizeof(StreamDecoder));
@@ -375,6 +433,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             sd->source_sample_rate = mp3->sampleRate;
             sd->source_channels = mp3->channels;
             sd->total_frames = drmp3_get_pcm_frame_count(mp3);
+            sd->mp3_seek = mp3_seek_open(filepath, mp3);
             break;
         }
         case AUDIO_FORMAT_WAV: {
@@ -980,7 +1039,7 @@ static int stream_decoder_seek(StreamDecoder* sd, int64_t frame) {
     bool success = false;
     switch (sd->format) {
         case AUDIO_FORMAT_MP3:
-            success = drmp3_seek_to_pcm_frame((drmp3*)sd->decoder, frame);
+            success = mp3_seek_to_frame((drmp3*)sd->decoder, (Mp3SeekState*)sd->mp3_seek, frame);
             break;
         case AUDIO_FORMAT_WAV:
             success = drwav_seek_to_pcm_frame((drwav*)sd->decoder, frame);
@@ -1049,6 +1108,8 @@ static void stream_decoder_close(StreamDecoder* sd) {
         case AUDIO_FORMAT_MP3:
             drmp3_uninit((drmp3*)sd->decoder);
             free(sd->decoder);
+            mp3_seek_close((Mp3SeekState*)sd->mp3_seek);
+            sd->mp3_seek = NULL;
             break;
         case AUDIO_FORMAT_WAV:
             drwav_uninit((drwav*)sd->decoder);

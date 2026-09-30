@@ -38,6 +38,19 @@ static TTF_Font *large_font_or_skip(void) {
     return Fonts_getLarge();
 }
 
+// A time takes hours only from one hour
+TEST(test_format_time) {
+    char buf[16];
+    format_time(buf, 0);
+    CHECK_EQ_INT(strcmp(buf, "00:00"), 0);
+    format_time(buf, 59 * 60 * 1000 + 59999);
+    CHECK_EQ_INT(strcmp(buf, "59:59"), 0);
+    format_time(buf, 3600 * 1000);
+    CHECK_EQ_INT(strcmp(buf, "1:00:00"), 0);
+    format_time(buf, (2 * 3600 + 14 * 60 + 5) * 1000);
+    CHECK_EQ_INT(strcmp(buf, "2:14:05"), 0);
+}
+
 TEST(test_chip_on_the_top_pill_row) {
     SDL_Surface *wide = make_screen(SCALE1(320), 480);
     SDL_Surface *narrow = make_screen(SCALE1(320) - 1, 480);
@@ -283,6 +296,7 @@ TEST(test_menu_row_reserves_the_icon_once) {
 }
 
 int main(void) {
+    RUN(test_format_time);
     RUN(test_chip_on_the_top_pill_row);
     RUN(test_footer_chip_box);
     RUN(test_status_group_threshold);

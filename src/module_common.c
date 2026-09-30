@@ -17,6 +17,7 @@
 #include "background.h"
 #include "toast.h"
 #include "test_control.h"
+#include "seek_scan.h"
 
 static bool autosleep_disabled = false;
 static FrameState frame = {0};
@@ -282,6 +283,28 @@ void ModuleCommon_startScreenOffHint(void) {
 
 void ModuleCommon_resetScreenOffHint(void) {
     screen_off_hint_active = false;
+}
+
+bool ModuleCommon_updateSeekScan(int back_step_ms, int fwd_step_ms) {
+    SeekScan* scan = SeekScan_shared();
+
+    // A track that stopped has nothing to seek
+    if (Player_getState() == PLAYER_STATE_STOPPED) {
+        bool was_scanning = SeekScan_isScanning(scan);
+        SeekScan_cancel(scan);
+        return was_scanning;
+    }
+
+    bool was_scanning = SeekScan_isScanning(scan);
+    int seek_to_ms;
+    bool seek = SeekScan_update(scan, SDL_GetTicks(), PAD_isPressed(BTN_LEFT),
+                                PAD_isPressed(BTN_RIGHT), Player_getPosition(),
+                                Player_getDuration(), back_step_ms, fwd_step_ms, &seek_to_ms);
+    if (seek) {
+        Player_seek(seek_to_ms);
+        ModuleCommon_recordInputTime();
+    }
+    return seek || was_scanning || SeekScan_isScanning(scan);
 }
 
 void ModuleCommon_recordInputTime(void) {

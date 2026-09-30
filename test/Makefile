@@ -40,6 +40,12 @@
 # the position come in, and the current index and the rows come out. It reads
 # the line type from lyrics.h, which holds no platform include.
 #
+# mp3_seek.c reads the header frame of an MP3 file through a callback, thus its
+# test gives it synthetic files in memory.
+#
+# seek_scan.c is the same shape as toast_state.c: the buttons and the clock come
+# in, and the seek and the position to show come out.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -55,7 +61,8 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
-           $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings
+           $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
+           $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -114,6 +121,12 @@ $(BIN)/test_frame_state: test_frame_state.c $(SRC)/frame_state.c $(SRC)/frame_st
 $(BIN)/test_lyric_window: test_lyric_window.c $(SRC)/lyric_window.c $(SRC)/lyric_window.h \
                           $(SRC)/lyrics.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_lyric_window.c $(SRC)/lyric_window.c
+
+$(BIN)/test_seek_scan: test_seek_scan.c $(SRC)/seek_scan.c $(SRC)/seek_scan.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_seek_scan.c $(SRC)/seek_scan.c
+
+$(BIN)/test_mp3_seek: test_mp3_seek.c $(SRC)/mp3_seek.c $(SRC)/mp3_seek.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_mp3_seek.c $(SRC)/mp3_seek.c -lm
 
 $(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/utf8.c

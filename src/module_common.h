@@ -67,6 +67,11 @@ bool ModuleCommon_processScreenOffHintTimeout(void);
 // Record last input time (for auto screen-off timeout)
 void ModuleCommon_recordInputTime(void);
 
+// Feed the progressive seek of LEFT and RIGHT on a playing screen, once each
+// frame. A short press seeks by `back_step_ms` or `fwd_step_ms`; a held button
+// scans, and its release seeks once. Returns true where the screen must draw.
+bool ModuleCommon_updateSeekScan(int back_step_ms, int fwd_step_ms);
+
 // Check if auto screen-off timeout has elapsed since last input.
 // If timed out: starts screen off hint and returns true.
 // Caller is responsible for clearing GPU layers after this returns true.

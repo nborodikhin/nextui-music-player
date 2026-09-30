@@ -57,6 +57,9 @@ typedef struct {
     int  selected;
 } NavEntry;
 #define NAV_STACK_DEPTH 32
+
+// The seek of a short press of LEFT or RIGHT
+#define MUSIC_SEEK_STEP_MS 5000
 static NavEntry nav_stack[NAV_STACK_DEPTH];
 static int      nav_stack_top = 0;
 
@@ -490,6 +493,10 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         ModuleCommon_recordInputTime();
     }
 
+    if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+        *dirty = 1;
+    }
+
     if (PAD_justPressed(BTN_A)) {
         Player_togglePause();
         *dirty = 1;
@@ -506,14 +513,6 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
         *state = PLAYER_INTERNAL_BROWSER;
         *dirty = 1;
         return true;  // Skip track-ended check to prevent auto-advance
-    }
-    else if (PAD_justRepeated(BTN_LEFT)) {
-        Player_seek(Player_getPosition() - 5000);
-        *dirty = 1;
-    }
-    else if (PAD_justRepeated(BTN_RIGHT)) {
-        Player_seek(Player_getPosition() + 5000);
-        *dirty = 1;
     }
     else if (PAD_justPressed(BTN_DOWN) || PAD_justPressed(BTN_L1)) {
         PlayerModule_prevTrack();
@@ -900,6 +899,10 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
             ModuleCommon_recordInputTime();
         }
 
+        if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+            dirty = 1;
+        }
+
         if (PAD_justPressed(BTN_A)) {
             Player_togglePause();
             dirty = 1;
@@ -914,14 +917,6 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 cleanup_playback(true);
             }
             return MODULE_EXIT_TO_MENU;
-        }
-        else if (PAD_justRepeated(BTN_LEFT)) {
-            Player_seek(Player_getPosition() - 5000);
-            dirty = 1;
-        }
-        else if (PAD_justRepeated(BTN_RIGHT)) {
-            Player_seek(Player_getPosition() + 5000);
-            dirty = 1;
         }
         else if (PAD_justPressed(BTN_DOWN) || PAD_justPressed(BTN_L1)) {
             PlayerModule_prevTrack();

@@ -18,6 +18,12 @@
 #include "ui_theme.h"
 #include "ui_album_art.h"
 #include "wget_fetch.h"
+#include "seek_scan.h"
+
+// The position that the screen shows: the target while LEFT or RIGHT scans
+static int shown_position(void) {
+    return SeekScan_displayPosition(SeekScan_shared(), Player_getPosition());
+}
 
 // The marquee of the episode title
 static ScrollTextState title_scroll = {0};
@@ -403,7 +409,7 @@ static void paint_status_layer(void) {
     UiLayer_clear(UI_LAYER_STATUS);
     if (!progress_position_set) return;
 
-    int position_ms = Player_getPosition();
+    int position_ms = shown_position();
     int position_sec = position_ms / 1000;
     progress_shown_sec = position_sec;
 
@@ -483,7 +489,7 @@ bool PodcastPlaying_frame(bool surface_renders) {
     // row, after a clear, takes it whatever the position is.
     bool repaint_status = progress_position_set &&
                           (progress_shown_sec < 0 ||
-                           (playing && Player_getPosition() / 1000 != progress_shown_sec));
+                           (playing && shown_position() / 1000 != progress_shown_sec));
 
     if (layers_stale) {
         repaint_status = repaint_animation = true;
