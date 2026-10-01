@@ -31,9 +31,7 @@ struct input_event_raw {
 };
 #include <errno.h>
 #include <samplerate.h>
-#ifdef HAVE_ALSA_LIB
-#include <alsa/asoundlib.h>
-#endif
+#include <dlfcn.h>
 #include <SDL2/SDL_image.h>
 
 #include "defines.h"
@@ -265,6 +263,25 @@ static void audio_device_change_callback(int device_type, int event);
 // handles it in Player_handleAudioSinkChange(), because SDL audio must not be
 // restarted from another thread while the main thread uses it
 static volatile bool audio_sink_changed = false;
+
+// Let alsa-lib read its configuration (~/.asoundrc) again at the next open. The build
+// of some devices has no alsa-lib (my355: tinyalsa only), but SDL loads it at run time
+// there too, thus the function comes from the copy that is loaded. Without alsa-lib
+// in the process, there is nothing to reload.
+static void alsa_reload_configuration(void) {
+    void* alsa = dlopen("libasound.so.2", RTLD_NOW | RTLD_NOLOAD);
+    if (!alsa) {
+        LOG_info("Audio: alsa-lib is not loaded, no configuration to reload\n");
+        return;
+    }
+    int (*free_global)(void) = (int (*)(void))dlsym(alsa, "snd_config_update_free_global");
+    if (free_global) {
+        free_global();
+    } else {
+        LOG_error("Audio: alsa-lib has no snd_config_update_free_global()\n");
+    }
+    dlclose(alsa);
+}
 static volatile uint32_t audio_sink_changed_at = 0;
 // The sink changes in steps (the file is written, then written again), thus the
 // main thread waits this long after the last event
@@ -1793,9 +1810,7 @@ static void reopen_audio_device(void) {
     if (SDL_WasInit(SDL_INIT_AUDIO)) {
         LOG_error("Audio: SDL audio still runs after the quit; the ALSA configuration stays\n");
     } else {
-#ifdef HAVE_ALSA_LIB
-        snd_config_update_free_global();
-#endif
+        alsa_reload_configuration();
     }
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
         LOG_error("Audio: failed to restart SDL audio: %s\n", SDL_GetError());

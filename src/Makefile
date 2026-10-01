@@ -289,8 +289,6 @@ ifeq ($(PLATFORM), my355)
 LDLIBS += -ltinyalsa
 else
 LDLIBS += -lasound
-# The code that must call alsa-lib (player.c: the reload of the ALSA configuration)
-MY_CFLAGS += -DHAVE_ALSA_LIB
 ifeq ($(PLATFORM), tg5050)
 LDLIBS += -ltinyalsa
 endif
