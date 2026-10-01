@@ -847,7 +847,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
             // Handle screen off hint
             if (ModuleCommon_isScreenOffHintActive()) {
                 handle_hid_events();
-                ModuleCommon_handleHardwareVolume();
                 Podcast_update();
 
                 // SELECT+A during hint -> full wake
@@ -872,7 +871,6 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
             }
             else if (screen_off) {
                 handle_hid_events();
-                ModuleCommon_handleHardwareVolume();
                 Podcast_update();
 
                 // Any button -> show hint

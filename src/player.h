@@ -196,10 +196,8 @@ void Player_update(void);
 // saw. Call on the main thread, once each frame.
 void Player_handleAudioSinkChange(void);
 
-// Set the software volume for the current output: the system volume on a curve for
-// Bluetooth and a USB DAC, whose mixer is at 100%, and 1.0 for the speaker, which
-// takes the system volume in hardware. Call at start, after a change of the output,
-// and after a change of the system volume.
+// Give the system volume to the mixer of the current output, as NextUI does for
+// each output, and play at full scale. Call at start and after a change of the output.
 void Player_syncOutputVolume(void);
 
 // A count that grows each time Player_handleAudioSinkChange() handles a change.

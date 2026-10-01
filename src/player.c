@@ -1663,27 +1663,10 @@ int Player_init(void) {
         }
     }
 
-    // If Bluetooth audio is detected, set BlueALSA mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_BLUETOOTH) {
-        // Set all mixer controls that contain "A2DP" in their name to 100%
-        // This handles devices like "Galaxy Buds Live (4B23 A2DP" etc.
-        system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-               "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-               "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
-        // Initialize HID input monitoring for Bluetooth AVRCP buttons
-        Player_initUSBHID();
-    }
-
-    // If USB DAC is detected, set its mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_USBDAC) {
-        // USB DACs typically appear as card 1, set common mixer controls to 100%
-        // Different USB DACs use different control names (PCM, Master, Headset, etc.)
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
-        // Initialize USB HID input monitoring for earphone buttons
+    // The remote of a Bluetooth headset (AVRCP) or of a USB DAC gives its buttons.
+    // The volume of these outputs is on their mixer, which NextUI sets
+    // (see Player_syncOutputVolume()).
+    if (audio_sink == AUDIO_SINK_BLUETOOTH || audio_sink == AUDIO_SINK_USBDAC) {
         Player_initUSBHID();
     }
 
@@ -1890,11 +1873,8 @@ void Player_handleAudioSinkChange(void) {
     }
 
     if (was_bluetooth != bluetooth_audio_active) {
-        // If Bluetooth just activated, set mixer to 100% and init HID
+        // If Bluetooth just activated, init HID
         if (bluetooth_audio_active) {
-            system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-                   "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-                   "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
             // Initialize HID input monitoring for Bluetooth AVRCP buttons
             Player_initUSBHID();
         } else if (!usbdac_audio_active) {
@@ -1903,13 +1883,7 @@ void Player_handleAudioSinkChange(void) {
         }
     }
 
-    // If USB DAC just activated, set its mixer to 100%
     if (!was_usbdac && usbdac_audio_active) {
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
         // Initialize USB HID input monitoring for earphone buttons
         Player_initUSBHID();
     } else if (was_usbdac && !usbdac_audio_active && !bluetooth_audio_active) {
@@ -1919,7 +1893,7 @@ void Player_handleAudioSinkChange(void) {
 
     reopen_audio_device();
 
-    // The new output takes the volume in another place (see Player_syncOutputVolume())
+    // The mixer of the new output takes the system volume
     Player_syncOutputVolume();
 }
 
@@ -2830,15 +2804,11 @@ bool Player_resume(void) {
 }
 
 void Player_syncOutputVolume(void) {
-    if (Player_isBluetoothActive() || Player_isUSBDACActive()) {
-        // The device mixer is at 100%, thus the player applies the system volume.
-        // Cubic curve for perceptual volume (human hearing is logarithmic).
-        float v = GetVolume() / 20.0f;
-        Player_setVolume(v * v * v);
-    } else {
-        // The speaker takes the system volume in hardware
-        Player_setVolume(1.0f);
-    }
+    // NextUI keeps the system volume on the mixer of each output: the speaker, the
+    // A2DP mixer of a Bluetooth headset and a USB DAC (SetRawVolume() of msettings).
+    // Thus the player plays at full scale, and gives the volume to the new mixer.
+    Player_setVolume(1.0f);
+    SetVolume(GetVolume());
 }
 
 void Player_setVolume(float volume) {

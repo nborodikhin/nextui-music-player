@@ -194,11 +194,8 @@ int main(int argc, char* argv[]) {
         goto cleanup;
     }
 
-    // At startup, set software volume based on output device
+    // Restore the volume on the mixer of the output, after the audio device is open and stable
     Player_syncOutputVolume();
-
-	// Restore hardware volume after audio device is open and stable
-	SetVolume(GetVolume());
 
     // Initialize self-update module
     SelfUpdate_init(".");

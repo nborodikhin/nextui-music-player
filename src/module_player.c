@@ -432,7 +432,6 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     // Handle screen off hint
     if (ModuleCommon_isScreenOffHintActive()) {
         handle_hid_events();
-        ModuleCommon_handleHardwareVolume();
         Player_update();
 
         // SELECT+A during hint -> full wake
@@ -459,7 +458,6 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     // Handle screen off
     if (screen_off) {
         handle_hid_events();
-        ModuleCommon_handleHardwareVolume();
         Player_update();
 
         // Any button -> show hint
@@ -844,7 +842,6 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         // Handle screen off hint
         if (ModuleCommon_isScreenOffHintActive()) {
             handle_hid_events();
-            ModuleCommon_handleHardwareVolume();
             if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
                 ModuleCommon_resetScreenOffHint();
                 ModuleCommon_recordInputTime();
@@ -876,7 +873,6 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                 ModuleCommon_markSurfaceDrawn();
             }
             handle_hid_events();
-            ModuleCommon_handleHardwareVolume();
             Player_update();
 
             if (Player_getState() == PLAYER_STATE_STOPPED) {

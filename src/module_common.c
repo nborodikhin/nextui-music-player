@@ -176,12 +176,6 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
         }
     }
 
-    // Handle volume controls - only when NOT in a combo with MENU or SELECT
-    // (Menu + Vol = brightness, Select + Vol = color temp - handled by platform)
-    // Note: We don't consume input or return early here - let PWR_update detect
-    // the volume button press and set show_setting to display the volume UI
-    ModuleCommon_handleHardwareVolume();
-
     // Handle quit confirmation dialog
     if (show_quit_confirm) {
         if (PAD_justPressed(BTN_A)) {
@@ -458,18 +452,8 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     } else {
         vol = (vol > 0) ? vol - 1 : 0;
     }
-    // USB HID events only come from USB DAC, so always use software volume
+    // keymon does not see these buttons: set the system volume, which NextUI puts on
+    // the mixer of the output
     SetVolume(vol);
-    float v = vol / 20.0f;
-    Player_setVolume(v * v * v);
     return true;
-}
-
-void ModuleCommon_handleHardwareVolume(void) {
-    if (PAD_isPressed(BTN_MENU) || PAD_isPressed(BTN_SELECT)) return;
-    if (!PAD_justRepeated(BTN_PLUS) && !PAD_justRepeated(BTN_MINUS)) return;
-
-    // Don't increment volume here - keymon already handles SetVolume().
-    // We only need to sync software volume for BT/USB DAC output.
-    Player_syncOutputVolume();
 }
