@@ -409,6 +409,7 @@ The music player uses:
 - **Shared code**: `NextUI/workspace/all/common/` (utils, api, config, scaler)
 - **Platform code**: `NextUI/workspace/<PLATFORM>/platform/`
 - **Libraries**: SDL2, SDL2_image, SDL2_ttf, GLESv2, EGL, libsamplerate, libzip, mbedTLS, ALSA
+- **Sonic** (`src/audio/sonic.c`, Apache-2.0): the change of playback speed that keeps the pitch
 - **Pak libraries**: where the firmware lacks a library, the pak carries one in
   `bin/<platform>/` and `launch.sh` loads it before `/usr/lib`. The build copies
   each one out of a toolchain image (`PAK_LIBRARIES` in `dev`); none is in git.

@@ -192,6 +192,18 @@ AudioFormat Player_detectFormat(const char* filepath);
 // Update player (call this in main loop)
 void Player_update(void);
 
+// Apply a change of the audio sink (Bluetooth, USB DAC, speaker) that the watcher
+// saw. Call on the main thread, once each frame.
+void Player_handleAudioSinkChange(void);
+
+// Give the system volume to the mixer of the current output, as NextUI does for
+// each output, and play at full scale. Call at start and after a change of the output.
+void Player_syncOutputVolume(void);
+
+// A count that grows each time Player_handleAudioSinkChange() handles a change.
+// A screen redraws when it changes, thus the status pill shows the new output.
+unsigned Player_getAudioSinkGeneration(void);
+
 // Resume/pause audio device (used by radio module)
 void Player_resumeAudio(void);
 void Player_pauseAudio(void);

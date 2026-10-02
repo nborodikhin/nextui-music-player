@@ -29,7 +29,9 @@ struct input_event_raw {
     uint16_t code;
     int32_t value;
 };
+#include <errno.h>
 #include <samplerate.h>
+#include <dlfcn.h>
 #include <SDL2/SDL_image.h>
 
 #include "defines.h"
@@ -54,6 +56,7 @@ struct input_event_raw {
 #define MINIMP4_IMPLEMENTATION
 #include "audio/minimp4.h"
 #include "mp3_seek.h"
+#include "audio/sonic.h"
 #include <fdk-aac/aacdecoder_lib.h>
 #include <opusfile.h>
 
@@ -123,7 +126,7 @@ static int m4a_read_callback(int64_t offset, void* buffer, size_t size, void* to
 }
 
 // Sample rates for different audio outputs
-#define SAMPLE_RATE_BLUETOOTH 44100  // 44.1kHz for Bluetooth A2DP compatibility
+#define SAMPLE_RATE_BLUETOOTH 48000  // 48kHz for Bluetooth where the NextUI setting has no valid rate
 #define SAMPLE_RATE_SPEAKER   48000  // 48kHz for speaker output
 #define SAMPLE_RATE_USB_DAC   48000  // 48kHz for USB DAC output
 #define SAMPLE_RATE_DEFAULT   48000  // Default fallback
@@ -212,22 +215,40 @@ static inline int16_t speaker_hpf_process(int16_t sample, int channel) {
 
 // Global player context
 static PlayerContext player = {0};
-static int64_t audio_position_samples = 0;  // Track position in samples for precision
+// The time that played, in frames of the output rate at speed 1x. A frame that
+// plays at speed 2x counts as two, thus a change of speed does not scale the past.
+static double audio_position_samples = 0;
 static WaveformData waveform = {0};  // Waveform overview for progress display
 static int current_sample_rate = SAMPLE_RATE_DEFAULT;  // Track current SDL audio device rate
 static bool bluetooth_audio_active = false;  // Track if Bluetooth audio is active
 static bool usbdac_audio_active = false;     // Track if USB DAC is active
 
 // Get target sample rate based on current audio sink
+// The output rate for Bluetooth. This is the value of PLAT_pickSampleRate() of NextUI for
+// a connected device, thus the player and the emulators ask BlueALSA for the same rate.
+// PLAT_pickSampleRate() itself runs `hcitool` to find a connection, which is too slow for
+// the stream thread. A fixed 44.1 kHz stalled SDL: through BlueALSA at 44.1 kHz, the
+// audio callback never ran on a link at 48 kHz.
+// The rate is the limit of the NextUI settings as it is: the Bluetooth stack chooses the
+// profile and the codec, thus any standard rate can be right. A value outside the standard
+// rates (8 to 192 kHz) is not from the settings, and gets 48 kHz.
+#define SAMPLE_RATE_MIN   8000
+#define SAMPLE_RATE_MAX 192000
+static int bluetooth_sample_rate(void) {
+    int limit = CFG_getBluetoothSamplingrateLimit();
+    if (limit < SAMPLE_RATE_MIN || limit > SAMPLE_RATE_MAX) return SAMPLE_RATE_BLUETOOTH;
+    return limit;
+}
+
 static int get_target_sample_rate(void) {
     if (bluetooth_audio_active) {
-        return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz for Bluetooth
+        return bluetooth_sample_rate();
     }
     // Check audio sink from msettings
     int sink = GetAudioSink();
     switch (sink) {
         case AUDIO_SINK_BLUETOOTH:
-            return SAMPLE_RATE_BLUETOOTH;  // 44100 Hz
+            return bluetooth_sample_rate();
         case AUDIO_SINK_USBDAC:
             return SAMPLE_RATE_USB_DAC;    // 48000 Hz
         default:
@@ -237,6 +258,36 @@ static int get_target_sample_rate(void) {
 
 // Forward declaration for audio device change callback
 static void audio_device_change_callback(int device_type, int event);
+
+// The watcher thread records a change of the audio sink here; the main thread
+// handles it in Player_handleAudioSinkChange(), because SDL audio must not be
+// restarted from another thread while the main thread uses it
+static volatile bool audio_sink_changed = false;
+
+// Let alsa-lib read its configuration (~/.asoundrc) again at the next open. The build
+// of some devices has no alsa-lib (my355: tinyalsa only), but SDL loads it at run time
+// there too, thus the function comes from the copy that is loaded. Without alsa-lib
+// in the process, there is nothing to reload.
+static void alsa_reload_configuration(void) {
+    void* alsa = dlopen("libasound.so.2", RTLD_NOW | RTLD_NOLOAD);
+    if (!alsa) {
+        LOG_info("Audio: alsa-lib is not loaded, no configuration to reload\n");
+        return;
+    }
+    int (*free_global)(void) = (int (*)(void))dlsym(alsa, "snd_config_update_free_global");
+    if (free_global) {
+        free_global();
+    } else {
+        LOG_error("Audio: alsa-lib has no snd_config_update_free_global()\n");
+    }
+    dlclose(alsa);
+}
+static volatile uint32_t audio_sink_changed_at = 0;
+// The sink changes in steps (the file is written, then written again), thus the
+// main thread waits this long after the last event
+#define AUDIO_SINK_SETTLE_MS 300
+// Counts the sink changes that the main thread handled, for the redraw of the status pill
+static unsigned audio_sink_generation = 0;
 
 // Forward declaration for FLAC metadata callback
 static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
@@ -1176,19 +1227,15 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
                              int src_rate, int dst_rate,
                              int16_t* output, size_t max_output_frames,
                              SRC_STATE* src_state, bool is_last) {
-    // Apply playback speed to the ratio
-    float speed = player.playback_speed;
-    if (speed < 0.5f) speed = 1.0f;  // Safety fallback
-
-    if (src_rate == dst_rate && speed == 1.0f) {
+    // The speed is not here: the time stretch after this changes it, and keeps the pitch
+    if (src_rate == dst_rate) {
         // No resampling needed, just copy
         size_t to_copy = (input_frames < max_output_frames) ? input_frames : max_output_frames;
         memcpy(output, input, to_copy * sizeof(int16_t) * AUDIO_CHANNELS);
         return to_copy;
     }
 
-    // Dividing by speed: >1.0 speed means lower ratio = fewer output samples = faster playback
-    double ratio = ((double)dst_rate / (double)src_rate) / (double)speed;
+    double ratio = (double)dst_rate / (double)src_rate;
 
     // Calculate total input frames (leftover from previous call + new input)
     size_t leftover_count = player.resample_leftover_count;
@@ -1281,6 +1328,58 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
 
 // ============ STREAMING DECODE THREAD ============
 
+// Set by reopen_audio_device(), cleared by the stream thread after it resets the resampler
+static volatile bool stream_resampler_reset = false;
+
+// ============ TIME STRETCH ============
+
+// The playback speed, with the pitch kept (Sonic). The stream thread owns the
+// stream: load_streaming() creates it before the thread starts, and
+// Player_stop() frees it after the thread ends.
+static sonicStream time_stretch = NULL;
+static bool time_stretch_active = false;  // the stream holds audio of a speed other than 1x
+
+#define TIME_STRETCH_READ_FRAMES 4096
+
+// Move the audio that the time stretch has ready into the stream buffer
+static void time_stretch_drain(int16_t* scratch) {
+    int frames;
+    while ((frames = sonicReadShortFromStream(time_stretch, scratch, TIME_STRETCH_READ_FRAMES)) > 0) {
+        circular_buffer_write(&player.stream_buffer, scratch, (size_t)frames);
+    }
+}
+
+// Pass a chunk at the output rate through the time stretch, into the stream buffer
+static void time_stretch_write(int16_t* pcm, size_t frames, float speed, int16_t* scratch) {
+    if (!time_stretch) {
+        // No stream (out of memory): the audio plays at 1x
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+    if (speed == 1.0f) {
+        // The audio of the old speed goes out first, then the time stretch is idle
+        if (time_stretch_active) {
+            sonicFlushStream(time_stretch);
+            time_stretch_drain(scratch);
+            time_stretch_active = false;
+        }
+        circular_buffer_write(&player.stream_buffer, pcm, frames);
+        return;
+    }
+
+    sonicSetSpeed(time_stretch, speed);
+    sonicWriteShortToStream(time_stretch, pcm, (int)frames);
+    time_stretch_active = true;
+    time_stretch_drain(scratch);
+}
+
+// Drop the audio in the time stretch, after a seek or a new output rate
+static void time_stretch_reset(int sample_rate) {
+    if (time_stretch) sonicDestroyStream(time_stretch);
+    time_stretch = sonicCreateStream(sample_rate, AUDIO_CHANNELS);
+    time_stretch_active = false;
+}
+
 static void* stream_thread_func(void* arg) {
     (void)arg;
 
@@ -1289,11 +1388,13 @@ static void* stream_thread_func(void* arg) {
     // Resample output buffer (allow for 2x expansion)
     size_t resample_buffer_size = DECODE_CHUNK_FRAMES * 3;
     int16_t* resample_buffer = malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* stretch_buffer = malloc(TIME_STRETCH_READ_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
 
-    if (!decode_buffer || !resample_buffer) {
+    if (!decode_buffer || !resample_buffer || !stretch_buffer) {
         LOG_error("Stream thread: Failed to allocate buffers\n");
         free(decode_buffer);
         free(resample_buffer);
+        free(stretch_buffer);
         return NULL;
     }
 
@@ -1307,8 +1408,20 @@ static void* stream_thread_func(void* arg) {
             }
             // Clear resampler leftover buffer to avoid playing stale samples
             player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
             player.stream_eof = false;  // Reset EOF flag on seek
             player.stream_seeking = false;
+        }
+
+        // A new output device is a break in the stream, as a seek is: the
+        // resampler starts again, and its leftover samples are for the old rate
+        if (stream_resampler_reset) {
+            if (player.resampler) {
+                src_reset((SRC_STATE*)player.resampler);
+            }
+            player.resample_leftover_count = 0;
+            time_stretch_reset(get_target_sample_rate());
+            stream_resampler_reset = false;
         }
 
         // Check if buffer needs more data (< 50% full)
@@ -1318,7 +1431,12 @@ static void* stream_thread_func(void* arg) {
             size_t decoded = stream_decoder_read(&player.stream_decoder,
                                                   decode_buffer, DECODE_CHUNK_FRAMES);
             if (decoded == 0) {
-                // Decoder has reached end of file
+                // Decoder has reached end of file. The time stretch gives out what it holds.
+                if (!player.stream_eof && time_stretch_active) {
+                    sonicFlushStream(time_stretch);
+                    time_stretch_drain(stretch_buffer);
+                    time_stretch_active = false;
+                }
                 player.stream_eof = true;
             } else {
                 // Resample chunk to target rate if needed
@@ -1326,19 +1444,20 @@ static void* stream_thread_func(void* arg) {
                 int dst_rate = get_target_sample_rate();
                 bool is_last = (player.stream_decoder.current_frame >= player.stream_decoder.total_frames);
 
-                size_t output_frames;
-                if (src_rate == dst_rate && player.playback_speed == 1.0f) {
-                    // No resampling needed
-                    output_frames = decoded;
-                    circular_buffer_write(&player.stream_buffer, decode_buffer, output_frames);
-                } else {
-                    // Resample
-                    output_frames = resample_chunk(decode_buffer, decoded,
-                                                   src_rate, dst_rate,
-                                                   resample_buffer, resample_buffer_size,
-                                                   (SRC_STATE*)player.resampler, is_last);
-                    circular_buffer_write(&player.stream_buffer, resample_buffer, output_frames);
+                int16_t* pcm = decode_buffer;
+                size_t frames = decoded;
+                if (src_rate != dst_rate) {
+                    frames = resample_chunk(decode_buffer, decoded,
+                                            src_rate, dst_rate,
+                                            resample_buffer, resample_buffer_size,
+                                            (SRC_STATE*)player.resampler, is_last);
+                    pcm = resample_buffer;
                 }
+
+                // Then the speed, with the pitch kept
+                float speed = player.playback_speed;
+                if (speed < 0.5f) speed = 1.0f;  // Safety fallback
+                time_stretch_write(pcm, frames, speed, stretch_buffer);
             }
         } else {
             // Buffer full enough, sleep briefly
@@ -1348,6 +1467,7 @@ static void* stream_thread_func(void* arg) {
 
     free(decode_buffer);
     free(resample_buffer);
+    free(stretch_buffer);
     return NULL;
 }
 
@@ -1470,9 +1590,9 @@ static void audio_callback(void* userdata, Uint8* stream, int len) {
         }
 
         // Update position (account for playback speed)
-        audio_position_samples += samples_read;
         float spd = ctx->playback_speed > 0.0f ? ctx->playback_speed : 1.0f;
-        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0 * spd) / current_sample_rate);
+        audio_position_samples += samples_read * (double)spd;
+        ctx->position_ms = (int64_t)((audio_position_samples * 1000.0) / current_sample_rate);
 
         // Check if track ended (decoder reached EOF or frame count)
         if ((ctx->stream_decoder.current_frame >= ctx->stream_decoder.total_frames || ctx->stream_eof) &&
@@ -1543,27 +1663,10 @@ int Player_init(void) {
         }
     }
 
-    // If Bluetooth audio is detected, set BlueALSA mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_BLUETOOTH) {
-        // Set all mixer controls that contain "A2DP" in their name to 100%
-        // This handles devices like "Galaxy Buds Live (4B23 A2DP" etc.
-        system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-               "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-               "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
-        // Initialize HID input monitoring for Bluetooth AVRCP buttons
-        Player_initUSBHID();
-    }
-
-    // If USB DAC is detected, set its mixer to 100% for software volume control
-    if (audio_sink == AUDIO_SINK_USBDAC) {
-        // USB DACs typically appear as card 1, set common mixer controls to 100%
-        // Different USB DACs use different control names (PCM, Master, Headset, etc.)
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
-        // Initialize USB HID input monitoring for earphone buttons
+    // The remote of a Bluetooth headset (AVRCP) or of a USB DAC gives its buttons.
+    // The volume of these outputs is on their mixer, which NextUI sets
+    // (see Player_syncOutputVolume()).
+    if (audio_sink == AUDIO_SINK_BLUETOOTH || audio_sink == AUDIO_SINK_USBDAC) {
         Player_initUSBHID();
     }
 
@@ -1672,6 +1775,9 @@ static void reopen_audio_device(void) {
     // Remember current playback state
     PlayerState prev_state = player.state;
 
+    // The stream thread may be in the resampler now, thus it resets it
+    stream_resampler_reset = true;
+
     // Pause and close existing device
     if (player.audio_device > 0) {
         SDL_PauseAudioDevice(player.audio_device, 1);
@@ -1679,8 +1785,25 @@ static void reopen_audio_device(void) {
         player.audio_device = 0;
     }
 
+    // alsa-lib reads ~/.asoundrc once and keeps it, thus the "default" device stays
+    // the old sink. Stop SDL audio, which also stops its ALSA hotplug thread, then let
+    // alsa-lib read its configuration again. The player is the only user of SDL audio,
+    // thus one quit stops it.
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    if (SDL_WasInit(SDL_INIT_AUDIO)) {
+        LOG_error("Audio: SDL audio still runs after the quit; the ALSA configuration stays\n");
+    } else {
+        alsa_reload_configuration();
+    }
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+        LOG_error("Audio: failed to restart SDL audio: %s\n", SDL_GetError());
+        return;
+    }
+
     // Get target sample rate for the new audio sink
     int target_rate = get_target_sample_rate();
+    LOG_info("Audio: reopen for the new sink: bluetooth %d, USB DAC %d, %d Hz\n",
+             bluetooth_audio_active, usbdac_audio_active, target_rate);
 
     // Reopen with target sample rate
     SDL_AudioSpec want, have;
@@ -1714,6 +1837,15 @@ static void reopen_audio_device(void) {
 static void audio_device_change_callback(int device_type, int event) {
     (void)device_type;
     (void)event;
+    audio_sink_changed_at = SDL_GetTicks();
+    audio_sink_changed = true;
+}
+
+void Player_handleAudioSinkChange(void) {
+    if (!audio_sink_changed || !player.audio_initialized) return;
+    if (SDL_GetTicks() - audio_sink_changed_at < AUDIO_SINK_SETTLE_MS) return;
+    audio_sink_changed = false;
+    audio_sink_generation++;
 
     // Re-check if Bluetooth is now active/inactive
     bool was_bluetooth = bluetooth_audio_active;
@@ -1741,11 +1873,8 @@ static void audio_device_change_callback(int device_type, int event) {
     }
 
     if (was_bluetooth != bluetooth_audio_active) {
-        // If Bluetooth just activated, set mixer to 100% and init HID
+        // If Bluetooth just activated, init HID
         if (bluetooth_audio_active) {
-            system("amixer scontrols 2>/dev/null | grep -i 'A2DP' | "
-                   "sed \"s/.*'\\([^']*\\)'.*/\\1/\" | "
-                   "while read ctrl; do amixer sset \"$ctrl\" 127 2>/dev/null; done");
             // Initialize HID input monitoring for Bluetooth AVRCP buttons
             Player_initUSBHID();
         } else if (!usbdac_audio_active) {
@@ -1754,13 +1883,7 @@ static void audio_device_change_callback(int device_type, int event) {
         }
     }
 
-    // If USB DAC just activated, set its mixer to 100%
     if (!was_usbdac && usbdac_audio_active) {
-        system("amixer -c 1 sset PCM 100% 2>/dev/null; "
-               "amixer -c 1 sset Master 100% 2>/dev/null; "
-               "amixer -c 1 sset Speaker 100% 2>/dev/null; "
-               "amixer -c 1 sset Headphone 100% 2>/dev/null; "
-               "amixer -c 1 sset Headset 100% 2>/dev/null");
         // Initialize USB HID input monitoring for earphone buttons
         Player_initUSBHID();
     } else if (was_usbdac && !usbdac_audio_active && !bluetooth_audio_active) {
@@ -1769,6 +1892,9 @@ static void audio_device_change_callback(int device_type, int event) {
     }
 
     reopen_audio_device();
+
+    // The mixer of the new output takes the system volume
+    Player_syncOutputVolume();
 }
 
 void Player_quit(void) {
@@ -2457,11 +2583,11 @@ static int load_streaming(const char* filepath) {
         return -1;
     }
 
-    // Initialize resampler for streaming
-    int src_rate = player.stream_decoder.source_sample_rate;
+    // Initialize resampler for streaming. Each track gets one, also where the
+    // rates agree now: a change of the output (Bluetooth) or of the speed makes
+    // the stream thread resample in the middle of the track.
     int dst_rate = get_target_sample_rate();
-
-    if (src_rate != dst_rate) {
+    {
         int error;
         player.resampler = src_new(SRC_SINC_FASTEST, AUDIO_CHANNELS, &error);
         if (!player.resampler) {
@@ -2471,6 +2597,7 @@ static int load_streaming(const char* filepath) {
             return -1;
         }
     }
+    time_stretch_reset(dst_rate);
 
     // Set track info
     player.track_info.sample_rate = dst_rate;  // Output rate
@@ -2604,6 +2731,11 @@ void Player_stop(void) {
             src_delete((SRC_STATE*)player.resampler);
             player.resampler = NULL;
         }
+        if (time_stretch) {
+            sonicDestroyStream(time_stretch);
+            time_stretch = NULL;
+        }
+        time_stretch_active = false;
         // Free resampler leftover buffer
         if (player.resample_leftover) {
             free(player.resample_leftover);
@@ -2671,6 +2803,14 @@ bool Player_resume(void) {
     return player.stream_seeking;
 }
 
+void Player_syncOutputVolume(void) {
+    // NextUI keeps the system volume on the mixer of each output: the speaker, the
+    // A2DP mixer of a Bluetooth headset and a USB DAC (SetRawVolume() of msettings).
+    // Thus the player plays at full scale, and gives the volume to the new mixer.
+    Player_setVolume(1.0f);
+    SetVolume(GetVolume());
+}
+
 void Player_setVolume(float volume) {
     if (volume < 0.0f) volume = 0.0f;
     if (volume > 1.0f) volume = 1.0f;
@@ -2707,6 +2847,10 @@ int Player_getDuration(void) {
 
 const TrackInfo* Player_getTrackInfo(void) {
     return &player.track_info;
+}
+
+unsigned Player_getAudioSinkGeneration(void) {
+    return audio_sink_generation;
 }
 
 const char* Player_getCurrentFile(void) {
@@ -2775,6 +2919,13 @@ bool Player_isUSBDACActive(void) {
 
 // USB HID input monitoring
 static int usb_hid_fd = -1;
+
+// The remote of a headset can appear after its audio: BlueZ creates the AVRCP input
+// device a moment after the audio stream. Thus while Bluetooth or a USB DAC is the
+// output and no remote is open, Player_pollUSBHID() looks again at this interval.
+#define HID_RETRY_MS 1000
+static uint32_t hid_retry_at = 0;
+static bool hid_missing_logged = false;
 
 // Find USB audio HID device by scanning /proc/bus/input/devices
 static int find_audio_hid_device(char* event_path, size_t path_size, bool find_bluetooth) {
@@ -2866,21 +3017,34 @@ void Player_initUSBHID(void) {
         if (find_audio_hid_device(event_path, sizeof(event_path), true) == 0) {
             usb_hid_fd = open(event_path, O_RDONLY | O_NONBLOCK);
             if (usb_hid_fd >= 0) {
+                LOG_info("HID: Bluetooth remote at %s\n", event_path);
+                hid_missing_logged = false;
                 return;
             }
+        }
+        if (!hid_missing_logged) {
+            LOG_info("HID: no Bluetooth remote yet, looking again each %d ms\n", HID_RETRY_MS);
+            hid_missing_logged = true;
         }
     }
 }
 
 USBHIDEvent Player_pollUSBHID(void) {
     if (usb_hid_fd < 0) {
-        return USB_HID_EVENT_NONE;
+        uint32_t now = SDL_GetTicks();
+        if ((bluetooth_audio_active || usbdac_audio_active) && (int32_t)(now - hid_retry_at) >= 0) {
+            hid_retry_at = now + HID_RETRY_MS;
+            Player_initUSBHID();
+        }
+        if (usb_hid_fd < 0) return USB_HID_EVENT_NONE;
     }
 
     struct input_event_raw ev;
-    while (read(usb_hid_fd, &ev, sizeof(ev)) == sizeof(ev)) {
+    ssize_t got;
+    while ((got = read(usb_hid_fd, &ev, sizeof(ev))) == sizeof(ev)) {
         // Only handle key press events (value=1), ignore release (0) and repeat (2)
         if (ev.type == EV_KEY && ev.value == 1) {
+            LOG_debug("HID: key %d\n", ev.code);
             switch (ev.code) {
                 case KEY_VOLUMEUP:
                     return USB_HID_EVENT_VOLUME_UP;
@@ -2896,6 +3060,12 @@ USBHIDEvent Player_pollUSBHID(void) {
                     return USB_HID_EVENT_PREV_TRACK;
             }
         }
+    }
+
+    // The remote went away (a disconnect): close it, and the retry finds the next one
+    if (got < 0 && errno == ENODEV) {
+        LOG_info("HID: remote went away\n");
+        Player_quitUSBHID();
     }
 
     return USB_HID_EVENT_NONE;
