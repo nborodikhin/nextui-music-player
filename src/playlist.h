@@ -9,6 +9,7 @@
 
 // Single track in the playlist
 typedef struct {
+    int file_id;
     char path[512];
     char name[256];
     AudioFormat format;
@@ -30,11 +31,15 @@ void Playlist_free(PlaylistContext* ctx);
 // Clear playlist (reset count but keep memory)
 void Playlist_clear(PlaylistContext* ctx);
 
-// Build playlist from a directory recursively
-// - path: directory to scan
-// - start_track_path: path of the track to start from (will be at index 0)
+// Build a playlist from an indexed directory and its descendants.
+// - start_file_id: file to place at index 0, or 0 for the first file
 // Returns: number of tracks added, or -1 on error
-int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const char* start_track_path);
+int Playlist_buildFromDirectory(PlaylistContext* ctx, int dir_id, int start_file_id);
+
+// Collect at most max_tracks playable files of an indexed directory and its
+// descendants into a new array. The caller frees *tracks.
+// Returns: number of tracks, or -1 on error
+int Playlist_collectDirectory(int dir_id, int max_tracks, PlaylistTrack** tracks);
 
 // Navigation (no wrap-around)
 // Returns: new index, or -1 if at end/start
@@ -57,11 +62,5 @@ int Playlist_getCurrentIndex(const PlaylistContext* ctx);
 
 // Check if playlist is valid/active
 bool Playlist_isActive(const PlaylistContext* ctx);
-
-// Collect audio file paths from a directory recursively (up to max_count).
-// Returns the count; *out_paths is a malloc'd array of strdup'd path strings.
-// Caller must free with Playlist_freePaths(paths, count).
-int Playlist_collectPaths(const char* dir_path, char*** out_paths, int max_count);
-void Playlist_freePaths(char** paths, int count);
 
 #endif // __PLAYLIST_H__

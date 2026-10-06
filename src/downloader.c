@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include "downloader.h"
-#include "keyboard.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,8 +9,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <dirent.h>
-#include <signal.h>
 #include <ctype.h>
 
 #include "defines.h"
@@ -19,6 +16,8 @@
 #include "debug.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
+#include "db.h"
+#include "filedb.h"
 #include "include/parson/parson.h"
 
 // Module states. Nothing outside this file needs them - the screens read the
@@ -31,11 +30,14 @@ typedef enum {
     DOWNLOADER_STATE_ERROR
 } DownloaderState;
 
+// The directory in the Music root that holds downloaded music, relative to the root.
+static const char* const DOWNLOAD_DIR_NAME = "Downloaded";
+
 // Paths
+static char download_dir[512] = "";
 static char ytdlp_path[512] = "";
 static char qjs_path[512] = "";
 static char ffmpeg_path[512] = "";
-static char download_dir[512] = "";
 static char queue_file[512] = "";
 static char version_file[512] = "";
 static char pak_path[512] = "";
@@ -75,57 +77,47 @@ static int search_max_results = DOWNLOADER_MAX_RESULTS;
 // Current yt-dlp version
 static char current_version[32] = "unknown";
 static bool paths_ready = false;
+static volatile int downloaded_dir_id = 0;
 
 // Forward declarations
 static bool ytdlp_present(void);
 static bool ffmpeg_present(void);
+static void sanitize_filename(const char* input, char* output, size_t max_len);
+
+// Returns the id of the index row of the download directory, or 0 when it has none.
+static int find_downloaded_dir(void) {
+    DbDirResult* result = Db_getDirByPath(DOWNLOAD_DIR_NAME);
+    int dir_id = result ? result->dir.id : 0;
+    Db_freeResult(result);
+    return dir_id;
+}
+
+// Finds the index row of the download directory. When it has none, scans the Music root and
+// looks again. Returns false when the directory is still not indexed.
+static bool init_downloaded_dir(void) {
+    if (downloaded_dir_id > 0) return true;
+
+    downloaded_dir_id = find_downloaded_dir();
+    if (downloaded_dir_id > 0) return true;
+
+    int scan_root_request = FileDb_scanDir(Db_getRootDirId(), false);
+    if (!FileDb_waitBlocking(scan_root_request)) return false;
+    downloaded_dir_id = find_downloaded_dir();
+    return downloaded_dir_id > 0;
+}
+
+bool Downloader_refreshIndex(void) {
+    if (!init_downloaded_dir()) return false;
+
+    int downloaded_scan_request = FileDb_scanDir(downloaded_dir_id, false);
+    return FileDb_waitBlocking(downloaded_scan_request);
+}
+
 static void* download_thread_func(void* arg);
 static void* check_thread_func(void* arg);
 static void* update_thread_func(void* arg);
 static void* search_thread_func(void* arg);
-static int run_command(const char* cmd, char* output, size_t output_size);
 static void sanitize_filename(const char* input, char* output, size_t max_len);
-static void clean_title(char* title);
-
-// Clean title by removing text inside () and [] brackets
-static void clean_title(char* title) {
-    if (!title || !title[0]) return;
-
-    char result[512];
-    int j = 0;
-    int paren_depth = 0;   // Track nested ()
-    int bracket_depth = 0; // Track nested []
-
-    for (int i = 0; title[i] && j < (int)sizeof(result) - 1; i++) {
-        char c = title[i];
-
-        if (c == '(') {
-            paren_depth++;
-        } else if (c == ')') {
-            if (paren_depth > 0) paren_depth--;
-        } else if (c == '[') {
-            bracket_depth++;
-        } else if (c == ']') {
-            if (bracket_depth > 0) bracket_depth--;
-        } else if (paren_depth == 0 && bracket_depth == 0) {
-            result[j++] = c;
-        }
-    }
-    result[j] = '\0';
-
-    // Trim trailing spaces
-    while (j > 0 && result[j-1] == ' ') {
-        result[--j] = '\0';
-    }
-
-    // Trim leading spaces
-    char* start = result;
-    while (*start == ' ') start++;
-
-    // Copy back to title (title buffer is at least 512 bytes from caller)
-    strncpy(title, start, 511);
-    title[511] = '\0';
-}
 
 // Set up paths and directories that do not depend on the binary being present.
 // Safe to call repeatedly; only the first call does the work.
@@ -141,13 +133,10 @@ static void ensure_paths(void) {
     snprintf(ffmpeg_path, sizeof(ffmpeg_path), "%s/bin/ffmpeg", pak_path);
     snprintf(version_file, sizeof(version_file), "%s/state/yt-dlp_version.txt", pak_path);
     snprintf(queue_file, sizeof(queue_file), "%s/state/youtube_queue.txt", pak_path);
-    snprintf(download_dir, sizeof(download_dir), "%s/Music/Downloaded", SDCARD_PATH);
 
-    Keyboard_init();
+    get_music_abspath(DOWNLOAD_DIR_NAME, download_dir, sizeof(download_dir));
 
-    char music_dir[512];
-    snprintf(music_dir, sizeof(music_dir), "%s/Music", SDCARD_PATH);
-    mkdir(music_dir, 0755);
+    mkdir(get_music_path(), 0755);
     mkdir(download_dir, 0755);
 
     Downloader_loadQueue();
@@ -666,16 +655,19 @@ bool Downloader_isInQueue(const char* video_id) {
     return false;
 }
 
-bool Downloader_isDownloaded(const char* video_id) {
-    if (!video_id) return false;
+bool Downloader_isDownloaded(const char* title) {
+    if (!title) return false;
 
-    // Check if file exists in download directory
-    // This is a simple check - could be improved with a database
-    char pattern[600];
-    snprintf(pattern, sizeof(pattern), "%s/*%s*", download_dir, video_id);
+    char safe_filename[128];
+    char filename[sizeof(safe_filename) + sizeof(".m4a")];
+    sanitize_filename(title, safe_filename, sizeof(safe_filename));
+    int length = snprintf(filename, sizeof(filename), "%s.m4a", safe_filename);
+    if (length < 0 || (size_t)length >= sizeof(filename)) return false;
 
-    // For now, just return false - would need glob() for proper implementation
-    return false;
+    DbFileResult* result = Db_getFileInDir(downloaded_dir_id, filename);
+    bool found = result != NULL;
+    Db_freeResult(result);
+    return found;
 }
 
 // Parse yt-dlp speed string like "1.23MiB/s" or "500KiB/s" to bytes/sec
@@ -901,6 +893,7 @@ static void* download_thread_func(void* arg) {
                     // Move temp to final
                     if (rename(temp_file, output_file) == 0) {
                         success = true;
+                        Downloader_refreshIndex();
                     }
                 } else {
                     LOG_error("Invalid M4A file: %s\n", temp_file);

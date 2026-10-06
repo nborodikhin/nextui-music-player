@@ -19,6 +19,7 @@
 // UI modules
 #include "ui_fonts.h"
 #include "keyboard_map.h"
+#include "keyboard.h"
 #include "ui_keyboard.h"
 #include "ui_icons.h"
 #include "ui_theme.h"
@@ -40,6 +41,7 @@
 #include "spectrum.h"
 #include "db.h"
 #include "test_control.h"
+#include "filedb.h"
 
 // Global quit flag
 static bool quit = false;
@@ -85,7 +87,7 @@ static void print_usage(const char* program) {
         "\n"
         "Commands of the control channel, one step for each line:\n"
         "  press(BTN)  press(BTN, n)  hold(BTN, ms)  hold(BTN, keep)  release(BTN)\n"
-        "  wait(ms)  screenshot(path)  sql(sql)  keep()  quit()\n"
+        "  wait(ms)  wait_scan()  screenshot(path)  sql(sql)  keep()  quit()\n"
         "\n"
         "BTN is UP, DOWN, LEFT, RIGHT, A, B, X, Y, START, SELECT, L1, R1, L2, R2,\n"
         "MENU, PLUS, MINUS or POWER.\n"
@@ -171,6 +173,7 @@ int main(int argc, char* argv[]) {
     WIFI_init();
     psa_crypto_init();
     Icons_init();
+    Keyboard_init();
 
     signal(SIGINT, sigHandler);
     signal(SIGTERM, sigHandler);
@@ -179,6 +182,9 @@ int main(int argc, char* argv[]) {
     if (!Db_init()) {
         LOG_error("Database is unavailable, continuing without it\n");
     }
+
+    // Start database-backed workers after schema and data migrations finish.
+    FileDb_start();
 
     Settings_init();
 
@@ -282,6 +288,7 @@ int main(int argc, char* argv[]) {
 cleanup:
     Background_stopAll();
     Downloader_cleanup();
+    FileDb_quit();
     Settings_quit();
     ModuleCommon_quit();
     SelfUpdate_cleanup();

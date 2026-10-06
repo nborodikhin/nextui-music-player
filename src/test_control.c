@@ -15,6 +15,7 @@
 #include "db.h"
 #include "display_helper.h"
 #include "module_common.h"
+#include "filedb.h"
 #include "test_control.h"
 
 // Composes the screen and the layers of the platform into out, thus a
@@ -56,6 +57,7 @@ typedef enum {
     ACT_UP,
     ACT_SHOT,
     ACT_EXECUTE_SQL,
+    ACT_WAIT_SCAN,
     ACT_KEEP,
     ACT_QUIT,
 } ActionType;
@@ -113,6 +115,8 @@ static bool eof_ends_run = true;    // false for a FIFO that a path gives
 static bool input_eof = false;
 static bool keep_open = false;   // the end of the source does not stop the app
 static bool quit_asked = false;
+static bool wait_scan_active = false;
+static uint32_t wait_scan_started = 0;
 
 static Action   queue[MAX_ACTIONS];
 static int      queue_head = 0;
@@ -317,6 +321,8 @@ bool TestControl_init(const char* value) {
 
     active = true;
     cursor = 0;
+    wait_scan_active = false;
+    wait_scan_started = 0;
     return true;
 }
 
@@ -519,6 +525,17 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
         return base + (uint32_t)ms;
     }
 
+    if (strcmp(name, "wait_scan") == 0) {
+        if (arg1 && arg1[0] != '\0') {
+            reply("err %d wait_scan takes no arguments", line);
+            return base;
+        }
+        if (!push_action(ACT_WAIT_SCAN, base)) {
+            reply("err %d queue is full", line);
+        }
+        return base;
+    }
+
     if (strcmp(name, "screenshot") == 0) {
         if (!arg1 || arg1[0] == '\0' || strlen(arg1) >= MAX_PATH_LEN) {
             reply("err %d bad path", line);
@@ -684,7 +701,18 @@ static void take_screenshot(const Action* a) {
     SDL_FreeSurface(image);
 }
 
-static void run_due_actions(uint32_t now) {
+static void shift_after_wait(uint32_t held) {
+    for (int i = 1; i < queue_count; i++) {
+        Action* action = &queue[(queue_head + i) % MAX_ACTIONS];
+        action->at += held;
+    }
+    for (int i = 1; i < steps_count; i++) {
+        Step* step = &steps[(steps_head + i) % MAX_STEPS];
+        step->end += held;
+    }
+}
+
+static bool run_due_actions(uint32_t now) {
     while (queue_count > 0) {
         Action* a = &queue[queue_head];
         if (!time_reached(now, a->at)) break;
@@ -694,6 +722,20 @@ static void run_due_actions(uint32_t now) {
             case ACT_SHOT: take_screenshot(a); break;
             case ACT_EXECUTE_SQL:
                 if (!Db_execute(a->data.sql)) reply("err %d SQL failed", a->line);
+                break;
+            case ACT_WAIT_SCAN:
+                if (!FileDb_isIdle()) {
+                    if (!wait_scan_active) {
+                        wait_scan_active = true;
+                        wait_scan_started = now;
+                    }
+                    return true;
+                }
+                if (wait_scan_active) {
+                    shift_after_wait(now - wait_scan_started);
+                    wait_scan_active = false;
+                    steps[steps_head].end = now;
+                }
                 break;
             case ACT_KEEP: keep_open = true; break;
             case ACT_QUIT:
@@ -705,6 +747,7 @@ static void run_due_actions(uint32_t now) {
         queue_head = (queue_head + 1) % MAX_ACTIONS;
         queue_count--;
     }
+    return false;
 }
 
 static void reply_finished_steps(uint32_t now) {
@@ -723,9 +766,9 @@ void TestControl_tick(void) {
     read_input();
 
     uint32_t now = SDL_GetTicks();
-    run_due_actions(now);
+    bool wait_scan_holding = run_due_actions(now);
     if (quit_asked) return;
-    reply_finished_steps(now);
+    if (!wait_scan_holding) reply_finished_steps(now);
 
     if (input_eof && !keep_open && queue_count == 0 && steps_count == 0) {
         quit_asked = true;

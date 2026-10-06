@@ -11,10 +11,8 @@
 #include "module_downloader.h"
 #include "keyboard.h"
 #include "display_helper.h"
-#include "module_library.h"
 #include "downloader.h"
 #include "ui_downloader.h"
-#include "ui_main.h"
 #include "ui_utils.h"
 #include "wifi.h"
 #include "list_nav.h"
@@ -159,6 +157,8 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
         }
     }
 
+    Downloader_refreshIndex();
+
     DownloaderInternalState state = DOWNLOADER_INTERNAL_MENU;
     int dirty = 1;
     char search_query[256] = "";
@@ -287,6 +287,8 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
                 DownloaderResult* r = &results[results_nav.selected];
                 if (Downloader_isInQueue(r->video_id)) {
                     Toast_show("Already in queue", TOAST_DURATION);
+                } else if (Downloader_isDownloaded(r->title)) {
+                    Toast_show("Already downloaded", TOAST_DURATION);
                 } else {
                     int added = Downloader_queueAdd(r->video_id, r->title);
                     if (added == 1) {

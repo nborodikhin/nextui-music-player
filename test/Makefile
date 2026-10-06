@@ -63,6 +63,10 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
            $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
            $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
+TESTS   += $(BIN)/test_playlist_m3u
+TESTS   += $(BIN)/test_resume
+TESTS   += $(BIN)/test_filedb
+TESTS   += $(BIN)/test_playlist
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -143,7 +147,7 @@ $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c 
 
 DB_INC = $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
          -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
-TEST_TEMP_DIR ?= $(abspath ../.test_tmp/manual)
+TEST_TEMP_DIR ?= $(abspath ../.codex_tmp/tests/data)
 
 $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                 $(SRC)/db_statement.c $(SRC)/db_statement.h \
@@ -151,6 +155,7 @@ $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_s
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/db-music"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  -lsqlite3 -lpthread -lzip
@@ -162,9 +167,95 @@ $(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/settings-music"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
 	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
+
+M3U_TEST_MUSIC = $(TEST_TEMP_DIR)/playlist-music
+M3U_TEST_DB = $(TEST_TEMP_DIR)/playlist-m3u.db
+
+$(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
+                          $(SRC)/playlist_m3u.h $(SRC)/playlist.h \
+                          $(SRC)/filedb.c $(SRC)/filedb.h \
+                          $(SRC)/browser.h $(SRC)/db.c $(SRC)/db.h \
+                          $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                          $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                          $(SRC)/file_utils.c $(SRC)/file_utils.h \
+                          $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DMUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
+	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_MUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
+	  -DTEST_DATABASE_PATH='"$(M3U_TEST_DB)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/playlist-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_playlist_m3u.c $(SRC)/playlist_m3u.c $(SRC)/filedb.c $(SRC)/db.c \
+	  $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  $(SRC)/utf8.c \
+	  -lsqlite3 -lpthread -lzip
+
+RESUME_TEST_MUSIC = $(TEST_TEMP_DIR)/resume-music
+RESUME_TEST_DB = $(TEST_TEMP_DIR)/resume.db
+
+$(BIN)/test_resume: test_resume.c $(SRC)/resume.c $(SRC)/resume.h \
+                     $(SRC)/filedb.c $(SRC)/filedb.h \
+                     $(SRC)/playlist_m3u.c $(SRC)/playlist_m3u.h \
+                     $(SRC)/playlist.h $(SRC)/browser.h $(SRC)/db.c \
+                     $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                     $(SRC)/file_utils.c $(SRC)/file_utils.h \
+                     $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DMUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
+	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DTEST_MUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
+	  -DTEST_DATABASE_PATH='"$(RESUME_TEST_DB)"' \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/resume-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_resume.c $(SRC)/resume.c $(SRC)/filedb.c $(SRC)/playlist_m3u.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c \
+	  $(SRC)/file_utils.c $(SRC)/utf8.c -lsqlite3 -lpthread -lzip
+
+FILEDB_TEST_MUSIC = $(TEST_TEMP_DIR)/filedb-music
+FILEDB_TEST_DB = $(TEST_TEMP_DIR)/filedb.db
+
+$(BIN)/test_filedb: test_filedb.c $(SRC)/filedb.c $(SRC)/filedb.h \
+                     $(SRC)/browser.c $(SRC)/browser.h \
+                     $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                     $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/filedb-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DMUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
+	  -DFILEDB_MUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
+	  -DFILEDB_DATABASE_PATH='"$(FILEDB_TEST_DB)"' \
+	  -o $@ test_filedb.c $(SRC)/filedb.c $(SRC)/browser.c $(SRC)/db.c $(SRC)/db_schema.c \
+	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
+
+PLAYLIST_TEST_MUSIC = $(TEST_TEMP_DIR)/queue-music
+PLAYLIST_TEST_DB = $(TEST_TEMP_DIR)/queue.db
+
+$(BIN)/test_playlist: test_playlist.c $(SRC)/playlist.c $(SRC)/playlist.h \
+                       $(SRC)/filedb.c $(SRC)/filedb.h \
+                       $(SRC)/browser.c $(SRC)/browser.h \
+                       $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
+                       $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(DB_INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/queue-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -DMUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
+	  -DPLAYLIST_MUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
+	  -DPLAYLIST_DATABASE_PATH='"$(PLAYLIST_TEST_DB)"' \
+	  -o $@ test_playlist.c $(SRC)/playlist.c $(SRC)/filedb.c $(SRC)/browser.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  -lsqlite3 -lpthread -lzip
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib
@@ -211,6 +302,7 @@ $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/file-utils-userdata"' \
+	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/file-utils-music"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 

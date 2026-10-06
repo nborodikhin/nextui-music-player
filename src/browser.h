@@ -1,18 +1,15 @@
 #ifndef __BROWSER_H__
 #define __BROWSER_H__
 
+#include <stddef.h>
 #include <stdbool.h>
 #include "defines.h"
-#include "player.h"  // For AudioFormat
-
-// The root of the library: the browser starts here, and a title gives a path
-// from here.
-#define MUSIC_PATH SDCARD_PATH "/Music"
+#include "player.h"
 
 // File entry structure
 typedef struct {
+    int db_id;         // id of the dirs or files row, by is_dir; -1 for Play All
     char name[256];
-    char path[512];
     bool is_dir;
     bool is_play_all;  // Special "Play All" entry for folders with only subfolders
     AudioFormat format;
@@ -20,7 +17,12 @@ typedef struct {
 
 // Browser context structure
 typedef struct {
-    char current_path[512];
+    int data_version;
+    char current_path[512];   // relative to the Music root, empty for the root
+    int dir_id;
+    bool is_root;         // the directory is the Music root, thus the list has no ".." entry
+    bool root_no_music;   // no directory or a subdirectory holds music; set for the root only
+    int audio_count;      // audio file entries in the list
     FileEntry* entries;
     int entry_count;
     int selected;
@@ -32,24 +34,13 @@ typedef struct {
 void Browser_freeEntries(BrowserContext* ctx);
 
 // Load directory contents
-void Browser_loadDirectory(BrowserContext* ctx, const char* path, const char* music_root);
+void Browser_loadDirectory(BrowserContext* ctx, int dir_id);
 
-// Get display name for file (without extension)
-void Browser_getDisplayName(const char* filename, char* out, int max_len);
+// Returns true when the database changed after the list was built. Does not change ctx.
+bool Browser_hasUpdate(const BrowserContext* ctx);
 
-// Count audio files in browser
-int Browser_countAudioFiles(const BrowserContext* ctx);
-
-// Get current track number (1-based)
-int Browser_getCurrentTrackNumber(const BrowserContext* ctx);
-
-// Check if file is a supported audio format
-bool Browser_isAudioFile(const char* filename);
-
-// Check if browser has a parent entry (..) — i.e., not at root
-bool Browser_hasParent(const BrowserContext* ctx);
-
-// Recursively check if any audio files exist under a directory
-bool Browser_hasAudioRecursive(const char* path);
+// Builds the list of the current directory again, and keeps the cursor on the same row.
+// Returns false when the build failed; ctx then keeps the previous list.
+bool Browser_refresh(BrowserContext* ctx);
 
 #endif

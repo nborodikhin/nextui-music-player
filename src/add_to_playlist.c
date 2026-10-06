@@ -4,7 +4,6 @@
 #include "defines.h"
 #include "api.h"
 #include "add_to_playlist.h"
-#include "file_utils.h"
 #include "playlist.h"
 #include "playlist_m3u.h"
 #include "keyboard.h"
@@ -12,47 +11,35 @@
 #include "ui_utils.h"
 #include "ui_theme.h"
 #include "toast.h"
-#include "module_common.h"
+
+// Limit of the files that one directory adds to a playlist.
+#define ADD_TO_PLAYLIST_MAX_FILES 1000
 
 // Internal state
 static bool active = false;
 
-static char** file_paths = NULL;
-static int    file_count  = 0;
+static PlaylistTrack* file_tracks = NULL;
+static int             file_count = 0;
 
 static PlaylistInfo playlists[MAX_PLAYLISTS];
 static int playlist_count = 0;
 static int selected = 0;
 static int scroll = 0;
 
-// Extract display name from a file path: basename without extension
-// TODO: prefer the track name from file metadata (ID3 / Vorbis comment / etc.)
-// over the filename when available; fall back to this only when metadata is missing.
-static void display_name_from_path(const char* path, char* out, int out_size) {
-    const char* base = strrchr(path, '/');
-    base = base ? base + 1 : path;
-    snprintf(out, out_size, "%s", base);
-    char* dot = strrchr(out, '.');
-    if (dot && dot != out) *dot = '\0';
-}
-
 static void free_file_list(void) {
-    Playlist_freePaths(file_paths, file_count);
-    file_paths = NULL;
-    file_count  = 0;
+    free(file_tracks);
+    file_tracks = NULL;
+    file_count = 0;
 }
 
-void AddToPlaylist_open(const char* path, const char* display_name) {
-    if (!path) return;
+void AddToPlaylist_open(int file_id) {
+    if (file_id <= 0) return;
     free_file_list();
 
-    file_paths = malloc(sizeof(char*));
-    if (!file_paths) return;
-    file_paths[0] = strdup(path);
-    if (!file_paths[0]) { free(file_paths); file_paths = NULL; return; }
+    file_tracks = calloc(1, sizeof(*file_tracks));
+    if (!file_tracks) return;
+    file_tracks[0].file_id = file_id;
     file_count = 1;
-
-    (void)display_name;  // unused — display name always derived from path at add time
 
     M3U_init();
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
@@ -61,12 +48,16 @@ void AddToPlaylist_open(const char* path, const char* display_name) {
     active = true;
 }
 
-void AddToPlaylist_openDir(const char* dir_path) {
-    if (!dir_path) return;
+void AddToPlaylist_openDir(int dir_id) {
+    if (dir_id < 0) return;
     free_file_list();
 
-    file_count = Playlist_collectPaths(dir_path, &file_paths, 1000);
-    if (file_count == 0) return;  // no audio files — no-op
+    file_count = Playlist_collectDirectory(dir_id, ADD_TO_PLAYLIST_MAX_FILES,
+                                           &file_tracks);
+    if (file_count <= 0) {
+        free_file_list();
+        return;
+    }
 
     M3U_init();
     playlist_count = M3U_listPlaylists(playlists, MAX_PLAYLISTS);
@@ -77,6 +68,16 @@ void AddToPlaylist_openDir(const char* dir_path) {
 
 bool AddToPlaylist_isActive(void) {
     return active;
+}
+
+// Appends the files of the dialog to a playlist. Returns the number of files added.
+static int add_files_to_playlist(int playlist_id) {
+    int* ids = calloc((size_t)file_count, sizeof(*ids));
+    if (!ids) return 0;
+    for (int i = 0; i < file_count; i++) ids[i] = file_tracks[i].file_id;
+    int added = M3U_addTracks(playlist_id, ids, file_count);
+    free(ids);
+    return added;
 }
 
 int AddToPlaylist_handleInput(void) {
@@ -101,25 +102,15 @@ int AddToPlaylist_handleInput(void) {
             // New Playlist
             char* name = Keyboard_open("Playlist name", MAX_PLAYLIST_NAME - 1);
             if (name && name[0]) {
-                char safe_name[MAX_PLAYLIST_NAME];
-                if (M3U_sanitizeName(name, safe_name, sizeof(safe_name)) &&
-                    M3U_create(name) == 0) {
-                    char new_path[512];
-                    int added = 0;
-                    char relative_path[sizeof("playlists/") + MAX_PLAYLIST_NAME + sizeof(".m3u")];
-                    snprintf(relative_path, sizeof(relative_path), "playlists/%s.m3u", safe_name);
-                    int length = userdata_snpath(relative_path, new_path, sizeof(new_path));
-                    if (length >= 0 && (size_t)length < sizeof(new_path)) {
-                        char dname[256];
-                        for (int i = 0; i < file_count; i++) {
-                            display_name_from_path(file_paths[i], dname, sizeof(dname));
-                            if (M3U_addTrack(new_path, file_paths[i], dname) == 0) added++;
-                        }
-                    }
+                int playlist_id = M3U_create(name);
+                PlaylistInfo* info = M3U_getInfo(playlist_id);
+                if (info) {
+                    int added = add_files_to_playlist(playlist_id);
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, safe_name);
+                    snprintf(msg, sizeof(msg), "Added %d/%d files to %s", added, file_count, info->name);
                     Toast_show(msg, TOAST_DURATION);
                 }
+                free(info);
                 free(name);
             }
             free_file_list();
@@ -129,12 +120,7 @@ int AddToPlaylist_handleInput(void) {
             // Existing playlist
             int idx = selected - 1;
             if (idx >= 0 && idx < playlist_count) {
-                int added = 0;
-                char dname[256];
-                for (int i = 0; i < file_count; i++) {
-                    display_name_from_path(file_paths[i], dname, sizeof(dname));
-                    if (M3U_addTrack(playlists[idx].path, file_paths[i], dname) == 0) added++;
-                }
+                int added = add_files_to_playlist(playlists[idx].id);
                 char msg[128];
                 snprintf(msg, sizeof(msg), "Added %d/%d files to %s",
                          added, file_count, playlists[idx].name);

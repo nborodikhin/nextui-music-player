@@ -4,6 +4,8 @@
 #include "defines.h"
 #include "api.h"
 #include "ui_music.h"
+
+#include "file_utils.h"
 #include "ui_fonts.h"
 #include "ui_icons.h"
 #include "ui_utils.h"
@@ -23,19 +25,13 @@ void render_browser(SDL_Surface* screen, int show_setting,
 
     // The path of the directory from the music root, thus the user sees where the
     // rows are. The root itself is "/".
-    const char* path = browser->current_path;
-    size_t root_len = strlen(MUSIC_PATH);
-    if (strncmp(path, MUSIC_PATH, root_len) == 0 && (path[root_len] == '/' || path[root_len] == '\0')) {
-        path += root_len;
-    }
-    render_screen_header(screen, path[0] ? path : "/", show_setting);
+    char path[sizeof(browser->current_path) + 1];
+    snprintf(path, sizeof(path), "/%s", browser->current_path);
+    render_screen_header(screen, path, show_setting);
 
-    // Empty state at root: no playable music anywhere
-    if (Browser_countAudioFiles(browser) == 0 && !Browser_hasParent(browser)) {
-        if (!Browser_hasAudioRecursive(browser->current_path)) {
-            render_empty_state(screen, "No music files found", "Add music to /Music on your SD card", NULL);
-            return;
-        }
+    if (browser->root_no_music) {
+        render_empty_state(screen, "No music files found", "Add music to /Music on your SD card", NULL);
+        return;
     }
 
     // Use common list layout calculation
@@ -64,7 +60,7 @@ void render_browser(SDL_Surface* screen, int show_setting,
                 strncpy(display, entry->name, sizeof(display) - 1);
                 display[sizeof(display) - 1] = '\0';
             } else {
-                Browser_getDisplayName(entry->name, display, sizeof(display));
+                get_file_display_name(entry->name, display, sizeof(display));
             }
         } else {
             // Without icons, use text indicators
@@ -73,7 +69,7 @@ void render_browser(SDL_Surface* screen, int show_setting,
             } else if (entry->is_play_all) {
                 snprintf(display, sizeof(display), "> %s", entry->name);
             } else {
-                Browser_getDisplayName(entry->name, display, sizeof(display));
+                get_file_display_name(entry->name, display, sizeof(display));
             }
         }
 

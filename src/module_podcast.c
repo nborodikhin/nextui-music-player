@@ -171,7 +171,6 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
 
 ModuleExitReason PodcastModule_run(DisplayContext* display) {
     Podcast_init();
-    Keyboard_init();
     DisplayHelper_addRecreatedCallback(display_recreated);
 
     // Auto-check for new episodes once per app session

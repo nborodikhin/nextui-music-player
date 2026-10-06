@@ -194,6 +194,18 @@ static bool remove_spectrum_settings_file(sqlite3* database) {
     return true;
 }
 
+static bool remove_resume_file(sqlite3* database) {
+    (void)database;
+    char path[512];
+    int length = userdata_snpath("resume.cfg", path, sizeof(path));
+    if (length < 0 || (size_t)length >= sizeof(path)) return false;
+    if (remove(path) != 0 && errno != ENOENT) {
+        LOG_error("[Db] failed to remove resume file: %s\n", strerror(errno));
+        return false;
+    }
+    return true;
+}
+
 static DbMigrationStep *migration_plan;
 static size_t migration_count;
 static bool count_only;
@@ -237,8 +249,40 @@ static void migrations(void) {
     function(copy_spectrum_settings_data);
     function(remove_spectrum_settings_file);
     function(copy_settings_data);
+    // 5
     function(remove_settings_file);
-    // 6
+    sql("CREATE TABLE dirs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "parent_id INTEGER REFERENCES dirs(id) ON DELETE CASCADE,"
+        "path TEXT NOT NULL UNIQUE,"
+        "filename TEXT NOT NULL"
+        ")");
+    // The Music root is the directory with no parent.
+    sql("INSERT INTO dirs (parent_id, path, filename) VALUES (NULL, '', '')");
+    sql("CREATE TABLE files ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "parent_id INTEGER NOT NULL REFERENCES dirs(id) ON DELETE CASCADE,"
+        "filename TEXT NOT NULL,"
+        "type TEXT NOT NULL DEFAULT 'unknown',"
+        "UNIQUE (parent_id, filename)"
+        ")");
+    sql("CREATE INDEX dirs_parent ON dirs (parent_id)");
+    // 10
+    sql("CREATE TABLE playlists ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "path TEXT NOT NULL UNIQUE,"
+        "num_entries INTEGER"
+        ")");
+    sql("CREATE TABLE last_played ("
+        "type TEXT PRIMARY KEY,"
+        "id1 INTEGER NOT NULL,"
+        "id2 INTEGER NOT NULL,"
+        "position INTEGER NOT NULL DEFAULT 0,"
+        "is_last TEXT NOT NULL DEFAULT 'false',"
+        "track_name TEXT"
+        ")");
+    function(remove_resume_file);
+    // 13
 }
 
 DbMigrationStep *DbSchema_getSteps(void) {

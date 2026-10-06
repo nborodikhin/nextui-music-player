@@ -104,6 +104,15 @@ static void draw_lyric_window(SDL_Surface* screen, int x, int top, int bottom, i
     lyrics_shown_count = count;
 }
 
+// Returns the 1-based number of the selected track among the audio files of the browser.
+static int current_track_number(const BrowserContext* ctx) {
+    int num = 0;
+    for (int i = 0; i <= ctx->selected && i < ctx->entry_count; i++) {
+        if (!ctx->entries[i].is_dir && !ctx->entries[i].is_play_all) num++;
+    }
+    return num;
+}
+
 void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *browser,
                     bool shuffle_enabled, bool repeat_enabled,
                     int playlist_track_num, int playlist_total) {
@@ -130,8 +139,8 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
 
     // Track counter "01 - 03" (smaller, gray) - after the format badge
     // Use playlist counts if available (playlist_total > 0), otherwise use browser counts
-    int track_num = (playlist_total > 0) ? playlist_track_num : Browser_getCurrentTrackNumber(browser);
-    int total_tracks = (playlist_total > 0) ? playlist_total : Browser_countAudioFiles(browser);
+    int track_num = (playlist_total > 0) ? playlist_track_num : current_track_number(browser);
+    int total_tracks = (playlist_total > 0) ? playlist_total : browser->audio_count;
     char track_str[32];
     snprintf(track_str, sizeof(track_str), "%02d - %02d", track_num, total_tracks);
     SDL_Surface *track_surf = TTF_RenderUTF8_Blended(
