@@ -217,6 +217,8 @@ tests:
 ./dev clean --deps                     # also remove the dependency checkouts
 
 # Inspect or update release versions and changelog notes
+./dev version get                     # local build version
+./dev version get --strict --tag v1.17.0
 ./dev version latest
 ./dev version list
 
@@ -229,6 +231,16 @@ tests:
 ./dev docker 5040 -- ls
 ./dev docker 5040 --podman -- ls
 ```
+
+For a stable release, use `./dev version create vMAJOR.MINOR.PATCH <note>` to
+prepare `pak.json`, then commit that preparation and push the matching tag.
+For a pre-release, push a tag such as `v1.18.0-beta.1`. Do not run
+`version create`. A pre-release keeps the version and changelog in `pak.json`
+of the latest stable release.
+
+Each build command accepts `--version <value>`. Without it, the binary holds
+the highest official tag that HEAD contains, with `+local`. Without an official
+tag, it uses the stable version in `pak.json`, with `+local`.
 
 ### Build Kinds
 
@@ -271,6 +283,9 @@ Use `--full` to install the complete pak and `--delete` to remove stale files
 from the installed pak before uploading it (userdata is not cleared).
 Passing a path to a `.zip` pak alongside a device target skips the build and
 installs that archive as a full pak (`--delete` still applies).
+`--delete-data` removes the data of the app (settings, database, playlists,
+podcasts) from `.userdata/shared/music-player` on the device before the install.
+It does not remove the pak, thus combine it with `--delete` for a clean install.
 
 ### Driving the App from a Script
 

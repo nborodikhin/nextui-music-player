@@ -1,4 +1,6 @@
 #include "selfupdate.h"
+#include "version_order.h"
+#include "version.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
 
@@ -30,7 +32,6 @@
 
 // Paths
 static char pak_path[512] = "";
-static char version_file[512] = "";
 static char current_version[32] = "";
 
 // Update status
@@ -85,22 +86,7 @@ static bool report_download_progress(long written, int speed_bps, void* ctx) {
     return !update_cancel;
 }
 
-// Compare semantic versions: returns positive if v1 > v2, negative if v1 < v2, 0 if equal
-static int compare_versions(const char* v1, const char* v2) {
-    int major1 = 0, minor1 = 0, patch1 = 0;
-    int major2 = 0, minor2 = 0, patch2 = 0;
 
-    // Skip 'v' prefix if present
-    if (v1[0] == 'v' || v1[0] == 'V') v1++;
-    if (v2[0] == 'v' || v2[0] == 'V') v2++;
-
-    sscanf(v1, "%d.%d.%d", &major1, &minor1, &patch1);
-    sscanf(v2, "%d.%d.%d", &major2, &minor2, &patch2);
-
-    if (major1 != major2) return major1 - major2;
-    if (minor1 != minor2) return minor1 - minor2;
-    return patch1 - patch2;
-}
 
 
 // Written on the device rather than shipped, keyed by their path relative to the
@@ -154,6 +140,15 @@ static void note_file_installed(const char* rel_path, void* ctx) {
         "%d / %d files", done, extracted_files);
 }
 
+static bool has_preserved_child(const char* rel_path) {
+    size_t length = strlen(rel_path);
+    for (int i = 0; preserved_paths[i]; i++) {
+        if (strncmp(preserved_paths[i], rel_path, length) == 0 &&
+            preserved_paths[i][length] == '/') return true;
+    }
+    return false;
+}
+
 // Delete anything in dst that the update no longer carries, except the paths
 // written on the device rather than shipped.
 // rel is the path of dst relative to the pak root ("" at the top level).
@@ -176,7 +171,13 @@ static void remove_orphans(const char* src, const char* dst, const char* rel) {
             if (is_preserved(rel_path)) {
                 continue;
             }
-            rm_rf(dst_path);
+            struct stat status;
+            if (lstat(dst_path, &status) == 0 && S_ISDIR(status.st_mode) &&
+                has_preserved_child(rel_path)) {
+                remove_orphans(src_path, dst_path, rel_path);
+            } else {
+                rm_rf(dst_path);
+            }
         }
         else if (entry->d_type == DT_DIR) {
             remove_orphans(src_path, dst_path, rel_path);
@@ -202,23 +203,7 @@ int SelfUpdate_init(const char* path) {
 
     strncpy(pak_path, path, sizeof(pak_path) - 1);
 
-    // Set up paths
-    snprintf(version_file, sizeof(version_file), "%s/state/app_version.txt", pak_path);
-
-    // Read version from file (primary source)
-    strncpy(current_version, APP_VERSION_FALLBACK, sizeof(current_version) - 1);
-    FILE* f = fopen(version_file, "r");
-    if (f) {
-        char file_version[32] = "";
-        if (fgets(file_version, sizeof(file_version), f)) {
-            char* nl = strchr(file_version, '\n');
-            if (nl) *nl = '\0';
-            if (strlen(file_version) > 0) {
-                strncpy(current_version, file_version, sizeof(current_version) - 1);
-            }
-        }
-        fclose(f);
-    }
+    snprintf(current_version, sizeof(current_version), "%s", APP_VERSION);
 
     memset(&update_status, 0, sizeof(update_status));
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
@@ -383,7 +368,8 @@ static void* check_thread_func(void* arg) {
     JSON_Object* release = json_root ? json_value_get_object(json_root) : NULL;
     const char* latest_version = release ? json_object_get_string(release, "tag_name") : NULL;
 
-    if (!latest_version || latest_version[0] == '\0') {
+    if (!Version_isValid(latest_version) ||
+        strlen(latest_version) >= sizeof(update_status.latest_version)) {
         json_value_free(json_root);
         strcpy(update_status.error_message, "Could not parse version");
         update_status.state = SELFUPDATE_STATE_ERROR;
@@ -396,7 +382,7 @@ static void* check_thread_func(void* arg) {
     update_status.progress_percent = 70;
 
     // Compare versions using semantic versioning
-    if (compare_versions(latest_version, current_version) <= 0) {
+    if (Version_compare(latest_version, current_version) <= 0) {
         json_value_free(json_root);
         update_status.update_available = false;
         strcpy(update_status.status_message, "Already up to date");
@@ -576,13 +562,6 @@ static void* update_thread_func(void* arg) {
     }
 
     update_status.progress_percent = 95;
-
-    // Update version file (in case state/ wasn't in the package or needs override)
-    FILE* vf = fopen(version_file, "w");
-    if (vf) {
-        fprintf(vf, "%s\n", update_status.latest_version);
-        fclose(vf);
-    }
 
     // Sync filesystem
     sync();

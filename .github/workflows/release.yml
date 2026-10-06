@@ -10,26 +10,64 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Require a tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" != tag ]; then
+            echo 'A release requires a tag.' >&2
+            exit 1
+          fi
+
+      - name: Checkout Music Player
+        uses: actions/checkout@v7
+
+      - name: Check release version
+        id: version
+        run: |
+          VERSION=$(./dev version get --strict --tag "$GITHUB_REF_NAME")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo 'prerelease=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'prerelease=false' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: version
     uses: ./.github/workflows/test.yml
 
   release:
-    needs: test
+    needs: [version, test]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - name: Checkout Music Player
         uses: actions/checkout@v7
 
       - name: Build and package release
-        run: ./dev dist all --strict
+        run: ./dev dist all --strict --version "$VERSION"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          FLAGS=(--latest)
+          if [ "$PRERELEASE" = true ]; then
+            FLAGS=(--prerelease --latest=false)
+          fi
           gh release create "$VERSION" \
-            --repo ${{ github.repository }} \
+            --verify-tag \
             --title "$VERSION" \
             --generate-notes \
+            "${FLAGS[@]}" \
             "${{ github.workspace }}/dist/Music.Player.pak.zip"

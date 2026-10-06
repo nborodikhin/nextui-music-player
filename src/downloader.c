@@ -147,6 +147,9 @@ static void ensure_paths(void) {
 
     char music_dir[512];
     snprintf(music_dir, sizeof(music_dir), "%s/Music", SDCARD_PATH);
+    char state_dir[512];
+    snprintf(state_dir, sizeof(state_dir), "%s/state", pak_path);
+    mkdir(state_dir, 0755);
     mkdir(music_dir, 0755);
     mkdir(download_dir, 0755);
 

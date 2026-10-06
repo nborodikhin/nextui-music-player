@@ -13,7 +13,6 @@
 #define APP_RELEASE_ASSET "Music.Player.pak.zip"
 
 // Fallback version if version file not found
-#define APP_VERSION_FALLBACK "0.0.0"
 
 // Self-update module states
 typedef enum {
@@ -54,7 +53,6 @@ typedef struct {
 
 // Initialize self-update module
 // pak_path: path to the .pak directory
-// Reads version from state/app_version.txt
 // Returns 0 on success, -1 on error
 int SelfUpdate_init(const char* pak_path);
 
