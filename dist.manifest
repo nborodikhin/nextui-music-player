@@ -5,7 +5,7 @@ pak.json
 launch.sh
 res/cacert.pem
 res/icon-*
-state/app_version.txt
+state/
 stations/*.json
 
 # Platform payload

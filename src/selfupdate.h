@@ -13,7 +13,6 @@
 #define APP_RELEASE_ASSET "Music.Player.pak.zip"
 
 // Fallback version if version file not found
-#define APP_VERSION_FALLBACK "0.0.0"
 
 // Self-update module states
 typedef enum {
@@ -54,7 +53,6 @@ typedef struct {
 
 // Initialize self-update module
 // pak_path: path to the .pak directory
-// Reads version from state/app_version.txt
 // Returns 0 on success, -1 on error
 int SelfUpdate_init(const char* pak_path);
 
@@ -96,5 +94,11 @@ void SelfUpdate_requestRestart(void);
 
 // Get current state
 SelfUpdateState SelfUpdate_getState(void);
+
+// Deletes each path in install_dir that pak_dir does not carry, except the paths
+// that the device writes. Keeps a directory that holds such a path, also when
+// pak_dir does not carry that directory, and deletes the rest of its contents.
+// pak_dir is the unpacked pak of the update. install_dir is the installed app.
+void SelfUpdate_removeObsoleteFiles(const char* pak_dir, const char* install_dir);
 
 #endif

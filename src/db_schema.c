@@ -194,6 +194,14 @@ static bool remove_spectrum_settings_file(sqlite3* database) {
     return true;
 }
 
+static bool remove_app_version_file(sqlite3* database) {
+    (void)database;
+    if (remove("state/app_version.txt") != 0 && errno != ENOENT) {
+        LOG_error("[Db] failed to remove app version file: %s\n", strerror(errno));
+    }
+    return true;
+}
+
 static DbMigrationStep *migration_plan;
 static size_t migration_count;
 static bool count_only;
@@ -228,7 +236,6 @@ static void migration(DbMigrationStep step) {
         .text     = stringify(FUNCTION),   \
     })
 
-
 static void migrations(void) {
     // note: each migration step runs in an sqlite transaction
     // 1
@@ -238,7 +245,8 @@ static void migrations(void) {
     function(remove_spectrum_settings_file);
     function(copy_settings_data);
     function(remove_settings_file);
-    // 6
+    function(remove_app_version_file);
+    // 7
 }
 
 DbMigrationStep *DbSchema_getSteps(void) {

@@ -86,6 +86,12 @@ TESTS   += $(BIN)/test_ui_fonts
 # desktop build as the two above do.
 TESTS   += $(BIN)/test_ui_music_playing
 
+TESTS   += $(BIN)/test_version
+
+# selfupdate_install.c deletes files, thus its test works in directories of its own under
+# TEST_TEMP_DIR, as the test of file_utils.c does.
+TESTS   += $(BIN)/test_selfupdate_install
+
 .PHONY: all build check run clean
 all: run
 
@@ -193,19 +199,19 @@ desktop-objs:
 
 $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_utils.c $(SRC)/ui_utils.c \
-	  $(DESKTOP_LINK_OBJ) $(DESKTOP_LIBS)
+	  $(DESKTOP_LINK_OBJ) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_fonts.c \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
-	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
+	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_ui_music_playing.c \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
-	      | grep -v -e musicplayer.o) $(DESKTOP_LIBS)
+	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
@@ -220,3 +226,14 @@ run: check $(TESTS)
 
 clean:
 	rm -rf $(BIN)
+
+$(BIN)/test_version: test_version.c $(SRC)/version.c $(SRC)/version.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_version.c $(SRC)/version.c
+
+$(BIN)/test_selfupdate_install: test_selfupdate_install.c $(SRC)/selfupdate_install.c \
+                                $(SRC)/selfupdate.h $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+	mkdir -p "$(TEST_TEMP_DIR)"
+	$(CC) $(CFLAGS) $(INC) \
+	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/selfupdate-install-userdata"' \
+	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
+	  -o $@ test_selfupdate_install.c $(SRC)/selfupdate_install.c $(SRC)/file_utils.c -lzip

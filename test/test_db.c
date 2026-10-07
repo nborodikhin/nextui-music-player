@@ -121,7 +121,7 @@ TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
     CHECK(Db_isAvailable());
-    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 6);
     CHECK(sqlite_has_settings(database_path));
     stop_test();
 }
@@ -154,7 +154,7 @@ TEST(settings_file_migration_runs_ordered_actions) {
     CHECK(result && result->count == 5);
     Db_freeResult(result);
     CHECK(access(settings_path, F_OK) != 0);
-    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 6);
 
     Db_quit();
     CHECK(Db_initInternal(database_path));
@@ -193,7 +193,7 @@ TEST(failed_settings_migration_keeps_no_partial_rows) {
     CHECK(sqlite_exec(database_path, "DROP TRIGGER fail_bass"));
     CHECK(Db_initInternal(database_path));
     CHECK_EQ_INT(sqlite_settings_count(database_path), 2);
-    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 6);
     CHECK(access(settings_path, F_OK) != 0);
     stop_test();
 }
@@ -227,7 +227,7 @@ TEST(failed_schema_migration_rolls_back) {
     CHECK_EQ_INT(sqlite_user_version(database_path), 0);
     CHECK(sqlite_exec(database_path, "DROP TABLE settings"));
     CHECK(Db_initInternal(database_path));
-    CHECK_EQ_INT(sqlite_user_version(database_path), 5);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 6);
     stop_test();
 }
 

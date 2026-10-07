@@ -1,4 +1,5 @@
 #include "selfupdate.h"
+#include "version.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
 
@@ -8,7 +9,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <errno.h>
 #include <zip.h>
 
@@ -30,7 +30,6 @@
 
 // Paths
 static char pak_path[512] = "";
-static char version_file[512] = "";
 static char current_version[32] = "";
 
 // Update status
@@ -85,44 +84,8 @@ static bool report_download_progress(long written, int speed_bps, void* ctx) {
     return !update_cancel;
 }
 
-// Compare semantic versions: returns positive if v1 > v2, negative if v1 < v2, 0 if equal
-static int compare_versions(const char* v1, const char* v2) {
-    int major1 = 0, minor1 = 0, patch1 = 0;
-    int major2 = 0, minor2 = 0, patch2 = 0;
-
-    // Skip 'v' prefix if present
-    if (v1[0] == 'v' || v1[0] == 'V') v1++;
-    if (v2[0] == 'v' || v2[0] == 'V') v2++;
-
-    sscanf(v1, "%d.%d.%d", &major1, &minor1, &patch1);
-    sscanf(v2, "%d.%d.%d", &major2, &minor2, &patch2);
-
-    if (major1 != major2) return major1 - major2;
-    if (minor1 != minor2) return minor1 - minor2;
-    return patch1 - patch2;
-}
 
 
-// Written on the device rather than shipped, keyed by their path relative to the
-// pak root. They are absent from the package on purpose, so orphan removal must
-// not treat them as leftovers: the binaries cost tens of megabytes to re-fetch,
-// and the queue is the user's own pending work.
-// state/yt-dlp_version.txt is deliberately absent: it is a cache the next launch
-// rebuilds from the binary.
-static const char* const preserved_paths[] = {
-    "bin/yt-dlp",
-    "bin/qjs",
-    "bin/ffmpeg",
-    "state/youtube_queue.txt",
-    NULL
-};
-
-static bool is_preserved(const char* rel_path) {
-    for (int i = 0; preserved_paths[i]; i++) {
-        if (strcmp(preserved_paths[i], rel_path) == 0) return true;
-    }
-    return false;
-}
 
 // Drives the extract slice of the progress bar from the archive's entry count.
 static void note_entry_extracted(long done, long total, void* ctx) {
@@ -154,45 +117,13 @@ static void note_file_installed(const char* rel_path, void* ctx) {
         "%d / %d files", done, extracted_files);
 }
 
-// Delete anything in dst that the update no longer carries, except the paths
-// written on the device rather than shipped.
-// rel is the path of dst relative to the pak root ("" at the top level).
-static void remove_orphans(const char* src, const char* dst, const char* rel) {
-    DIR* dir = opendir(dst);
-    if (!dir) return;
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-
-        char src_path[600], dst_path[600], rel_path[600];
-        snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
-        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
-        snprintf(rel_path, sizeof(rel_path), "%s%s%s", rel, rel[0] ? "/" : "", entry->d_name);
-
-        if (access(src_path, F_OK) != 0) {
-            if (is_preserved(rel_path)) {
-                continue;
-            }
-            rm_rf(dst_path);
-        }
-        else if (entry->d_type == DT_DIR) {
-            remove_orphans(src_path, dst_path, rel_path);
-        }
-    }
-
-    closedir(dir);
-}
-
 // Install the unpacked update over the pak: copy everything across, then drop
 // whatever the new package no longer has.
 static int sync_directories(const char* src, const char* dst) {
     int installed = 0;
     if (!cp_rf(src, dst, note_file_installed, &installed)) return -1;
 
-    remove_orphans(src, dst, "");
+    SelfUpdate_removeObsoleteFiles(src, dst);
     return 0;
 }
 
@@ -202,23 +133,7 @@ int SelfUpdate_init(const char* path) {
 
     strncpy(pak_path, path, sizeof(pak_path) - 1);
 
-    // Set up paths
-    snprintf(version_file, sizeof(version_file), "%s/state/app_version.txt", pak_path);
-
-    // Read version from file (primary source)
-    strncpy(current_version, APP_VERSION_FALLBACK, sizeof(current_version) - 1);
-    FILE* f = fopen(version_file, "r");
-    if (f) {
-        char file_version[32] = "";
-        if (fgets(file_version, sizeof(file_version), f)) {
-            char* nl = strchr(file_version, '\n');
-            if (nl) *nl = '\0';
-            if (strlen(file_version) > 0) {
-                strncpy(current_version, file_version, sizeof(current_version) - 1);
-            }
-        }
-        fclose(f);
-    }
+    snprintf(current_version, sizeof(current_version), "%s", APP_VERSION);
 
     memset(&update_status, 0, sizeof(update_status));
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
@@ -383,7 +298,8 @@ static void* check_thread_func(void* arg) {
     JSON_Object* release = json_root ? json_value_get_object(json_root) : NULL;
     const char* latest_version = release ? json_object_get_string(release, "tag_name") : NULL;
 
-    if (!latest_version || latest_version[0] == '\0') {
+    if (!Version_isValid(latest_version) ||
+        strlen(latest_version) >= sizeof(update_status.latest_version)) {
         json_value_free(json_root);
         strcpy(update_status.error_message, "Could not parse version");
         update_status.state = SELFUPDATE_STATE_ERROR;
@@ -396,7 +312,7 @@ static void* check_thread_func(void* arg) {
     update_status.progress_percent = 70;
 
     // Compare versions using semantic versioning
-    if (compare_versions(latest_version, current_version) <= 0) {
+    if (Version_compare(latest_version, current_version) <= 0) {
         json_value_free(json_root);
         update_status.update_available = false;
         strcpy(update_status.status_message, "Already up to date");
@@ -564,7 +480,7 @@ static void* update_thread_func(void* arg) {
     strcpy(update_status.status_message, "Installing update...");
     update_status.progress_percent = 70;
 
-    // Sync all files: copy everything from update, remove orphaned files
+    // Sync all files: copy everything from update, remove obsolete files
     // This handles: musicplayer.elf, launch.sh, bin/, fonts/, stations/, state/, etc.
     // Note: Linux allows replacing a running binary - it continues from memory
     if (sync_directories(update_root, pak_path) != 0) {
@@ -576,13 +492,6 @@ static void* update_thread_func(void* arg) {
     }
 
     update_status.progress_percent = 95;
-
-    // Update version file (in case state/ wasn't in the package or needs override)
-    FILE* vf = fopen(version_file, "w");
-    if (vf) {
-        fprintf(vf, "%s\n", update_status.latest_version);
-        fclose(vf);
-    }
 
     // Sync filesystem
     sync();

@@ -33,6 +33,7 @@ ALL_PLATFORMS = DEVICE_PLATFORMS + ("desktop",)
 BUILD_KINDS = ("debug", "release")
 PAK_NAME = "Music Player.pak"
 REMOTE_ROOT = "/mnt/SDCARD/Tools"
+REMOTE_USERDATA = "/mnt/SDCARD/.userdata/shared/music-player"
 RESTART_FLAG = "/tmp/nextui-music-player.restart"
 MANIFEST = ROOT / "dist.manifest"
 DEPS_MANIFEST = ROOT / "deps.json"
@@ -42,7 +43,6 @@ DIST_DIR = ROOT / "dist"
 DIST_PAK = DIST_DIR / PAK_NAME
 DIST_ZIP = DIST_DIR / "Music.Player.pak.zip"
 PAK_FILE = ROOT / "pak.json"
-APP_VERSION_FILE = ROOT / "state/app_version.txt"
 SELFUPDATE_HEADER = ROOT / "src/selfupdate.h"
 QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
 QR_CODE_PNG = ROOT / "src/qr-code.png"
@@ -1264,7 +1264,12 @@ def build_desktop(kind):
         setup_marker.touch()
         print("Desktop workspace setup complete.")
 
+    installed_header = prefix_local / "include/msettings.h"
+    previous_header = installed_header.read_bytes() if installed_header.exists() else None
+    previous_stat = installed_header.stat() if previous_header is not None else None
     run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=env)
+    if previous_header is not None and installed_header.read_bytes() == previous_header:
+        os.utime(installed_header, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
     run_command(
         [
             "make",
@@ -1278,10 +1283,75 @@ def build_desktop(kind):
     )
 
 
-def build_platforms(platforms, runtime="docker", kind="debug"):
+VERSION_NUMBER = r"(0|[1-9][0-9]*)"
+VERSION_CORE = r"v" + r"\.".join([VERSION_NUMBER] * 3)
+STABLE_VERSION = re.compile(VERSION_CORE + r"\Z", re.ASCII)
+OFFICIAL_VERSION = re.compile(VERSION_CORE + r"(-[a-z]+\." + VERSION_NUMBER + r")?\Z", re.ASCII)
+BUILD_VERSION = re.compile(VERSION_CORE + r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+                           r"(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\Z", re.ASCII)
+VERSION_FORM = "vMAJOR.MINOR.PATCH[-pre-release][+build], no leading zeros, at most 31 characters"
+# A derived version adds "+" and a build identifier of up to seven characters to a release tag.
+RELEASE_TAG_MAX = 23
+
+
+def checked_version(value):
+    valid = isinstance(value, str) and len(value) <= 31 and BUILD_VERSION.fullmatch(value)
+    if valid and "-" in value.split("+", 1)[0]:
+        identifiers = value.split("+", 1)[0].split("-", 1)[1].split(".")
+        valid = all(not (item.isdigit() and len(item) > 1 and item[0] == "0")
+                    for item in identifiers)
+    if not valid:
+        raise DevError("Invalid version {!r}. Expected {}.".format(value, VERSION_FORM))
+    return value
+
+
+def official_version_order(value):
+    core, separator, prerelease = value[1:].partition("-")
+    numbers = tuple((len(part), part) for part in core.split("."))
+    if not separator:
+        return numbers, 1, ()
+    label, number = prerelease.split(".")
+    return numbers, 0, (label, len(number), number)
+
+
+def app_version(requested, identifier="local"):
+    if requested != "auto":
+        return checked_version(requested)
+    tags = []
+    try:
+        checkout = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+                                  capture_output=True, text=True)
+        if checkout.returncode == 0 and Path(checkout.stdout.strip()).resolve() == ROOT:
+            result = subprocess.run(["git", "-C", str(ROOT), "tag", "--merged", "HEAD"],
+                                    capture_output=True, text=True)
+            if result.returncode == 0:
+                tags = [tag for tag in result.stdout.splitlines()
+                        if OFFICIAL_VERSION.fullmatch(tag)]
+    except FileNotFoundError:
+        pass
+    if tags:
+        base = max(tags, key=official_version_order)
+    else:
+        base = load_pak().get("version")
+        if not isinstance(base, str) or not STABLE_VERSION.fullmatch(base):
+            raise DevError("pak.json must give a stable version, got {!r}.".format(base))
+    return checked_version(base + "+" + identifier)
+
+
+def write_app_version(platform, kind, version):
+    path = ROOT / "src" / "build" / kind / platform / "version_string.c"
+    content = '#include "version.h"\n\nconst char APP_VERSION[] = "' + version + '";\n'
+    if not path.exists() or path.read_text() != content:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
+def build_platforms(platforms, runtime="docker", kind="debug", requested_version="auto"):
+    version = app_version(requested_version)
     check_dependencies()
     for platform in platforms:
         print("== Building {} ({}) ==".format(platform, kind), flush=True)
+        write_app_version(platform, kind, version)
         if platform == "desktop":
             build_desktop(kind)
         else:
@@ -1290,6 +1360,7 @@ def build_platforms(platforms, runtime="docker", kind="debug"):
 
 def parse_manifest(platforms):
     entries = []
+    directories = []
     missing = []
     for line_number, raw_line in enumerate(MANIFEST.read_text().splitlines(), 1):
         line = raw_line.strip()
@@ -1310,6 +1381,14 @@ def parse_manifest(platforms):
             patterns.append(line)
 
         for pattern in patterns:
+            if pattern.endswith("/"):
+                directory = ROOT / pattern
+                try:
+                    directory.resolve().relative_to(ROOT)
+                except ValueError:
+                    raise DevError("Manifest entry escapes the repository: " + pattern)
+                directories.append(directory.relative_to(ROOT))
+                continue
             absolute_pattern = str(ROOT / pattern)
             matches = sorted(Path(path) for path in glob.glob(absolute_pattern, recursive=True))
             matches = [path for path in matches if path.is_file() or path.is_symlink()]
@@ -1323,7 +1402,7 @@ def parse_manifest(platforms):
                 except ValueError:
                     raise DevError("Manifest entry escapes the repository: " + str(path))
                 entries.append(path.relative_to(ROOT))
-    return unique(entries), missing
+    return unique(entries), unique(directories), missing
 
 
 def stage_package(platforms, strict):
@@ -1332,12 +1411,15 @@ def stage_package(platforms, strict):
         shutil.rmtree(DIST_PAK)
     DIST_PAK.mkdir(parents=True, exist_ok=True)
 
-    entries, missing = parse_manifest(platforms)
+    entries, directories, missing = parse_manifest(platforms)
     if missing:
         message = "Manifest patterns with no matches:\n  " + "\n  ".join(missing)
         if strict:
             raise DevError(message)
         print("WARNING: " + message, file=sys.stderr)
+
+    for relative in directories:
+        (DIST_PAK / relative).mkdir(parents=True, exist_ok=True)
 
     for relative in entries:
         source = ROOT / relative
@@ -1351,7 +1433,8 @@ def stage_package(platforms, strict):
             for path in DIST_PAK.rglob("*")
             if path.is_file() or path.is_symlink()
         }
-        expected = set(entries)
+        actual.update(relative for relative in directories if (DIST_PAK / relative).is_dir())
+        expected = set(entries) | set(directories)
         extra = sorted(actual - expected)
         absent = sorted(expected - actual)
         if extra or absent:
@@ -1371,7 +1454,7 @@ def create_zip(package_dir):
         DIST_ZIP.unlink()
     with zipfile.ZipFile(DIST_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(package_dir.rglob("*")):
-            if path.is_file():
+            if path.is_file() or (path.is_dir() and not any(path.iterdir())):
                 archive.write(path, path.relative_to(package_dir))
     return DIST_ZIP
 
@@ -1445,6 +1528,15 @@ def install_binary(device):
         flush=True,
     )
     adb(device, "push", str(source), destination_dir + "/musicplayer.elf")
+
+
+def delete_userdata(device):
+    stop_player(device, restart=False)
+    print(
+        "Removing app data from {}:{}".format(device.serial, REMOTE_USERDATA),
+        flush=True,
+    )
+    adb_shell(device, "rm", "-rf", REMOTE_USERDATA)
 
 
 def install_full(device, package, delete):
@@ -1767,6 +1859,31 @@ def normalize_version(version):
     return version if version.startswith("v") else "v" + version
 
 
+def version_get(_pak, args):
+    print(app_version("auto", args.identifier))
+    return 0
+
+
+def check_release_tag(tag):
+    if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > RELEASE_TAG_MAX:
+        raise DevError("Invalid release tag {!r}. Expected vMAJOR.MINOR.PATCH or "
+                       "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros, "
+                       "at most {} characters.".format(tag, RELEASE_TAG_MAX))
+
+
+def version_validate_release(pak, args):
+    tag = args.tag
+    check_release_tag(tag)
+    stable = pak.get("version")
+    if not isinstance(stable, str) or not STABLE_VERSION.fullmatch(stable):
+        raise DevError("pak.json must give a stable version, got {!r}.".format(stable))
+    if STABLE_VERSION.fullmatch(tag) and tag != stable:
+        raise DevError("Stable tag {} differs from pak.json version {}.".format(tag, stable))
+    print("{} is a valid {}.".format(
+        tag, "stable release" if STABLE_VERSION.fullmatch(tag) else "pre-release"))
+    return 0
+
+
 def version_latest(pak, _args):
     version = latest_version(pak)
     print("{}: {}".format(version, pak["changelog"][version]))
@@ -1886,6 +2003,10 @@ def update_qr_code_header(repo_url):
 
 def version_create(pak, args):
     version = normalize_version(args.version)
+    if not STABLE_VERSION.fullmatch(version):
+        raise DevError("Release preparation requires a stable version. "
+                       "A pre-release is a tag push, with no version create.")
+    check_release_tag(version)
     text = " ".join(args.text)
     if version in pak["changelog"]:
         raise DevError(
@@ -1899,8 +2020,6 @@ def version_create(pak, args):
     save_pak(pak)
     print("pak.json -> {}: {}".format(version, text))
 
-    APP_VERSION_FILE.write_text(version)
-    print("state/app_version.txt -> " + version)
     update_selfupdate_header(pak["repo_url"])
     update_qr_code_header(pak["repo_url"])
     return 0
@@ -1920,15 +2039,16 @@ def version_remove(pak, args):
         return 0
 
     was_current = pak["version"] == version
-    del pak["changelog"][version]
     if was_current:
-        if not pak["changelog"]:
-            raise DevError("No versions left after removal.")
-        new_version = latest_version(pak)
+        stable_versions = [key for key in pak["changelog"]
+                           if key != version and STABLE_VERSION.fullmatch(key)]
+        if not stable_versions:
+            raise DevError("No stable versions left after removal.")
+        new_version = max(stable_versions, key=official_version_order)
         pak["version"] = new_version
-        APP_VERSION_FILE.write_text(new_version)
         print("Current version updated to " + new_version)
 
+    del pak["changelog"][version]
     save_pak(pak)
     print("Removed {}.".format(version))
     return 0
@@ -1982,7 +2102,7 @@ def command_container(args):
 def command_build(args):
     platforms = resolve_build_platforms(args.targets)
     runtime = container_runtime(args)
-    build_platforms(platforms, runtime, args.kind)
+    build_platforms(platforms, runtime, args.kind, args.version)
     return 0
 
 
@@ -2015,7 +2135,7 @@ def command_dist(args):
         )
     check_dependencies(strict=args.strict and not args.allow_unpinned)
     runtime = container_runtime(args)
-    build_platforms(platforms, runtime, args.kind)
+    build_platforms(platforms, runtime, args.kind, args.version)
     if DIST_ZIP.exists():
         DIST_ZIP.unlink()
     package = stage_package(platforms, strict=args.strict)
@@ -2059,6 +2179,8 @@ def command_install_or_run(args, should_run):
         raise DevError("arguments after '--' go to the desktop app; add the desktop target")
 
     only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
+    if args.delete_data and has_desktop:
+        raise DevError("--delete-data applies to device targets only")
     if archive and only_desktop:
         raise DevError("installing a pak zip requires a device target")
     devices = [] if only_desktop else list_devices()
@@ -2067,7 +2189,7 @@ def command_install_or_run(args, should_run):
     )
     if not archive:
         runtime = container_runtime(args)
-        build_platforms(platforms, runtime, args.kind)
+        build_platforms(platforms, runtime, args.kind, args.version)
 
     by_platform = {}
     for device in device_targets:
@@ -2091,6 +2213,8 @@ def command_install_or_run(args, should_run):
 
             for device in matching_devices:
                 try:
+                    if args.delete_data:
+                        delete_userdata(device)
                     if package:
                         install_full(device, package, delete=args.delete)
                     else:
@@ -2195,6 +2319,11 @@ def command_log(args):
     ).returncode
 
 
+def add_version_option(parser):
+    parser.add_argument("--version", default="auto",
+                        help="version in the binary (default: auto, with +local)")
+
+
 def add_build_kind_option(parser, default):
     """Let the caller select what the compiler makes. The default differs by
     command: a local build is for a person who examines it, a package is for a
@@ -2242,6 +2371,7 @@ def add_install_options(parser, include_run, target_help):
     parser.add_argument("targets", nargs="*", metavar="target", help=target_help)
     add_container_runtime_options(parser)
     add_build_kind_option(parser, "debug")
+    add_version_option(parser)
     parser.add_argument(
         "--full",
         action="store_true",
@@ -2251,6 +2381,12 @@ def add_install_options(parser, include_run, target_help):
         "--delete",
         action="store_true",
         help="remove the installed pak before uploading it (implies --full)",
+    )
+    parser.add_argument(
+        "--delete-data",
+        action="store_true",
+        help="remove the data of the app from {} before installing "
+        "(does not imply --delete)".format(REMOTE_USERDATA),
     )
     if include_run:
         parser.add_argument("--run", action="store_true", help="run after installing")
@@ -2359,6 +2495,7 @@ def create_parser():
     )
     add_container_runtime_options(build)
     add_build_kind_option(build, "debug")
+    add_version_option(build)
     build.set_defaults(handler=command_build)
 
     test = subparsers.add_parser(
@@ -2388,7 +2525,7 @@ def create_parser():
         description="build and install",
         usage=(
             "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
-            "[--full] [--delete] [--run]"
+            "[--full] [--delete] [--delete-data] [--run]"
         ),
     )
     add_install_options(
@@ -2408,7 +2545,7 @@ def create_parser():
         description="build, install, and run",
         usage=(
             "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
-            "[--full] [--delete] [-f]\n"
+            "[--full] [--delete] [--delete-data] [-f]\n"
             "       %(prog)s desktop [-h] [--headless] [-- app-argument ...]"
         ),
         epilog=(
@@ -2459,6 +2596,7 @@ def create_parser():
     )
     add_container_runtime_options(dist)
     add_build_kind_option(dist, "release")
+    add_version_option(dist)
     dist.add_argument(
         "--no-zip",
         action="store_true",
@@ -2557,6 +2695,26 @@ def create_parser():
         title="commands",
         metavar="command",
     )
+
+    version_get_parser = version_commands.add_parser(
+        "get",
+        help="print the version that a build with no --version gets",
+        description="print the version that a build with no --version gets: the "
+        "highest release tag that HEAD contains, or the pak.json version, with "
+        "the build identifier after +",
+    )
+    version_get_parser.add_argument("--identifier", default="local",
+                                    help="build identifier after + (default: local)")
+    version_get_parser.set_defaults(version_handler=version_get)
+
+    version_validate_release_parser = version_commands.add_parser(
+        "validate-release",
+        help="validate a tag as a release",
+        description="validate that a tag has the release form and agrees with pak.json; "
+        "exit with a nonzero status if it does not",
+    )
+    version_validate_release_parser.add_argument("tag", help="the release tag")
+    version_validate_release_parser.set_defaults(version_handler=version_validate_release)
 
     version_latest_parser = version_commands.add_parser(
         "latest",
