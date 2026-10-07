@@ -1864,12 +1864,16 @@ def version_get(_pak, args):
     return 0
 
 
-def version_validate_release(pak, args):
-    tag = args.tag
+def check_release_tag(tag):
     if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > RELEASE_TAG_MAX:
         raise DevError("Invalid release tag {!r}. Expected vMAJOR.MINOR.PATCH or "
                        "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros, "
                        "at most {} characters.".format(tag, RELEASE_TAG_MAX))
+
+
+def version_validate_release(pak, args):
+    tag = args.tag
+    check_release_tag(tag)
     stable = pak.get("version")
     if not isinstance(stable, str) or not STABLE_VERSION.fullmatch(stable):
         raise DevError("pak.json must give a stable version, got {!r}.".format(stable))
@@ -2002,7 +2006,7 @@ def version_create(pak, args):
     if not STABLE_VERSION.fullmatch(version):
         raise DevError("Release preparation requires a stable version. "
                        "A pre-release is a tag push, with no version create.")
-    checked_version(version)
+    check_release_tag(version)
     text = " ".join(args.text)
     if version in pak["changelog"]:
         raise DevError(
