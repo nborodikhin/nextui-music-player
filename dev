@@ -1312,7 +1312,7 @@ def official_version_order(value):
     return numbers, 0, (label, len(number), number)
 
 
-def app_version(requested):
+def app_version(requested, identifier="local"):
     if requested != "auto":
         return checked_version(requested)
     tags = []
@@ -1333,11 +1333,11 @@ def app_version(requested):
         base = load_pak().get("version")
         if not isinstance(base, str) or not STABLE_VERSION.fullmatch(base):
             raise DevError("pak.json must give a stable version, got {!r}.".format(base))
-    return checked_version(base + "+local")
+    return checked_version(base + "+" + identifier)
 
 
 def write_app_version(platform, kind, version):
-    path = ROOT / "src" / "build" / kind / platform / "version.c"
+    path = ROOT / "src" / "build" / kind / platform / "version_string.c"
     content = '#include "version.h"\n\nconst char APP_VERSION[] = "' + version + '";\n'
     if not path.exists() or path.read_text() != content:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1857,41 +1857,24 @@ def normalize_version(version):
     return version if version.startswith("v") else "v" + version
 
 
-def version_get(pak, args):
-    if not args.strict:
-        if args.tag:
-            raise DevError("--tag requires --strict.")
-        print(app_version("auto"))
-        return 0
+def version_get(_pak, args):
+    print(app_version("auto", args.identifier))
+    return 0
 
-    changed = git(ROOT, "status", "--porcelain", "--untracked-files=no")
-    if changed:
-        raise DevError("Tracked files differ from HEAD:\n" + changed)
-    if args.tag:
-        tag_ref = "refs/tags/" + args.tag + "^{commit}"
-        try:
-            commit = git(ROOT, "rev-parse", "--verify", tag_ref)
-        except DevError:
-            raise DevError("Tag {!r} does not exist or does not name a commit.".format(args.tag))
-        if commit != git(ROOT, "rev-parse", "HEAD"):
-            raise DevError("Tag {!r} is not at HEAD.".format(args.tag))
-        candidates = [args.tag]
-    else:
-        candidates = git(ROOT, "tag", "--points-at", "HEAD").splitlines()
-        if not candidates:
-            raise DevError("HEAD has no tag.")
-    official = [tag for tag in candidates if OFFICIAL_VERSION.fullmatch(tag)]
-    if not official:
-        raise DevError("Invalid release tags: {}. Expected vMAJOR.MINOR.PATCH or "
+
+def version_validate_release(pak, args):
+    tag = args.tag
+    if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > 31:
+        raise DevError("Invalid release tag {!r}. Expected vMAJOR.MINOR.PATCH or "
                        "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros."
-                       .format(", ".join(candidates)))
-    version = checked_version(max(official, key=official_version_order))
+                       .format(tag))
     stable = pak.get("version")
     if not isinstance(stable, str) or not STABLE_VERSION.fullmatch(stable):
         raise DevError("pak.json must give a stable version, got {!r}.".format(stable))
-    if STABLE_VERSION.fullmatch(version) and version != stable:
-        raise DevError("Stable tag {} differs from pak.json version {}.".format(version, stable))
-    print(version)
+    if STABLE_VERSION.fullmatch(tag) and tag != stable:
+        raise DevError("Stable tag {} differs from pak.json version {}.".format(tag, stable))
+    print("{} is a valid {}.".format(
+        tag, "stable release" if STABLE_VERSION.fullmatch(tag) else "pre-release"))
     return 0
 
 
@@ -2651,13 +2634,23 @@ def create_parser():
 
     version_get_parser = version_commands.add_parser(
         "get",
-        help="print the build version or check the official release version",
-        description="print the build version or check the official release version",
+        help="print the version that a build with no --version gets",
+        description="print the version that a build with no --version gets: the "
+        "highest release tag that HEAD contains, or the pak.json version, with "
+        "the build identifier after +",
     )
-    version_get_parser.add_argument("--strict", action="store_true",
-                                    help="require a clean tree and an official tag at HEAD")
-    version_get_parser.add_argument("--tag", help="check this tag only, with --strict")
+    version_get_parser.add_argument("--identifier", default="local",
+                                    help="build identifier after + (default: local)")
     version_get_parser.set_defaults(version_handler=version_get)
+
+    version_validate_release_parser = version_commands.add_parser(
+        "validate-release",
+        help="validate a tag as a release",
+        description="validate that a tag has the release form and agrees with pak.json; "
+        "exit with a nonzero status if it does not",
+    )
+    version_validate_release_parser.add_argument("tag", help="the release tag")
+    version_validate_release_parser.set_defaults(version_handler=version_validate_release)
 
     version_latest_parser = version_commands.add_parser(
         "latest",

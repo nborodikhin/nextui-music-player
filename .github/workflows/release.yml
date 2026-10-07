@@ -31,7 +31,8 @@ jobs:
       - name: Check release version
         id: version
         run: |
-          VERSION=$(./dev version get --strict --tag "$GITHUB_REF_NAME")
+          VERSION="$GITHUB_REF_NAME"
+          ./dev version validate-release "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if [[ "$VERSION" == *-* ]]; then
             echo 'prerelease=true' >> "$GITHUB_OUTPUT"

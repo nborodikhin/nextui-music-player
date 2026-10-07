@@ -11,7 +11,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build and package
-        run: ./dev dist all
+        run: |
+          VERSION=$(./dev version get --identifier "${GITHUB_SHA::7}")
+          ./dev dist all --version "$VERSION"
 
       - name: Upload the pak
         uses: actions/upload-artifact@v7

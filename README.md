@@ -217,8 +217,9 @@ tests:
 ./dev clean --deps                     # also remove the dependency checkouts
 
 # Inspect or update release versions and changelog notes
-./dev version get                     # local build version
-./dev version get --strict --tag v1.17.0
+./dev version get                     # local build version: v1.17.0+local
+./dev version get --identifier abc1234   # v1.17.0+abc1234
+./dev version validate-release v1.18.0   # exit status 0 if the tag can be a release
 ./dev version latest
 ./dev version list
 

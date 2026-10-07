@@ -1,5 +1,4 @@
 #include "selfupdate.h"
-#include "version_order.h"
 #include "version.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
