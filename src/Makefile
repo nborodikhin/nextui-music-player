@@ -179,7 +179,7 @@ LOCAL_SRC = \
     musicplayer.c player.c playlist.c playlist_m3u.c \
     db.c db_schema.c db_statement.c debug.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
-    downloader.c selfupdate.c display_helper.c \
+    downloader.c selfupdate.c selfupdate_install.c display_helper.c \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \

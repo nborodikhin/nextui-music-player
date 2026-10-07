@@ -1290,6 +1290,8 @@ OFFICIAL_VERSION = re.compile(VERSION_CORE + r"(-[a-z]+\." + VERSION_NUMBER + r"
 BUILD_VERSION = re.compile(VERSION_CORE + r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
                            r"(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\Z", re.ASCII)
 VERSION_FORM = "vMAJOR.MINOR.PATCH[-pre-release][+build], no leading zeros, at most 31 characters"
+# A derived version adds "+" and a build identifier of up to seven characters to a release tag.
+RELEASE_TAG_MAX = 23
 
 
 def checked_version(value):
@@ -1864,10 +1866,10 @@ def version_get(_pak, args):
 
 def version_validate_release(pak, args):
     tag = args.tag
-    if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > 31:
+    if not OFFICIAL_VERSION.fullmatch(tag) or len(tag) > RELEASE_TAG_MAX:
         raise DevError("Invalid release tag {!r}. Expected vMAJOR.MINOR.PATCH or "
-                       "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros."
-                       .format(tag))
+                       "vMAJOR.MINOR.PATCH-<lowercase-label>.N, with no leading zeros, "
+                       "at most {} characters.".format(tag, RELEASE_TAG_MAX))
     stable = pak.get("version")
     if not isinstance(stable, str) or not STABLE_VERSION.fullmatch(stable):
         raise DevError("pak.json must give a stable version, got {!r}.".format(stable))
@@ -1999,7 +2001,7 @@ def version_create(pak, args):
     version = normalize_version(args.version)
     if not STABLE_VERSION.fullmatch(version):
         raise DevError("Release preparation requires a stable version. "
-                       "A beta release is a tag push, with no version create.")
+                       "A pre-release is a tag push, with no version create.")
     checked_version(version)
     text = " ".join(args.text)
     if version in pak["changelog"]:

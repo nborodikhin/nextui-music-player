@@ -95,4 +95,10 @@ void SelfUpdate_requestRestart(void);
 // Get current state
 SelfUpdateState SelfUpdate_getState(void);
 
+// Deletes each path in install_dir that pak_dir does not carry, except the paths
+// that the device writes. Keeps a directory that holds such a path, also when
+// pak_dir does not carry that directory, and deletes the rest of its contents.
+// pak_dir is the unpacked pak of the update. install_dir is the installed app.
+void SelfUpdate_removeObsoleteFiles(const char* pak_dir, const char* install_dir);
+
 #endif

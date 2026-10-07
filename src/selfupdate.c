@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <errno.h>
 #include <zip.h>
 
@@ -88,27 +87,6 @@ static bool report_download_progress(long written, int speed_bps, void* ctx) {
 
 
 
-// Written on the device rather than shipped, keyed by their path relative to the
-// pak root. They are absent from the package on purpose, so orphan removal must
-// not treat them as leftovers: the binaries cost tens of megabytes to re-fetch,
-// and the queue is the user's own pending work.
-// state/yt-dlp_version.txt is deliberately absent: it is a cache the next launch
-// rebuilds from the binary.
-static const char* const preserved_paths[] = {
-    "bin/yt-dlp",
-    "bin/qjs",
-    "bin/ffmpeg",
-    "state/youtube_queue.txt",
-    NULL
-};
-
-static bool is_preserved(const char* rel_path) {
-    for (int i = 0; preserved_paths[i]; i++) {
-        if (strcmp(preserved_paths[i], rel_path) == 0) return true;
-    }
-    return false;
-}
-
 // Drives the extract slice of the progress bar from the archive's entry count.
 static void note_entry_extracted(long done, long total, void* ctx) {
     (void)ctx;
@@ -139,60 +117,13 @@ static void note_file_installed(const char* rel_path, void* ctx) {
         "%d / %d files", done, extracted_files);
 }
 
-static bool has_preserved_child(const char* rel_path) {
-    size_t length = strlen(rel_path);
-    for (int i = 0; preserved_paths[i]; i++) {
-        if (strncmp(preserved_paths[i], rel_path, length) == 0 &&
-            preserved_paths[i][length] == '/') return true;
-    }
-    return false;
-}
-
-// Delete anything in dst that the update no longer carries, except the paths
-// written on the device rather than shipped.
-// rel is the path of dst relative to the pak root ("" at the top level).
-static void remove_orphans(const char* src, const char* dst, const char* rel) {
-    DIR* dir = opendir(dst);
-    if (!dir) return;
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-
-        char src_path[600], dst_path[600], rel_path[600];
-        snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
-        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
-        snprintf(rel_path, sizeof(rel_path), "%s%s%s", rel, rel[0] ? "/" : "", entry->d_name);
-
-        if (access(src_path, F_OK) != 0) {
-            if (is_preserved(rel_path)) {
-                continue;
-            }
-            struct stat status;
-            if (lstat(dst_path, &status) == 0 && S_ISDIR(status.st_mode) &&
-                has_preserved_child(rel_path)) {
-                remove_orphans(src_path, dst_path, rel_path);
-            } else {
-                rm_rf(dst_path);
-            }
-        }
-        else if (entry->d_type == DT_DIR) {
-            remove_orphans(src_path, dst_path, rel_path);
-        }
-    }
-
-    closedir(dir);
-}
-
 // Install the unpacked update over the pak: copy everything across, then drop
 // whatever the new package no longer has.
 static int sync_directories(const char* src, const char* dst) {
     int installed = 0;
     if (!cp_rf(src, dst, note_file_installed, &installed)) return -1;
 
-    remove_orphans(src, dst, "");
+    SelfUpdate_removeObsoleteFiles(src, dst);
     return 0;
 }
 
@@ -549,7 +480,7 @@ static void* update_thread_func(void* arg) {
     strcpy(update_status.status_message, "Installing update...");
     update_status.progress_percent = 70;
 
-    // Sync all files: copy everything from update, remove orphaned files
+    // Sync all files: copy everything from update, remove obsolete files
     // This handles: musicplayer.elf, launch.sh, bin/, fonts/, stations/, state/, etc.
     // Note: Linux allows replacing a running binary - it continues from memory
     if (sync_directories(update_root, pak_path) != 0) {
