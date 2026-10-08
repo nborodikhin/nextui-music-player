@@ -21,5 +21,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Music.Player.pak
-          path: dist/Music.Player.pak.zip
+          path: |
+            dist/Music.Player.pak.zip
+            dist/*.pakz
           if-no-files-found: error

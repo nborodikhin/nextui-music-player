@@ -18,13 +18,22 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Installation
 
 ### Manual Installation
+
+Each release has one `.pakz` package for each platform:
+
+| Device                         | Package                    |
+|--------------------------------|----------------------------|
+| TrimUI Brick, TrimUI Smart Pro | `Music.Player-tg5040.pakz` |
+| TrimUI Smart Pro S             | `Music.Player-tg5050.pakz` |
+| Miyoo Flip                     | `Music.Player-my355.pakz`  |
+| Anbernic RG XX (H700) devices  | `Music.Player-h700.pakz`   |
+
 1. Mount your NextUI SD card to a computer.
-2. Download the latest release file named `Music.Player.pak.zip` from Github.
-3. Copy the zip file to `/Tools/<PLATFORM>/Music.Player.pak.zip` (replace `<PLATFORM>` with your device: `tg5040`, `tg5050`, `my355`, or `h700`).
-4. Extract the zip in place, then delete the zip file.
-5. Confirm that there is a `/Tools/<PLATFORM>/Music.Player.pak` folder on your SD card.
-6. Rename the `Music.Player.pak` folder to `Music Player.pak`.
-7. Unmount your SD Card and insert it into your device.
+2. Download the `.pakz` package for device from the latest release on Github.
+3. Copy the package to the root of the SD card
+  - You can put several `.pakz` files if you use SD card on several devices.
+4. Unmount your SD card and insert it into your device.
+5. Start the device. NextUI installs each package and then deletes it.
 
 ### Pak Store Installation
 
@@ -211,7 +220,8 @@ tests:
 ./dev run device
 ./dev log device --follow
 
-# Build a release folder and ZIP package using the distribution manifest
+# Build the pak zip and one .pakz package for each platform, using the
+# distribution manifest
 ./dev dist all --strict
 
 # Remove generated local build and distribution output

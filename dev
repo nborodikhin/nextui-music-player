@@ -42,6 +42,9 @@ CONTAINER_PROJECT = "/root/workspace/nextui-music-player"
 DIST_DIR = ROOT / "dist"
 DIST_PAK = DIST_DIR / PAK_NAME
 DIST_ZIP = DIST_DIR / "Music.Player.pak.zip"
+# Each platform folder holds the tree that its .pakz package puts at the root
+# of the SD card.
+DIST_PAKZ_DIR = DIST_DIR / "pakz"
 PAK_FILE = ROOT / "pak.json"
 SELFUPDATE_HEADER = ROOT / "src/selfupdate.h"
 QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
@@ -83,12 +86,18 @@ class DevError(Exception):
     pass
 
 
+def sorted_subactions(action):
+    """Returns the commands of a subparsers action in alphabetical order of their
+    primary names. An alias gets no entry of its own."""
+    return sorted(action._get_subactions(), key=lambda command: command.dest)
+
+
 class CommandHelpFormatter(argparse.HelpFormatter):
     def _format_action(self, action):
         if isinstance(action, argparse._SubParsersAction):
             format_action = super()._format_action
             return "".join(
-                format_action(command) for command in action._get_subactions()
+                format_action(command) for command in sorted_subactions(action)
             )
         return super()._format_action(action)
 
@@ -1422,11 +1431,13 @@ def parse_manifest(platforms):
     return unique(entries), unique(directories), missing
 
 
-def stage_package(platforms, strict):
+def stage_package(platforms, destination, strict):
+    """Copy the files that the manifest gives for `platforms` into `destination`.
+    Returns `destination`."""
     platforms = tuple(unique(platforms))
-    if DIST_PAK.exists():
-        shutil.rmtree(DIST_PAK)
-    DIST_PAK.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
 
     entries, directories, missing = parse_manifest(platforms)
     if missing:
@@ -1436,21 +1447,21 @@ def stage_package(platforms, strict):
         print("WARNING: " + message, file=sys.stderr)
 
     for relative in directories:
-        (DIST_PAK / relative).mkdir(parents=True, exist_ok=True)
+        (destination / relative).mkdir(parents=True, exist_ok=True)
 
     for relative in entries:
         source = ROOT / relative
-        destination = DIST_PAK / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination, follow_symlinks=True)
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=True)
 
     if strict:
         actual = {
-            path.relative_to(DIST_PAK)
-            for path in DIST_PAK.rglob("*")
+            path.relative_to(destination)
+            for path in destination.rglob("*")
             if path.is_file() or path.is_symlink()
         }
-        actual.update(relative for relative in directories if (DIST_PAK / relative).is_dir())
+        actual.update(relative for relative in directories if (destination / relative).is_dir())
         expected = set(entries) | set(directories)
         extra = sorted(actual - expected)
         absent = sorted(expected - actual)
@@ -1462,18 +1473,20 @@ def stage_package(platforms, strict):
                 lines.append("Missing files:\n  " + "\n  ".join(map(str, absent)))
             raise DevError("\n".join(lines))
 
-    return DIST_PAK
+    return destination
 
 
-def create_zip(package_dir):
-    DIST_DIR.mkdir(parents=True, exist_ok=True)
-    if DIST_ZIP.exists():
-        DIST_ZIP.unlink()
-    with zipfile.ZipFile(DIST_ZIP, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(package_dir.rglob("*")):
+def create_zip(source_dir, archive_path):
+    """Pack `source_dir` into `archive_path`, with paths relative to `source_dir`.
+    Returns `archive_path`."""
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    if archive_path.exists():
+        archive_path.unlink()
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(source_dir.rglob("*")):
             if path.is_file() or (path.is_dir() and not any(path.iterdir())):
-                archive.write(path, path.relative_to(package_dir))
-    return DIST_ZIP
+                archive.write(path, path.relative_to(source_dir))
+    return archive_path
 
 
 def extract_package(archive, destination):
@@ -2144,6 +2157,17 @@ def command_clean(args):
     return 0
 
 
+def remove_packages():
+    """Remove the packages of an earlier run, thus dist/ holds only the
+    packages of this run."""
+    if DIST_ZIP.exists():
+        DIST_ZIP.unlink()
+    for archive in DIST_DIR.glob("Music.Player-*.pakz"):
+        archive.unlink()
+    if DIST_PAKZ_DIR.exists():
+        shutil.rmtree(DIST_PAKZ_DIR)
+
+
 def command_dist(args):
     platforms = resolve_dist_platforms(args.targets)
     if args.strict and set(platforms) != set(DEVICE_PLATFORMS):
@@ -2154,12 +2178,15 @@ def command_dist(args):
     check_dependencies(strict=args.strict and not args.allow_unpinned)
     runtime = container_runtime(args)
     build_platforms(platforms, runtime, args.kind, args.version)
-    if DIST_ZIP.exists():
-        DIST_ZIP.unlink()
-    package = stage_package(platforms, strict=args.strict)
+    remove_packages()
+    package = stage_package(platforms, DIST_PAK, strict=args.strict)
     print("Created " + str(package.relative_to(ROOT)))
-    if not args.no_zip:
-        archive = create_zip(package)
+    archive = create_zip(package, DIST_ZIP)
+    print("Created " + str(archive.relative_to(ROOT)))
+    for platform in platforms:
+        source = DIST_PAKZ_DIR / platform
+        stage_package((platform,), source / "Tools" / platform / PAK_NAME, strict=args.strict)
+        archive = create_zip(source, DIST_DIR / "Music.Player-{}.pakz".format(platform))
         print("Created " + str(archive.relative_to(ROOT)))
     return 0
 
@@ -2224,7 +2251,7 @@ def command_install_or_run(args, should_run):
             package = unpacked
             if full and not package:
                 try:
-                    package = stage_package((platform,), strict=False)
+                    package = stage_package((platform,), DIST_PAK, strict=False)
                 except DevError as error:
                     failures.append(str(error))
                     continue
@@ -2421,8 +2448,9 @@ def parser_tree_help(parser, path=()):
     for action in parser._actions:
         if not isinstance(action, argparse._SubParsersAction):
             continue
-        for name, subparser in action.choices.items():
-            blocks.extend(parser_tree_help(subparser, path + (name,)))
+        for command in sorted_subactions(action):
+            subparser = action.choices[command.dest]
+            blocks.extend(parser_tree_help(subparser, path + (command.dest,)))
     return blocks
 
 
@@ -2599,11 +2627,12 @@ def create_parser():
 
     dist = subparsers.add_parser(
         "dist",
-        help="build the app and create a distribution package",
-        description="build the app and create a distribution package",
+        help="build the app and create the distribution packages",
+        description="build the app and create the pak zip and one .pakz package "
+        "for each platform",
         usage=(
             "%(prog)s target [-h] [--docker | --podman] [--debug | --release] "
-            "[--no-zip] [--strict] [--allow-unpinned]"
+            "[--strict] [--allow-unpinned]"
         ),
     )
     dist.add_argument(
@@ -2615,11 +2644,6 @@ def create_parser():
     add_container_runtime_options(dist)
     add_build_kind_option(dist, "release")
     add_version_option(dist)
-    dist.add_argument(
-        "--no-zip",
-        action="store_true",
-        help="skip .pak.zip package creation",
-    )
     dist.add_argument(
         "--strict",
         action="store_true",
