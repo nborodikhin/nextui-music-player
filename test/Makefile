@@ -227,8 +227,9 @@ run: check $(TESTS)
 clean:
 	rm -rf $(BIN)
 
-$(BIN)/test_version: test_version.c $(SRC)/version.c $(SRC)/version.h test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_version.c $(SRC)/version.c
+$(BIN)/test_version: test_version.c $(SRC)/version.c $(SRC)/version.h \
+                     $(SRC)/include/parson/parson.c test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_version.c $(SRC)/version.c $(SRC)/include/parson/parson.c
 
 $(BIN)/test_selfupdate_install: test_selfupdate_install.c $(SRC)/selfupdate_install.c \
                                 $(SRC)/selfupdate.h $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)

@@ -244,9 +244,13 @@ static void migrations(void) {
     function(copy_spectrum_settings_data);
     function(remove_spectrum_settings_file);
     function(copy_settings_data);
+    // 5
     function(remove_settings_file);
     function(remove_app_version_file);
-    // 7
+    sql("UPDATE settings SET name = 'update_channel', type = 'string', "
+        "value = CASE value WHEN 'true' THEN 'stable' ELSE 'off' END "
+        "WHERE name = 'auto_update' AND type = 'bool'");
+    // 8
 }
 
 DbMigrationStep *DbSchema_getSteps(void) {

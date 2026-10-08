@@ -4,14 +4,14 @@
 #include <SDL2/SDL.h>
 
 // Settings menu items - stable IDs, matching display order.
-#define SETTINGS_ITEM_SCREEN_OFF    0
-#define SETTINGS_ITEM_BASS_FILTER   1
-#define SETTINGS_ITEM_SOFT_LIMITER  2
-#define SETTINGS_ITEM_AUTO_UPDATE   3
-#define SETTINGS_ITEM_CLEAR_CACHE   4
-#define SETTINGS_ITEM_UPDATE_YTDLP  5
-#define SETTINGS_ITEM_ABOUT         6
-#define SETTINGS_ITEM_COUNT         7
+#define SETTINGS_ITEM_SCREEN_OFF     0
+#define SETTINGS_ITEM_BASS_FILTER    1
+#define SETTINGS_ITEM_SOFT_LIMITER   2
+#define SETTINGS_ITEM_UPDATE_CHANNEL 3
+#define SETTINGS_ITEM_CLEAR_CACHE    4
+#define SETTINGS_ITEM_UPDATE_YTDLP   5
+#define SETTINGS_ITEM_ABOUT          6
+#define SETTINGS_ITEM_COUNT          7
 
 // Render the settings menu.
 // menu_selected: currently selected menu item

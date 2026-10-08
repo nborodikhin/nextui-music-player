@@ -32,9 +32,17 @@ const IntSetting SETTING_SOFT_LIMITER = {
     .fallback = 2,
 };
 
-const BoolSetting SETTING_AUTO_UPDATE = {
-    .name     = "auto_update",
-    .fallback = true,
+static const char* const update_channel_db_values[] = {
+    [UPDATE_CHANNEL_OFF]    = "off",
+    [UPDATE_CHANNEL_STABLE] = "stable",
+    [UPDATE_CHANNEL_BETA]   = "beta",
+    NULL,
+};
+
+const EnumSetting SETTING_UPDATE_CHANNEL = {
+    .name      = "update_channel",
+    .fallback  = UPDATE_CHANNEL_STABLE,
+    .db_values = update_channel_db_values,
 };
 
 typedef struct {
@@ -283,4 +291,42 @@ void Settings_setString(const StringSetting* key, const char* value) {
     pthread_mutex_unlock(&cache_mutex);
 
     if (updated) Db_saveStringSetting(key->name, value);
+}
+
+static int enum_count(const EnumSetting* key) {
+    int count = 0;
+    while (key->db_values[count]) count++;
+    return count;
+}
+
+static int get_enum(const EnumSetting* key) {
+    int index = find_entry(key->name);
+    if (index < 0 || cache[index].type != DB_SETTING_STRING || !cache[index].string_value) {
+        return key->fallback;
+    }
+    for (int value = 0; key->db_values[value]; value++) {
+        if (strcmp(key->db_values[value], cache[index].string_value) == 0) return value;
+    }
+    return key->fallback;
+}
+
+int Settings_getEnum(const EnumSetting* key) {
+    if (!key || !key->name || !key->db_values) return 0;
+
+    pthread_mutex_lock(&cache_mutex);
+    int value = get_enum(key);
+    pthread_mutex_unlock(&cache_mutex);
+    return value;
+}
+
+void Settings_setEnum(const EnumSetting* key, int value) {
+    if (!key || !key->name || !key->db_values) return;
+    if (value < 0 || value >= enum_count(key)) return;
+
+    const char* spelling = key->db_values[value];
+    pthread_mutex_lock(&cache_mutex);
+    bool updated = set_string(key->name, spelling);
+    pthread_mutex_unlock(&cache_mutex);
+
+    if (updated) Db_saveStringSetting(key->name, spelling);
 }

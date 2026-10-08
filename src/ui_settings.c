@@ -61,9 +61,9 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
                 label = "Soft Limiter";
                 value_str = SettingsModule_getSoftLimiterDisplayStr();
                 break;
-            case SETTINGS_ITEM_AUTO_UPDATE:
-                label = "Auto Update Check";
-                value_str = SettingsModule_getAutoUpdateDisplayStr();
+            case SETTINGS_ITEM_UPDATE_CHANNEL:
+                label = "Updates";
+                value_str = SettingsModule_getUpdateChannelDisplayStr();
                 break;
             case SETTINGS_ITEM_CLEAR_CACHE: {
                 long cache_size = album_art_get_cache_size();
@@ -149,7 +149,7 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF ||
         menu_selected == SETTINGS_ITEM_BASS_FILTER ||
         menu_selected == SETTINGS_ITEM_SOFT_LIMITER ||
-        menu_selected == SETTINGS_ITEM_AUTO_UPDATE) {
+        menu_selected == SETTINGS_ITEM_UPDATE_CHANNEL) {
         GFX_blitButtonGroup((char *[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
     } else {
         GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
