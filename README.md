@@ -10,6 +10,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
 - **my355** - Miyoo Flip
+- **h700** - Anbernic (H700)
 
 ![music_player](https://github.com/user-attachments/assets/de4fe612-1c48-4e98-9537-79504e20f299)
 
@@ -19,11 +20,11 @@ A comprehensive music playback application for NextUI featuring local file playb
 ### Manual Installation
 1. Mount your NextUI SD card to a computer.
 2. Download the latest release file named `Music.Player.pak.zip` from Github.
-3. Copy the zip file to `/Tools/<PLATFORM>/Music.Player.pak.zip` (replace `<PLATFORM>` with your device: `tg5040` or `tg5050`).
+3. Copy the zip file to `/Tools/<PLATFORM>/Music.Player.pak.zip` (replace `<PLATFORM>` with your device: `tg5040`, `tg5050`, `my355`, or `h700`).
 4. Extract the zip in place, then delete the zip file.
 5. Confirm that there is a `/Tools/<PLATFORM>/Music.Player.pak` folder on your SD card.
 6. Rename the `Music.Player.pak` folder to `Music Player.pak`.
-7. Unmount your SD Card and insert it into your TrimUI device.
+7. Unmount your SD Card and insert it into your device.
 
 ### Pak Store Installation
 
@@ -198,6 +199,7 @@ tests:
 # Build only
 ./dev build                            # desktop
 ./dev build brick tsps                 # tg5040 and tg5050
+./dev build h700                       # Anbernic H700
 
 # Run host-side unit tests
 ./dev test
@@ -402,11 +404,13 @@ nextui-music-player/         # This project
 │   └── workspace/
 │       ├── all/             # Shared code (common utilities, minarch)
 │       ├── tg5040/          # TrimUI Brick platform
-│       └── tg5050/          # TrimUI Smart Pro S platform
+│       ├── tg5050/          # TrimUI Smart Pro S platform
+│       └── h700/            # Anbernic H700 platform
 ├── src/                     # Source code
 ├── bin/                     # Platform binaries and runtime tools
 │   ├── tg5040/              # TrimUI Brick binary (musicplayer.elf)
 │   ├── tg5050/              # TrimUI Smart Pro S binary (musicplayer.elf)
+│   ├── h700/                # Anbernic H700 binary (musicplayer.elf)
 │   ├── yt-dlp               # YouTube downloader (installed on demand)
 │   ├── qjs                  # QuickJS, required by yt-dlp (installed on demand)
 │   ├── ffmpeg               # media convertor, required by yt-dlp (installed on demand)
@@ -429,4 +433,4 @@ The music player uses:
 - **Pak libraries**: where the firmware lacks a library, the pak carries one in
   `bin/<platform>/` and `launch.sh` loads it before `/usr/lib`. The build copies
   each one out of a toolchain image (`PAK_LIBRARIES` in `dev`); none is in git.
-  Today: libfdk-aac on tg5050 and my355, and SDL2_image 2.9 (JPEG decoder) on my355.
+  Today: libfdk-aac on tg5050, my355, and h700, and SDL2_image 2.9 (JPEG decoder) on my355 and h700.

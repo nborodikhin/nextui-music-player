@@ -28,7 +28,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-DEVICE_PLATFORMS = ("tg5040", "tg5050", "my355")
+DEVICE_PLATFORMS = ("tg5040", "tg5050", "my355", "h700")
 ALL_PLATFORMS = DEVICE_PLATFORMS + ("desktop",)
 BUILD_KINDS = ("debug", "release")
 PAK_NAME = "Music Player.pak"
@@ -56,7 +56,8 @@ YELLOW = "\033[1;33m"
 ALIASES = {
     "tg5040": ("tg5040", "5040", "brick", "brickpro", "tsp", "smartpro"),
     "tg5050": ("tg5050", "5050", "tsps", "smartpros"),
-    "my355": ("my355", "355", "flip", "miyooflip"),
+    "my355": ("my355", "355", "flip", "miyooflip", "miyoo"),
+    "h700": ("h700", "rgxx", "rgsp", "rg", "anbernic"),
     "desktop": ("desktop",),
 }
 
@@ -110,25 +111,32 @@ class PakLibrary:
     link: bool = False
 
 
-# libfdk-aac exists in the tg5040 image only; tg5050 and my355 borrow it.
-FDK_AAC = PakLibrary(
+# tg5050 and my355 use the AAC library from the tg5040 image.
+TG5040_FDK_AAC = PakLibrary(
     name   = "libfdk-aac.so.1",
     image  = "tg5040",
     source = SYSROOT_LIB + "/libfdk-aac.so.1",
     link   = True,
 )
 
-# SDL2_image 2.9 with the JPEG and PNG decoders compiled in. The firmware of
-# the Flip ships SDL2_image 2.0 with PNG only.
-SDL2_IMAGE = PakLibrary(
+# SDL2_image 2.9 with JPEG and PNG decoders. Flip and h700 firmware has no
+# JPEG decoder.
+MY355_SDL2_IMAGE = PakLibrary(
     name   = "libSDL2_image-2.0.so.0",
     image  = "my355",
     source = SYSROOT_LIB + "/libSDL2_image-2.0.so.0",
 )
 
+H700_FDK_AAC = PakLibrary(
+    name   = "libfdk-aac.so.1",
+    image  = "h700",
+    source = SYSROOT_LIB + "/libfdk-aac.so.1",
+)
+
 PAK_LIBRARIES = {
-    "tg5050": (FDK_AAC,),
-    "my355": (FDK_AAC, SDL2_IMAGE),
+    "tg5050": (TG5040_FDK_AAC,),
+    "my355": (TG5040_FDK_AAC, MY355_SDL2_IMAGE),
+    "h700": (H700_FDK_AAC, MY355_SDL2_IMAGE),
 }
 
 
@@ -1002,6 +1010,15 @@ def detect_device(device):
             hardware = identifier
             break
 
+    if platform == "unknown":
+        # Match the platform check in the NextUI updater.
+        model = "\n".join(adb_shell(
+            device, "cat", "/proc/device-tree/model", check=False
+        ))
+        if "sun50iw9" in model:
+            platform = "h700"
+            hardware = model.replace("\0", "").strip()
+
     return Device(
         serial=device.serial,
         state=device.state,
@@ -1598,6 +1615,7 @@ def clean_local():
         ROOT / "bin/tg5040/musicplayer.elf",
         ROOT / "bin/tg5050/musicplayer.elf",
         ROOT / "bin/my355/musicplayer.elf",
+        ROOT / "bin/h700/musicplayer.elf",
         ROOT / "bin/desktop/musicplayer.elf",
         ROOT / "Music.Player.pak.zip",
     ]
@@ -2491,7 +2509,7 @@ def create_parser():
         "targets",
         nargs="*",
         metavar="target",
-        help="one or more of desktop (default), tg5040, tg5050, my355, all",
+        help="one or more of desktop (default), tg5040, tg5050, my355, h700, all",
     )
     add_container_runtime_options(build)
     add_build_kind_option(build, "debug")
@@ -2532,7 +2550,7 @@ def create_parser():
         install,
         include_run=True,
         target_help=(
-            "one or more of desktop, tg5040, tg5050, my355, device, or an ADB serial "
+            "one or more of desktop, tg5040, tg5050, my355, h700, device, or an ADB serial "
             "(no default), plus an optional path to a pak zip to install "
             "instead of building"
         ),
@@ -2566,7 +2584,7 @@ def create_parser():
         run,
         include_run=False,
         target_help=(
-            "one or more of desktop (default), tg5040, tg5050, my355, device, or an "
+            "one or more of desktop (default), tg5040, tg5050, my355, h700, device, or an "
             "ADB serial, plus an optional path to a pak zip to install "
             "instead of building"
         ),
@@ -2592,7 +2610,7 @@ def create_parser():
         "targets",
         nargs="*",
         metavar="target",
-        help="one or more of all (default), tg5040, tg5050, my355",
+        help="one or more of all (default), tg5040, tg5050, my355, h700",
     )
     add_container_runtime_options(dist)
     add_build_kind_option(dist, "release")
@@ -2625,7 +2643,7 @@ def create_parser():
         nargs="*",
         metavar="target",
         help=(
-            "one or more of all (default), desktop, tg5040, tg5050, my355, device, "
+            "one or more of all (default), desktop, tg5040, tg5050, my355, h700, device, "
             "or an ADB serial; all is desktop and every connected device"
         ),
     )
@@ -2642,7 +2660,7 @@ def create_parser():
         nargs="*",
         metavar="target",
         help=(
-            "exactly one of device (default), tg5040, tg5050, my355, or an ADB serial; "
+            "exactly one of device (default), tg5040, tg5050, my355, h700, or an ADB serial; "
             "must resolve to one connected device"
         ),
     )
@@ -2783,7 +2801,7 @@ def create_parser():
         "platform",
         nargs="?",
         default="tg5040",
-        help="one of tg5040 (default), tg5050, my355",
+        help="one of tg5040 (default), tg5050, my355, h700",
     )
     container.add_argument(
         "container_command",

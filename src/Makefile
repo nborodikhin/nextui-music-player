@@ -1,11 +1,11 @@
 ###########################################################
 # Supported platforms
-#   tg5040 / tg5050 / my355 : ARM64 device builds (cross-compiled in the Docker
+#   tg5040 / tg5050 / my355 / h700 : ARM64 device builds (cross-compiled in the Docker
 #                     toolchain)
 #   desktop         : native Linux/macOS build for local dev/testing (no device,
 #                     no cross-compiler). Uses SDL2 + desktop OpenGL instead of
 #                     GLES, and has no AAC/M4A support (see fdk_aac_desktop_stub.c).
-SUPPORTED_PLATFORMS = tg5040 tg5050 my355 desktop
+SUPPORTED_PLATFORMS = tg5040 tg5050 my355 h700 desktop
 DEFAULT_PLATFORM = tg5040
 
 ifeq (,$(PLATFORM))
@@ -284,16 +284,21 @@ else
 LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
 endif
 else
+ifeq ($(PLATFORM), h700)
+# The SDK GLES metadata names libUMP, which h700 does not use.
+LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
+else
 LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+endif
 LDLIBS += -lfdk-aac
 # The audio libraries a device pulls in are whatever its toolchain sysroot
 # carries: the TrimUI targets have ALSA (tg5050 additionally needs tinyalsa),
-# while my355 has tinyalsa only.
+# h700 needs ALSA and tinyalsa. my355 has tinyalsa only.
 ifeq ($(PLATFORM), my355)
 LDLIBS += -ltinyalsa
 else
 LDLIBS += -lasound
-ifeq ($(PLATFORM), tg5050)
+ifneq (,$(filter $(PLATFORM),tg5050 h700))
 LDLIBS += -ltinyalsa
 endif
 endif
