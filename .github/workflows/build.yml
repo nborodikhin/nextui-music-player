@@ -17,9 +17,37 @@ jobs:
           VERSION=$(./dev version get --identifier "${GITHUB_SHA::7}")
           ./dev dist all --version "$VERSION"
 
-      - name: Upload the pak
+      - name: Upload the pak zip
         uses: actions/upload-artifact@v7
         with:
-          name: Music.Player.pak
           path: dist/Music.Player.pak.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the tg5040 package
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Music.Player-tg5040.pakz
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the tg5050 package
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Music.Player-tg5050.pakz
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the my355 package
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Music.Player-my355.pakz
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the h700 package
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Music.Player-h700.pakz
+          archive: false
           if-no-files-found: error

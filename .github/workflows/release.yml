@@ -73,4 +73,5 @@ jobs:
             --title "$VERSION" \
             --generate-notes \
             "${FLAGS[@]}" \
-            "${{ github.workspace }}/dist/Music.Player.pak.zip"
+            "${{ github.workspace }}/dist/Music.Player.pak.zip" \
+            "${{ github.workspace }}"/dist/*.pakz
