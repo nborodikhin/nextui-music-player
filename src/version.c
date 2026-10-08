@@ -116,3 +116,57 @@ int Version_compare(const char* left, const char* right) {
         right = right_end + 1;
     }
 }
+
+const char* Version_getAssetUrl(const JSON_Object* release, const char* asset_name) {
+    if (!release || !asset_name) return NULL;
+
+    JSON_Array* assets = json_object_get_array(release, "assets");
+    for (size_t index = 0; assets && index < json_array_get_count(assets); index++) {
+        JSON_Object* asset = json_array_get_object(assets, index);
+        const char* name = asset ? json_object_get_string(asset, "name") : NULL;
+        if (name && strcmp(name, asset_name) == 0) {
+            const char* url = json_object_get_string(asset, "browser_download_url");
+            return url && url[0] != '\0' ? url : NULL;
+        }
+    }
+    return NULL;
+}
+
+// Returns the best release, and sets status to why there is none.
+static const JSON_Object* find_best_release(const JSON_Value* releases, const char* asset_name,
+                                            VersionReleaseStatus* status) {
+    *status = VERSION_RELEASE_NO_VERSION;
+    if (!releases || !asset_name) return NULL;
+
+    JSON_Array* list = json_value_get_array(releases);
+    JSON_Object* single = json_value_get_object(releases);
+    size_t count = list ? json_array_get_count(list) : (single ? 1 : 0);
+
+    const JSON_Object* best = NULL;
+    for (size_t index = 0; index < count; index++) {
+        const JSON_Object* release = list ? json_array_get_object(list, index) : single;
+        if (!release) continue;
+        if (json_object_get_boolean(release, "draft") == 1) continue;
+        const char* tag = json_object_get_string(release, "tag_name");
+        if (!Version_isValid(tag)) continue;
+        *status = VERSION_RELEASE_NO_ASSET;
+        if (!Version_getAssetUrl(release, asset_name)) continue;
+
+        if (!best || Version_compare(tag, json_object_get_string(best, "tag_name")) > 0) {
+            best = release;
+        }
+    }
+    if (best) *status = VERSION_RELEASE_FOUND;
+    return best;
+}
+
+VersionReleaseStatus Version_bestReleaseExists(const JSON_Value* releases, const char* asset_name) {
+    VersionReleaseStatus status;
+    find_best_release(releases, asset_name, &status);
+    return status;
+}
+
+const JSON_Object* Version_getBestRelease(const JSON_Value* releases, const char* asset_name) {
+    VersionReleaseStatus status;
+    return find_best_release(releases, asset_name, &status);
+}

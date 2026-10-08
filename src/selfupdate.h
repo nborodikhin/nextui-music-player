@@ -32,7 +32,8 @@ typedef enum {
     UPDATE_UI_CHECKING,
     UPDATE_UI_AVAILABLE,   // a newer version exists
     UPDATE_UI_CURRENT,     // checked, nothing newer
-    UPDATE_UI_FAILED
+    UPDATE_UI_FAILED,
+    UPDATE_UI_RESTART      // an update is installed, the restart is due
 } UpdateUiState;
 
 // Update status information
@@ -74,6 +75,11 @@ int SelfUpdate_startUpdate(void);
 
 // Cancel ongoing update
 void SelfUpdate_cancelUpdate(void);
+
+// Forgets the result of the last check, after a change of the update channel.
+// A running check completes, and its result is discarded. An update that runs
+// or waits for the restart does not change.
+void SelfUpdate_forgetCheck(void);
 
 // Get the snapshot of the current status.
 SelfUpdateStatus SelfUpdate_getStatus(void);

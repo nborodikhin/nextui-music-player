@@ -1,6 +1,9 @@
 #include "test.h"
 #include "version.h"
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 TEST(valid_forms) {
     const char* values[] = {"v0.0.0", "1.2.3", "v1.18.0-beta.1+test.2",
@@ -47,10 +50,141 @@ TEST(rc_forms) {
     }
 }
 
+#define ASSET "Music.Player.pak.zip"
+
+// Returns the JSON text of one release. Pass false in with_asset to leave the
+// release asset out, and true in draft to mark the release as a draft.
+static const char* release_json(char* buffer, size_t size, const char* tag,
+                                bool with_asset, bool draft) {
+    snprintf(buffer, size,
+             "{\"tag_name\": \"%s\", \"draft\": %s, \"assets\": ["
+             "{\"name\": \"other.zip\", \"browser_download_url\": \"https://x/other\"}%s]}",
+             tag, draft ? "true" : "false",
+             with_asset ? ", {\"name\": \"" ASSET "\", "
+                          "\"browser_download_url\": \"https://x/pak\"}"
+                        : "");
+    return buffer;
+}
+
+// Returns the tag of the selected release, or NULL.
+static const char* select_tag(const char* json, VersionReleaseStatus* status) {
+    static char tag[64];
+    JSON_Value* value = json_parse_string(json);
+    if (status) *status = Version_bestReleaseExists(value, ASSET);
+    const JSON_Object* best = Version_getBestRelease(value, ASSET);
+    const char* result = NULL;
+    if (best) {
+        snprintf(tag, sizeof(tag), "%s", json_object_get_string(best, "tag_name"));
+        result = tag;
+    }
+    json_value_free(value);
+    return result;
+}
+
+static bool tag_is(const char* actual, const char* expected) {
+    return actual && strcmp(actual, expected) == 0;
+}
+
+TEST(stable_after_its_pre_releases) {
+    char a[256], b[256], c[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s, %s]",
+             release_json(a, sizeof(a), "v1.18.0", true, false),
+             release_json(b, sizeof(b), "v1.18.0-rc.1", true, false),
+             release_json(c, sizeof(c), "v1.18.0-beta.1", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0"));
+}
+
+TEST(pre_release_ahead_of_latest) {
+    char a[256], b[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s]",
+             release_json(a, sizeof(a), "v1.18.0-beta.1", true, false),
+             release_json(b, sizeof(b), "v1.17.0", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0-beta.1"));
+}
+
+TEST(newer_release_without_asset) {
+    char a[256], b[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s]",
+             release_json(a, sizeof(a), "v1.18.0-beta.2", false, false),
+             release_json(b, sizeof(b), "v1.18.0-beta.1", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0-beta.1"));
+}
+
+TEST(late_fix_of_older_version) {
+    char a[256], b[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s]",
+             release_json(a, sizeof(a), "v1.17.1", true, false),
+             release_json(b, sizeof(b), "v1.18.0-beta.1", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0-beta.1"));
+}
+
+TEST(tag_of_different_form_is_skipped) {
+    char a[256], b[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s]",
+             release_json(a, sizeof(a), "nightly", true, false),
+             release_json(b, sizeof(b), "v1.17.0", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.17.0"));
+}
+
+TEST(draft_is_skipped) {
+    char a[256], b[256], json[1024];
+    snprintf(json, sizeof(json), "[%s, %s]",
+             release_json(a, sizeof(a), "v1.19.0", true, true),
+             release_json(b, sizeof(b), "v1.18.0", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0"));
+}
+
+TEST(release_without_tag_is_skipped) {
+    char b[256], json[1024];
+    snprintf(json, sizeof(json),
+             "[{\"draft\": false, \"assets\": [{\"name\": \"" ASSET "\", "
+             "\"browser_download_url\": \"https://x/pak\"}]}, %s]",
+             release_json(b, sizeof(b), "v1.18.0", true, false));
+    CHECK(tag_is(select_tag(json, NULL), "v1.18.0"));
+}
+
+TEST(single_object_for_stable) {
+    char a[256];
+    CHECK(tag_is(select_tag(release_json(a, sizeof(a), "v1.17.0", true, false), NULL),
+                 "v1.17.0"));
+}
+
+TEST(status_tells_the_reason) {
+    char a[256];
+    VersionReleaseStatus status;
+    CHECK(select_tag(release_json(a, sizeof(a), "v1.17.0", true, false), &status));
+    CHECK_EQ_INT(status, VERSION_RELEASE_FOUND);
+    CHECK(!select_tag(release_json(a, sizeof(a), "nightly", true, false), &status));
+    CHECK_EQ_INT(status, VERSION_RELEASE_NO_VERSION);
+    CHECK(!select_tag(release_json(a, sizeof(a), "v1.17.0", false, false), &status));
+    CHECK_EQ_INT(status, VERSION_RELEASE_NO_ASSET);
+    CHECK(!select_tag("[]", &status));
+    CHECK_EQ_INT(status, VERSION_RELEASE_NO_VERSION);
+}
+
+TEST(asset_url) {
+    char a[256];
+    JSON_Value* value = json_parse_string(release_json(a, sizeof(a), "v1.17.0", true, false));
+    const char* url = Version_getAssetUrl(json_value_get_object(value), ASSET);
+    CHECK(url && strcmp(url, "https://x/pak") == 0);
+    CHECK(!Version_getAssetUrl(json_value_get_object(value), "missing.zip"));
+    json_value_free(value);
+}
+
 int main(void) {
     RUN(valid_forms);
     RUN(invalid_forms);
     RUN(version_order);
     RUN(rc_forms);
+    RUN(stable_after_its_pre_releases);
+    RUN(pre_release_ahead_of_latest);
+    RUN(newer_release_without_asset);
+    RUN(late_fix_of_older_version);
+    RUN(tag_of_different_form_is_skipped);
+    RUN(draft_is_skipped);
+    RUN(release_without_tag_is_skipped);
+    RUN(single_object_for_stable);
+    RUN(status_tells_the_reason);
+    RUN(asset_url);
     return test_summary();
 }
