@@ -5,15 +5,14 @@ dependency whose `deps.json` entry names this directory. The pin marker in the
 checkout records the result, thus a build tells a patched tree from a tree with
 hand edits.
 
-Each patch is a pull request that is open upstream. Keep the file the same as
-the diff of the pull request, thus the patch goes away with no change to this
-project when the pull request is merged and the pin moves.
+Ideally, each patch should have an open pull request upstream. Keep the file
+the same as the diff of the pull request. Remove the patch when the pull
+request is merged and the pin moves to a revision that contains it.
 
 | Patch | Upstream |
 |---|---|
-| `0001-plat-capturescreenshot.patch` | [LoveRetro/NextUI#828](https://github.com/LoveRetro/NextUI/pull/828) - `PLAT_captureScreenshot()` |
 
-Refresh one with:
+Refresh a patch from its upstream pull request. For example:
 
 ```bash
 gh pr diff 828 --repo LoveRetro/NextUI > deps/patches/nextui/0001-plat-capturescreenshot.patch
