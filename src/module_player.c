@@ -487,15 +487,19 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
 
     // Normal input handling
-    if (PAD_anyPressed()) {
+    bool key_locked = ModuleCommon_isKeyLocked();
+    if (!key_locked && PAD_anyPressed()) {
         ModuleCommon_recordInputTime();
     }
 
-    if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+    if (!key_locked && ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
         *dirty = 1;
     }
 
-    if (PAD_justPressed(BTN_A)) {
+    if (key_locked) {
+        // the screen draws, and the keys do nothing
+    }
+    else if (PAD_justPressed(BTN_A)) {
         Player_togglePause();
         *dirty = 1;
     }
@@ -546,7 +550,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
     else if (PAD_tappedSelect(SDL_GetTicks())) {
         ModuleCommon_startScreenOffHint();
-        MusicPlaying_leave();
+        if (!ModuleCommon_shouldDrawContentWhileLocked()) MusicPlaying_leave();
         *dirty = 1;
     }
 
@@ -676,7 +680,8 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
         }
 
         if (state == PLAYER_INTERNAL_BROWSER) {
-            if (handle_browser_input(&state, &dirty)) {
+            // The playback can end while the keys are locked
+            if (!ModuleCommon_isKeyLocked() && handle_browser_input(&state, &dirty)) {
                 return MODULE_EXIT_TO_MENU;
             }
         }
@@ -891,15 +896,19 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
 
         // Normal input handling
-        if (PAD_anyPressed()) {
+        bool key_locked = ModuleCommon_isKeyLocked();
+        if (!key_locked && PAD_anyPressed()) {
             ModuleCommon_recordInputTime();
         }
 
-        if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+        if (!key_locked && ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
             dirty = 1;
         }
 
-        if (PAD_justPressed(BTN_A)) {
+        if (key_locked) {
+            // the screen draws, and the keys do nothing
+        }
+        else if (PAD_justPressed(BTN_A)) {
             Player_togglePause();
             dirty = 1;
         }
@@ -946,7 +955,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
         else if (PAD_tappedSelect(SDL_GetTicks())) {
             ModuleCommon_startScreenOffHint();
-            MusicPlaying_leave();
+            if (!ModuleCommon_shouldDrawContentWhileLocked()) MusicPlaying_leave();
             dirty = 1;
         }
 
