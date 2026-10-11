@@ -475,6 +475,10 @@ void ModuleCommon_frameBegin(void) {
     if (DisplayHelper_outputChanged()) {
         DisplayHelper_moveToOutput();
         output_switched = true;
+        // A cable change is an action of the user, as a key press is. It opens
+        // the lock, and the new output starts its own timeout.
+        ModuleCommon_resetScreenOffHint();
+        ModuleCommon_recordInputTime();
     }
     GFX_startFrame();
     ScreenTitle_frameBegin();

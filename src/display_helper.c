@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <msettings.h>
@@ -6,6 +7,7 @@
 #include "defines.h"
 #include "api.h"
 #include "display_helper.h"
+#include "selfupdate.h"
 #include "ui_theme.h"
 
 #define MAX_RECREATED_CALLBACKS 8
@@ -101,11 +103,15 @@ static void release_video(void) {
 	display_released = true;
 }
 
-// Returns false when the platform gives no surface. The display then stays released.
-static bool rebuild_video(void) {
+// Restarts the app when the platform gives no surface: the modules cannot run
+// without one, and a new start sets up the video again.
+static void rebuild_video(void) {
 	SDL_Surface* screen = PLAT_initVideo();
-	if (!screen)
-		return false;
+	if (!screen) {
+		LOG_error("the platform gave no display surface, restarting\n");
+		SelfUpdate_requestRestart();
+		exit(EXIT_FAILURE);
+	}
 
 	context.surface = screen;
 	context.width = screen->w;
@@ -118,7 +124,6 @@ static bool rebuild_video(void) {
 
 	SDL_QuitSubSystem(SDL_INIT_EVENTS);
 	display_released = false;
-	return true;
 }
 
 void DisplayHelper_prepareForExternal(void) {
@@ -138,8 +143,7 @@ void DisplayHelper_recoverDisplay(void) {
 	if (!display_released)
 		return;
 
-	if (!rebuild_video())
-		return;
+	rebuild_video();
 
 	// Drop whatever the external program left behind, including the press that
 	// dismissed it.
@@ -180,6 +184,9 @@ void DisplayHelper_moveToOutput(void) {
 	SetHDMI(hdmi_active);
 
 	rebuild_video();
+	// The panel can be dark from the screen-off of a module
+	if (!hdmi_active)
+		PLAT_enableBacklight(1);
 
 	last_output_poll = SDL_GetTicks();
 	PAD_reset();

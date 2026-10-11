@@ -171,6 +171,8 @@ static void refresh_gpu_layers(int* dirty) {
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     RadioPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 
