@@ -886,11 +886,15 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 continue;
             }
             else {
-                if (ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
+                bool key_locked = ModuleCommon_isKeyLocked();
+                if (!key_locked && ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
                     dirty = 1;
                 }
 
-                if (PAD_justPressed(BTN_A)) {
+                if (key_locked) {
+                    // the screen draws, and the keys do nothing
+                }
+                else if (PAD_justPressed(BTN_A)) {
                     if (Player_getState() == PLAYER_STATE_PAUSED) Player_play();
                     else Player_pause();
                     ModuleCommon_recordInputTime();
@@ -918,9 +922,11 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 }
                 else if (PAD_tappedSelect(SDL_GetTicks())) {
                     ModuleCommon_startScreenOffHint();
-                    clear_and_show_screen_off_hint(screen);
-                    ModuleCommon_frameEnd(screen);
-                    continue;
+                    if (!ModuleCommon_shouldDrawContentWhileLocked()) {
+                        clear_and_show_screen_off_hint(screen);
+                        ModuleCommon_frameEnd(screen);
+                        continue;
+                    }
                 }
                 else if (PAD_justPressed(BTN_UP)) {
                     float speed = Player_getPlaybackSpeed();

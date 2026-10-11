@@ -1,6 +1,8 @@
 #ifndef __DISPLAY_HELPER_H__
 #define __DISPLAY_HELPER_H__
 
+#include <stdbool.h>
+
 struct SDL_Surface;
 
 typedef struct DisplayContext DisplayContext;
@@ -30,5 +32,13 @@ void DisplayHelper_prepareForExternal(void);
 
 // Restore the display after the external binary execution.
 void DisplayHelper_recoverDisplay(void);
+
+// Check whether the connected output (HDMI or the panel) is not the one that
+// the display uses.
+bool DisplayHelper_outputChanged(void);
+
+// Move the display to the output that is connected now. The surface is then new
+// and empty, and can have a different size.
+void DisplayHelper_moveToOutput(void);
 
 #endif

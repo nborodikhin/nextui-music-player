@@ -53,8 +53,20 @@ void ModuleCommon_setAutosleepDisabled(bool disabled);
 // Check if screen off hint is active
 bool ModuleCommon_isScreenOffHintActive(void);
 
-// Start screen off hint countdown
+// Returns true when the screen keeps its content while the keys are locked, as on
+// HDMI, which has no backlight to turn off.
+bool ModuleCommon_shouldDrawContentWhileLocked(void);
+
+// Lock the keys. Where the screen goes dark, start the countdown of the screen
+// off hint: the caller then removes its GPU layers and draws the hint. Where the
+// screen keeps its content (see ModuleCommon_shouldDrawContentWhileLocked()),
+// show an unlock toast: the module draws, and skips its input while
+// ModuleCommon_isKeyLocked() returns true.
 void ModuleCommon_startScreenOffHint(void);
+
+// Returns true while the keys of a screen that keeps its content are locked. The
+// module then skips its input. SELECT + A opens the lock.
+bool ModuleCommon_isKeyLocked(void);
 
 // Reset (cancel) screen off hint
 void ModuleCommon_resetScreenOffHint(void);
@@ -73,8 +85,8 @@ void ModuleCommon_recordInputTime(void);
 bool ModuleCommon_updateSeekScan(int back_step_ms, int fwd_step_ms);
 
 // Check if auto screen-off timeout has elapsed since last input.
-// If timed out: starts screen off hint and returns true.
-// Caller is responsible for clearing GPU layers after this returns true.
+// If timed out: locks the keys, and returns true where the screen goes dark. The
+// caller then removes its GPU layers and draws the hint.
 bool ModuleCommon_checkAutoScreenOffTimeout(void);
 
 // Clean up module common resources (call at app exit)

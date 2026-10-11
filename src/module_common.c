@@ -18,6 +18,7 @@
 #include "toast.h"
 #include "test_control.h"
 #include "seek_scan.h"
+#include "display_helper.h"
 
 static bool autosleep_disabled = false;
 static FrameState frame = {0};
@@ -27,6 +28,14 @@ static uint32_t last_input_time = 0;
 static bool screen_off_hint_active = false;
 static uint32_t screen_off_hint_start = 0;
 static time_t screen_off_hint_start_wallclock = 0;
+
+// Key lock of a screen that keeps its content, such as on HDMI. The module draws
+// as usual and skips its input; a toast shows how to unlock.
+static bool key_locked = false;
+// SELECT + A was pressed. The lock opens in the next frame, thus the module
+// skips that A and does not take it as its own input.
+static bool unlock_pending = false;
+static ToastToken unlock_toast_token = TOAST_TOKEN_NONE;
 
 // Dialog states
 static bool show_quit_confirm = false;
@@ -40,6 +49,7 @@ static bool quit_requested = false;
 // modules, and a signal in that interval must not be lost.
 static volatile sig_atomic_t stop_signalled = 0;
 static bool show_controls_help = false;
+static bool output_switched = false;
 
 // START button long press detection
 static uint32_t start_press_time = 0;
@@ -56,6 +66,7 @@ void ModuleCommon_init(void) {
     autosleep_disabled = false;
     last_input_time = SDL_GetTicks();
     screen_off_hint_active = false;
+    key_locked = false;
     show_quit_confirm = false;
     quit_requested = false;
     show_controls_help = false;
@@ -98,6 +109,13 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     if (quit_requested) {
         result.input_consumed = true;
         result.should_quit = true;
+        return result;
+    }
+
+    if (output_switched) {
+        output_switched = false;
+        result.input_consumed = true;
+        result.dirty = true;
         return result;
     }
 
@@ -175,6 +193,9 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             }
         }
     }
+
+    // The earphone buttons above work while the keys are locked
+    if (key_locked) return result;
 
     // Handle quit confirmation dialog
     if (show_quit_confirm) {
@@ -292,7 +313,21 @@ bool ModuleCommon_isScreenOffHintActive(void) {
     return screen_off_hint_active;
 }
 
+bool ModuleCommon_shouldDrawContentWhileLocked(void) {
+    // HDMI has no backlight to turn off
+    return hdmi_active;
+}
+
+static void show_unlock_toast(void) {
+    unlock_toast_token = Toast_show("Press SELECT + A to unlock", SCREEN_OFF_HINT_DURATION_MS);
+}
+
 void ModuleCommon_startScreenOffHint(void) {
+    if (ModuleCommon_shouldDrawContentWhileLocked()) {
+        key_locked = true;
+        show_unlock_toast();
+        return;
+    }
     screen_off_hint_active = true;
     screen_off_hint_start = SDL_GetTicks();
     screen_off_hint_start_wallclock = time(NULL);
@@ -300,6 +335,30 @@ void ModuleCommon_startScreenOffHint(void) {
 
 void ModuleCommon_resetScreenOffHint(void) {
     screen_off_hint_active = false;
+    if (key_locked) {
+        key_locked = false;
+        unlock_pending = false;
+        Toast_dismiss(unlock_toast_token);
+    }
+}
+
+bool ModuleCommon_isKeyLocked(void) {
+    return key_locked;
+}
+
+// Runs the key lock of a screen that keeps its content, once for each frame,
+// after the poll of the pad.
+static void update_key_lock(void) {
+    if (unlock_pending) {
+        ModuleCommon_resetScreenOffHint();
+        ModuleCommon_recordInputTime();
+    }
+    else if (PAD_isPressed(BTN_SELECT) && PAD_isPressed(BTN_A)) {
+        unlock_pending = true;
+    }
+    else if (PAD_anyJustPressed()) {
+        show_unlock_toast();
+    }
 }
 
 bool ModuleCommon_updateSeekScan(int back_step_ms, int fwd_step_ms) {
@@ -329,11 +388,11 @@ void ModuleCommon_recordInputTime(void) {
 }
 
 bool ModuleCommon_checkAutoScreenOffTimeout(void) {
-    if (screen_off_hint_active) return false;
+    if (screen_off_hint_active || key_locked) return false;
     uint32_t screen_timeout_ms = Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT) * 1000;
     if (screen_timeout_ms > 0 && SDL_GetTicks() - last_input_time >= screen_timeout_ms) {
         ModuleCommon_startScreenOffHint();
-        return true;
+        return !ModuleCommon_shouldDrawContentWhileLocked();
     }
     return false;
 }
@@ -413,10 +472,15 @@ bool ModuleCommon_stopSignalled(void) {
 }
 
 void ModuleCommon_frameBegin(void) {
+    if (DisplayHelper_outputChanged()) {
+        DisplayHelper_moveToOutput();
+        output_switched = true;
+    }
     GFX_startFrame();
     ScreenTitle_frameBegin();
     PAD_poll();
     TestControl_tick();
+    if (key_locked) update_key_lock();
     Toast_tick();
 }
 
