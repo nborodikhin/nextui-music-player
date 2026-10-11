@@ -73,6 +73,8 @@ static uint32_t last_resume_save = 0;
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     MusicPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 // Helper to load directory
@@ -559,6 +561,8 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     if (Player_getState() == PLAYER_STATE_STOPPED) {
         if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
             Resume_clear();  // All tracks finished naturally
+            // The keys lock the playback only
+            ModuleCommon_resetScreenOffHint();
             cleanup_playback(false);
             load_directory(MUSIC_PATH);
             nav_stack_top = 0;
@@ -680,8 +684,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
         }
 
         if (state == PLAYER_INTERNAL_BROWSER) {
-            // The playback can end while the keys are locked
-            if (!ModuleCommon_isKeyLocked() && handle_browser_input(&state, &dirty)) {
+            if (handle_browser_input(&state, &dirty)) {
                 return MODULE_EXIT_TO_MENU;
             }
         }
@@ -964,6 +967,8 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         if (Player_getState() == PLAYER_STATE_STOPPED) {
             if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
                 Resume_clear();  // All tracks finished naturally
+                // The keys lock the playback only
+                ModuleCommon_resetScreenOffHint();
                 cleanup_album_art_background();
                 cleanup_playback(true);
                 return MODULE_EXIT_TO_MENU;

@@ -147,6 +147,8 @@ static void refresh_gpu_layers(int* dirty) {
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     PodcastPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 // The screen goes dark after the hint, thus its layers go now and the hint
@@ -163,6 +165,8 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     PodcastPlaying_leave();
     Toast_dismiss(seek_toast);
     ModuleCommon_setAutosleepDisabled(false);
+    // The keys lock the playback only
+    ModuleCommon_resetScreenOffHint();
     podcast_episodes_nav.selected = podcast_current_episode_index;
     *state = PODCAST_INTERNAL_EPISODES;
     *dirty = 1;
