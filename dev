@@ -701,8 +701,8 @@ def clone_dependency(dependency):
 
 def fetch_dependency(dependency):
     """Make the checkout exist, without touching the network when it already
-    does. A ref edited in the manifest is followed only if it already resolves
-    locally; anything needing the remote is `./dev deps update`."""
+    does. A ref edited in the manifest is followed if it resolves locally or
+    after a fetch of the remote tags; anything else is `./dev deps update`."""
     status = dependency_status(dependency)
     if status.state == "missing":
         clone_dependency(dependency)
@@ -758,6 +758,16 @@ def fetch_dependency(dependency):
         return False
 
     commit = resolve_ref(dependency.root, dependency.ref)
+    if not commit:
+        # A clone only holds the tags that existed at the time, thus a manifest
+        # that moves onto a newer release tag needs them from the remote.
+        print("{}: fetching tags for {}".format(dependency.name, dependency.ref),
+              flush=True)
+        run_command(
+            ["git", "-C", str(dependency.root), "fetch", "--tags", "origin"],
+            check=False,
+        )
+        commit = resolve_ref(dependency.root, dependency.ref)
     if not commit:
         print(
             "{}: {} is not fetched yet - run ./dev deps update".format(
