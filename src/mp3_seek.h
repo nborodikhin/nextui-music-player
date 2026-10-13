@@ -14,7 +14,8 @@
 // - "VBRI" (a variable bitrate, Fraunhofer): a table of the sizes of equal
 //   groups of frames
 // Without a header frame, init scans the frame headers synchronously. If every
-// frame has the same bitrate and sample rate, it keeps one offset per 256 frames.
+// frame has the same bitrate and sample rate and valid reservoir consumption,
+// it keeps one offset per 256 frames.
 //
 // For each seek, Mp3Seek_pointFor() gives one point to seek from: the byte
 // position of a real frame header near the target, and the index of the first

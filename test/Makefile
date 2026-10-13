@@ -131,7 +131,7 @@ $(BIN)/test_lyric_window: test_lyric_window.c $(SRC)/lyric_window.c $(SRC)/lyric
 $(BIN)/test_seek_scan: test_seek_scan.c $(SRC)/seek_scan.c $(SRC)/seek_scan.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_seek_scan.c $(SRC)/seek_scan.c
 
-$(BIN)/test_mp3_seek: test_mp3_seek.c $(SRC)/mp3_seek.c $(SRC)/mp3_seek.h test.h | $(BIN)
+$(BIN)/test_mp3_seek: test_mp3_seek.c $(SRC)/mp3_seek.c $(SRC)/mp3_seek.h $(SRC)/audio/dr_mp3.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_mp3_seek.c $(SRC)/mp3_seek.c -lm
 
 $(BIN)/test_keyboard_map: test_keyboard_map.c $(SRC)/keyboard_map.c $(SRC)/keyboard_map.h $(SRC)/utf8.c test.h | $(BIN)

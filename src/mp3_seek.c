@@ -126,6 +126,48 @@ static bool read_stream_header(const Mp3SeekInfo* info, Mp3SeekRead read, void* 
            h->bitrate_kbps == info->bitrate_kbps && h->frame_bytes <= file_size - pos;
 }
 
+static unsigned side_bits(const uint8_t* side, int bit, int count) {
+    unsigned value = 0;
+    for (int i = 0; i < count; i++, bit++) {
+        value = (value << 1) | ((side[bit / 8] >> (7 - bit % 8)) & 1);
+    }
+    return value;
+}
+
+// Match normal decoding's reservoir consumption, not the NULL-output duration
+// scan. dr_mp3's Huffman reader advances by each granule's part_23_length, then
+// saves the bytes after ceil(total consumed bits / 8), capped at 511 bytes.
+static bool validate_reservoir(Mp3SeekRead read, void* ctx, int64_t file_size,
+                               int64_t pos, const FrameHeader* h, HeaderBuffer* buf,
+                               int* reservoir) {
+    int crc_bytes = h->crc ? 2 : 0;
+    int payload = h->frame_bytes - 4 - crc_bytes - h->side_info_bytes;
+    if (payload < 0) return false;
+    const uint8_t* side = buffered_bytes(read, ctx, file_size, pos + 4 + crc_bytes,
+                                          h->side_info_bytes, buf);
+    if (!side) return false;
+    bool mpeg1 = h->version == 3;
+    int channels = h->side_info_bytes == (mpeg1 ? 17 : 9) ? 1 : 2;
+    int needed = (int)side_bits(side, 0, mpeg1 ? 9 : 8);
+    if (needed > *reservoir) return false;
+    int granules = channels * (mpeg1 ? 2 : 1);
+    int bit = mpeg1 ? (channels == 1 ? 18 : 20) : 8 + channels;
+    int consumed = 0;
+    for (int i = 0; i < granules; i++, bit += mpeg1 ? 59 : 63) {
+        consumed += (int)side_bits(side, bit, 12);
+        if (side_bits(side, bit + 12, 9) > 288) return false;
+        int switching = bit + (mpeg1 ? 33 : 38);
+        if (side_bits(side, switching, 1) && !side_bits(side, switching + 1, 2)) {
+            return false;
+        }
+    }
+    int available = needed + payload;
+    if (consumed > available * 8) return false;
+    *reservoir = available - (consumed + 7) / 8;
+    if (*reservoir > 511) *reservoir = 511;
+    return true;
+}
+
 static bool build_cbr_index(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
                             int64_t file_size) {
     // ID3v1 is metadata after the last audio frame, not a broken frame.
@@ -139,9 +181,11 @@ static bool build_cbr_index(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
     info->cbr_offsets = malloc(capacity * sizeof(*info->cbr_offsets));
     bool ok = info->cbr_offsets != NULL;
     int64_t pos = info->first_frame;
+    int reservoir = 0;
     while (ok && pos < file_size) {
         FrameHeader h;
-        if (!read_stream_header(info, read, ctx, file_size, pos, &buf, &h)) {
+        if (!read_stream_header(info, read, ctx, file_size, pos, &buf, &h) ||
+            !validate_reservoir(read, ctx, file_size, pos, &h, &buf, &reservoir)) {
             ok = false;
             break;
         }

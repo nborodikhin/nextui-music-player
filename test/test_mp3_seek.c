@@ -11,6 +11,8 @@
 
 #include "test.h"
 #include "mp3_seek.h"
+#define DR_MP3_IMPLEMENTATION
+#include "audio/dr_mp3.h"
 
 // MPEG-1 Layer III, 128 kbps, 44.1 kHz, mono: 417 or 418 bytes, 1152 samples
 #define HDR_NO_PAD  0xFF, 0xFB, 0x90, 0xC4
@@ -45,6 +47,14 @@ static void put_be32(uint8_t* p, uint32_t v) {
 
 static void put_be16(uint8_t* p, uint16_t v) {
     p[0] = (uint8_t)(v >> 8); p[1] = (uint8_t)v;
+}
+
+static void put_bits(uint8_t* p, int bit, int count, unsigned value) {
+    for (int i = 0; i < count; i++) {
+        unsigned mask = 1u << (7 - (bit + i) % 8);
+        p[(bit + i) / 8] &= (uint8_t)~mask;
+        if (value & (1u << (count - 1 - i))) p[(bit + i) / 8] |= (uint8_t)mask;
+    }
 }
 
 // Write the ID3v2 tag, then `FRAMES` audio frames after `header_bytes` bytes of
@@ -203,8 +213,8 @@ TEST(indexed_cbr_accounts_for_frames_skipped_by_reservoir) {
         // MPEG-1 main_data_begin = 511: two frames must fill the reservoir
         // before the decoder produces its first PCM frame after a jump.
         uint8_t* side = f.data + f.frame_pos[n] + 4;
-        side[0] = 255;
-        side[1] = 128;
+        int needed = n == 1 ? 396 : 511;
+        put_bits(side, 0, 9, (unsigned)needed);
     }
     Mp3SeekInfo info;
     CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
@@ -233,7 +243,9 @@ TEST(indexed_low_bitrate_mpeg2_and_mpeg25_warm_up) {
             f.frame_pos[n] = pos;
             uint8_t hdr[] = {0xFF, version == 2 ? 0xF3 : 0xE3, 0x10, 0xC4};
             memcpy(f.data + pos, hdr, 4);
-            if (n > 0) f.data[pos + 4] = 255; // MPEG-2 uses an 8-bit reservoir offset
+            int needed = n * (frame_bytes - 13);
+            if (needed > 255) needed = 255;
+            f.data[pos + 4] = (uint8_t)needed;
         }
         f.size = ID3_BYTES + (int64_t)FRAMES * frame_bytes;
         Mp3SeekInfo info;
@@ -257,6 +269,60 @@ TEST(headerless_missing_initial_reservoir_gives_none) {
     CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
     CHECK(info.cbr_offsets == NULL);
     free(f.data);
+}
+
+TEST(duration_count_can_hide_a_reservoir_underflow) {
+    File f; make_file(&f, 0);
+    // Mono MPEG-1: the first granule starts at bit 18, the second at bit 77.
+    // Frame 0 consumes all its main data. Frame 1 then needs one missing byte.
+    uint8_t* side = f.data + f.frame_pos[0] + 4;
+    int payload = (int)(f.frame_pos[1] - f.frame_pos[0]) - 4 - SIDE_INFO;
+    put_bits(side, 77, 12, (unsigned)payload * 8);
+    put_bits(f.data + f.frame_pos[1] + 4, 0, 9, 1);
+
+    drmp3 decoder;
+    CHECK(drmp3_init_memory(&decoder, f.data, (size_t)f.size, NULL));
+    CHECK(drmp3_get_pcm_frame_count(&decoder) == (drmp3_uint64)FRAMES * SPF);
+    int16_t pcm[SPF];
+    drmp3_uint64 decoded = 0, got;
+    while ((got = drmp3_read_pcm_frames_s16(&decoder, SPF, pcm)) != 0) decoded += got;
+    CHECK(decoded == (drmp3_uint64)(FRAMES - 1) * SPF);
+    drmp3_uninit(&decoder);
+
+    Mp3SeekInfo info;
+    bool indexed = Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame);
+    Mp3Seek_free(&info);
+    free(f.data);
+    CHECK(!indexed);
+}
+
+TEST(reservoir_consumption_counts_all_granules_and_rounds_up) {
+    for (int channels = 1; channels <= 2; channels++) {
+        for (int crc = 0; crc <= 1; crc++) {
+            File f; make_file(&f, 0);
+            for (int n = 0; n < FRAMES; n++) {
+                uint8_t* hdr = f.data + f.frame_pos[n];
+                hdr[3] = channels == 1 ? 0xC4 : 0x04;
+                if (crc) hdr[1] &= (uint8_t)~1;
+            }
+            int side_size = channels == 1 ? 17 : 32;
+            uint8_t* side = f.data + f.frame_pos[900] + 4 + 2 * crc;
+            int payload = (int)(f.frame_pos[901] - f.frame_pos[900]) - 4 - 2 * crc - side_size;
+            int granules = channels * 2;
+            int bits = payload * 8 - 1; // Only one bit remains, so zero complete bytes remain.
+            for (int gr = 0; gr < granules; gr++) {
+                int count = bits / granules + (gr < bits % granules);
+                put_bits(side, (channels == 1 ? 18 : 20) + 59 * gr, 12, (unsigned)count);
+            }
+            Mp3SeekInfo info;
+            CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+            Mp3Seek_free(&info);
+            put_bits(f.data + f.frame_pos[901] + 4 + 2 * crc, 0, 9, 1);
+            CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+            CHECK(info.cbr_offsets == NULL);
+            free(f.data);
+        }
+    }
 }
 
 TEST(headerless_long_file_grows_index) {
@@ -417,6 +483,8 @@ int main(void) {
     RUN(indexed_cbr_accounts_for_frames_skipped_by_reservoir);
     RUN(indexed_low_bitrate_mpeg2_and_mpeg25_warm_up);
     RUN(headerless_missing_initial_reservoir_gives_none);
+    RUN(duration_count_can_hide_a_reservoir_underflow);
+    RUN(reservoir_consumption_counts_all_granules_and_rounds_up);
     RUN(headerless_long_file_grows_index);
     RUN(headerless_cbr_without_id3_builds_index);
     RUN(headerless_cbr_with_id3v1_builds_index);

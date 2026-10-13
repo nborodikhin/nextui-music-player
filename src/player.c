@@ -431,8 +431,8 @@ static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3, int64
         state->file_size = ftell(state->file);
         if (Mp3Seek_init(&state->info, mp3_seek_read, state->file, state->file_size,
                          (int64_t)mp3->streamStartOffset)) {
-            // Header counts must agree with the decoder's separate duration
-            // scan: damaged audio can make the decoder skip complete frames.
+            // Reservoir validation happens during indexing. This extra count
+            // check compares the index with the separate duration scan only.
             if (state->info.kind != MP3_SEEK_CBR_INDEX ||
                 state->info.frame_count * state->info.samples_per_frame == total_frames) {
                 return state;
