@@ -194,6 +194,14 @@ static bool remove_spectrum_settings_file(sqlite3* database) {
     return true;
 }
 
+static bool remove_app_version_file(sqlite3* database) {
+    (void)database;
+    if (remove("state/app_version.txt") != 0 && errno != ENOENT) {
+        LOG_error("[Db] failed to remove app version file: %s\n", strerror(errno));
+    }
+    return true;
+}
+
 static bool remove_resume_file(sqlite3* database) {
     (void)database;
     char path[512];
@@ -240,7 +248,6 @@ static void migration(DbMigrationStep step) {
         .text     = stringify(FUNCTION),   \
     })
 
-
 static void migrations(void) {
     // note: each migration step runs in an sqlite transaction
     // 1
@@ -251,6 +258,11 @@ static void migrations(void) {
     function(copy_settings_data);
     // 5
     function(remove_settings_file);
+    function(remove_app_version_file);
+    sql("UPDATE settings SET name = 'update_channel', type = 'string', "
+        "value = CASE value WHEN 'true' THEN 'stable' ELSE 'off' END "
+        "WHERE name = 'auto_update' AND type = 'bool'");
+    // 8
     sql("CREATE TABLE dirs ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "parent_id INTEGER REFERENCES dirs(id) ON DELETE CASCADE,"
@@ -259,6 +271,7 @@ static void migrations(void) {
         ")");
     // The Music root is the directory with no parent.
     sql("INSERT INTO dirs (parent_id, path, filename) VALUES (NULL, '', '')");
+    // 10
     sql("CREATE TABLE files ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "parent_id INTEGER NOT NULL REFERENCES dirs(id) ON DELETE CASCADE,"
@@ -267,7 +280,6 @@ static void migrations(void) {
         "UNIQUE (parent_id, filename)"
         ")");
     sql("CREATE INDEX dirs_parent ON dirs (parent_id)");
-    // 10
     sql("CREATE TABLE playlists ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "path TEXT NOT NULL UNIQUE,"
@@ -282,7 +294,7 @@ static void migrations(void) {
         "track_name TEXT"
         ")");
     function(remove_resume_file);
-    // 13
+    // 15
 }
 
 DbMigrationStep *DbSchema_getSteps(void) {

@@ -136,6 +136,9 @@ static void ensure_paths(void) {
 
     get_music_abspath(DOWNLOAD_DIR_NAME, download_dir, sizeof(download_dir));
 
+    char state_dir[512];
+    snprintf(state_dir, sizeof(state_dir), "%s/state", pak_path);
+    mkdir(state_dir, 0755);
     mkdir(get_music_path(), 0755);
     mkdir(download_dir, 0755);
 

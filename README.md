@@ -10,6 +10,7 @@ A comprehensive music playback application for NextUI featuring local file playb
 - **tg5040** - TrimUI Smart Pro / TrimUI Brick / Brick Hammer
 - **tg5050** - TrimUI Smart Pro S
 - **my355** - Miyoo Flip
+- **h700** - Anbernic (H700)
 
 ![music_player](https://github.com/user-attachments/assets/de4fe612-1c48-4e98-9537-79504e20f299)
 
@@ -17,13 +18,22 @@ A comprehensive music playback application for NextUI featuring local file playb
 ## Installation
 
 ### Manual Installation
+
+Each release has one `.pakz` package for each platform:
+
+| Device                         | Package                    |
+|--------------------------------|----------------------------|
+| TrimUI Brick, TrimUI Smart Pro | `Music.Player-tg5040.pakz` |
+| TrimUI Smart Pro S             | `Music.Player-tg5050.pakz` |
+| Miyoo Flip                     | `Music.Player-my355.pakz`  |
+| Anbernic RG XX (H700) devices  | `Music.Player-h700.pakz`   |
+
 1. Mount your NextUI SD card to a computer.
-2. Download the latest release file named `Music.Player.pak.zip` from Github.
-3. Copy the zip file to `/Tools/<PLATFORM>/Music.Player.pak.zip` (replace `<PLATFORM>` with your device: `tg5040` or `tg5050`).
-4. Extract the zip in place, then delete the zip file.
-5. Confirm that there is a `/Tools/<PLATFORM>/Music.Player.pak` folder on your SD card.
-6. Rename the `Music.Player.pak` folder to `Music Player.pak`.
-7. Unmount your SD Card and insert it into your TrimUI device.
+2. Download the `.pakz` package for device from the latest release on Github.
+3. Copy the package to the root of the SD card
+  - You can put several `.pakz` files if you use SD card on several devices.
+4. Unmount your SD card and insert it into your device.
+5. Start the device. NextUI installs each package and then deletes it.
 
 ### Pak Store Installation
 
@@ -198,6 +208,7 @@ tests:
 # Build only
 ./dev build                            # desktop
 ./dev build brick tsps                 # tg5040 and tg5050
+./dev build h700                       # Anbernic H700
 
 # Run host-side unit tests
 ./dev test
@@ -209,7 +220,8 @@ tests:
 ./dev run device
 ./dev log device --follow
 
-# Build a release folder and ZIP package using the distribution manifest
+# Build the pak zip and one .pakz package for each platform, using the
+# distribution manifest
 ./dev dist all --strict
 
 # Remove generated local build and distribution output
@@ -217,6 +229,9 @@ tests:
 ./dev clean --deps                     # also remove the dependency checkouts
 
 # Inspect or update release versions and changelog notes
+./dev version get                     # local build version: v1.17.0+local
+./dev version get --identifier abc1234   # v1.17.0+abc1234
+./dev version validate-release v1.18.0   # exit status 0 if the tag can be a release
 ./dev version latest
 ./dev version list
 
@@ -229,6 +244,16 @@ tests:
 ./dev docker 5040 -- ls
 ./dev docker 5040 --podman -- ls
 ```
+
+For a stable release, use `./dev version create vMAJOR.MINOR.PATCH <note>` to
+prepare `pak.json`, then commit that preparation and push the matching tag.
+For a pre-release, push a tag such as `v1.18.0-beta.1`. Do not run
+`version create`. A pre-release keeps the version and changelog in `pak.json`
+of the latest stable release.
+
+Each build command accepts `--version <value>`. Without it, the binary holds
+the highest official tag that HEAD contains, with `+local`. Without an official
+tag, it uses the stable version in `pak.json`, with `+local`.
 
 ### Build Kinds
 
@@ -271,6 +296,9 @@ Use `--full` to install the complete pak and `--delete` to remove stale files
 from the installed pak before uploading it (userdata is not cleared).
 Passing a path to a `.zip` pak alongside a device target skips the build and
 installs that archive as a full pak (`--delete` still applies).
+`--delete-data` removes the data of the app (settings, database, playlists,
+podcasts) from `.userdata/shared/music-player` on the device before the install.
+It does not remove the pak, thus combine it with `--delete` for a clean install.
 
 ### Driving the App from a Script
 
@@ -386,11 +414,13 @@ nextui-music-player/         # This project
 │   └── workspace/
 │       ├── all/             # Shared code (common utilities, minarch)
 │       ├── tg5040/          # TrimUI Brick platform
-│       └── tg5050/          # TrimUI Smart Pro S platform
+│       ├── tg5050/          # TrimUI Smart Pro S platform
+│       └── h700/            # Anbernic H700 platform
 ├── src/                     # Source code
 ├── bin/                     # Platform binaries and runtime tools
 │   ├── tg5040/              # TrimUI Brick binary (musicplayer.elf)
 │   ├── tg5050/              # TrimUI Smart Pro S binary (musicplayer.elf)
+│   ├── h700/                # Anbernic H700 binary (musicplayer.elf)
 │   ├── yt-dlp               # YouTube downloader (installed on demand)
 │   ├── qjs                  # QuickJS, required by yt-dlp (installed on demand)
 │   ├── ffmpeg               # media convertor, required by yt-dlp (installed on demand)
@@ -409,7 +439,8 @@ The music player uses:
 - **Shared code**: `NextUI/workspace/all/common/` (utils, api, config, scaler)
 - **Platform code**: `NextUI/workspace/<PLATFORM>/platform/`
 - **Libraries**: SDL2, SDL2_image, SDL2_ttf, GLESv2, EGL, libsamplerate, libzip, mbedTLS, ALSA
+- **Sonic** (`src/audio/sonic.c`, Apache-2.0): the change of playback speed that keeps the pitch
 - **Pak libraries**: where the firmware lacks a library, the pak carries one in
   `bin/<platform>/` and `launch.sh` loads it before `/usr/lib`. The build copies
   each one out of a toolchain image (`PAK_LIBRARIES` in `dev`); none is in git.
-  Today: libfdk-aac on tg5050 and my355, and SDL2_image 2.9 (JPEG decoder) on my355.
+  Today: libfdk-aac on tg5050, my355, and h700, and SDL2_image 2.9 (JPEG decoder) on my355 and h700.

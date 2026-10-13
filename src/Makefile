@@ -1,11 +1,11 @@
 ###########################################################
 # Supported platforms
-#   tg5040 / tg5050 / my355 : ARM64 device builds (cross-compiled in the Docker
+#   tg5040 / tg5050 / my355 / h700 : ARM64 device builds (cross-compiled in the Docker
 #                     toolchain)
 #   desktop         : native Linux/macOS build for local dev/testing (no device,
 #                     no cross-compiler). Uses SDL2 + desktop OpenGL instead of
 #                     GLES, and has no AAC/M4A support (see fdk_aac_desktop_stub.c).
-SUPPORTED_PLATFORMS = tg5040 tg5050 my355 desktop
+SUPPORTED_PLATFORMS = tg5040 tg5050 my355 h700 desktop
 DEFAULT_PLATFORM = tg5040
 
 ifeq (,$(PLATFORM))
@@ -92,6 +92,9 @@ NEXTUI_ROOT ?= ../NextUI/workspace
 
 # `clean` is exempt so a tree can always be scrubbed without its dependencies.
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
+ifeq (,$(wildcard $(BUILD_DIR)/version_string.c))
+$(error No $(BUILD_DIR)/version_string.c - build through ./dev)
+endif
 ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
 $(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
 endif
@@ -172,10 +175,11 @@ MBEDTLS_OBJS = $(patsubst %.c,$(MBEDTLS_OBJ_DIR)/%.o,$(MBEDTLS_SRC))
 # Main application sources
 
 LOCAL_SRC = \
+    version.c \
     musicplayer.c player.c filedb.c playlist.c playlist_m3u.c \
     db.c db_schema.c db_statement.c debug.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
-    downloader.c selfupdate.c display_helper.c \
+    downloader.c selfupdate.c selfupdate_install.c display_helper.c \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
@@ -190,7 +194,7 @@ LOCAL_SRC = \
     ui_theme_utils.c keyboard_map.c utf8.c \
     spectrum.c \
     spectrum_ceiling.c \
-    audio/kiss_fft.c audio/kiss_fftr.c \
+    audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c
 
@@ -223,7 +227,7 @@ APP_SRC = $(LOCAL_SRC) $(EXT_SRC)
 
 LOCAL_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LOCAL_SRC))
 EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
-APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS)
+APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS) $(BUILD_DIR)/version_string.o
 
 ###########################################################
 # Compiler / linker flags
@@ -280,16 +284,21 @@ else
 LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
 endif
 else
+ifeq ($(PLATFORM), h700)
+# The SDK GLES metadata names libUMP, which h700 does not use.
+LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
+else
 LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+endif
 LDLIBS += -lfdk-aac
 # The audio libraries a device pulls in are whatever its toolchain sysroot
 # carries: the TrimUI targets have ALSA (tg5050 additionally needs tinyalsa),
-# while my355 has tinyalsa only.
+# h700 needs ALSA and tinyalsa. my355 has tinyalsa only.
 ifeq ($(PLATFORM), my355)
 LDLIBS += -ltinyalsa
 else
 LDLIBS += -lasound
-ifeq ($(PLATFORM), tg5050)
+ifneq (,$(filter $(PLATFORM),tg5050 h700))
 LDLIBS += -ltinyalsa
 endif
 endif
@@ -323,6 +332,9 @@ $(LIBOPUS): $(OPUS_OBJS)
 
 $(LIBMBEDTLS): $(MBEDTLS_OBJS)
 	$(AR) rcs $@ $^
+
+$(BUILD_DIR)/version_string.o: $(BUILD_DIR)/version_string.c version.h
+	$(CC) -c $(MY_CFLAGS) -o $@ $<
 
 # Compile main app sources
 $(OBJ_DIR)/%.o: %.c

@@ -283,8 +283,13 @@ void render_about(SDL_Surface* screen, int show_setting) {
             status_color = Theme_getColor(THEME_ROLE_STATUS_SUCCESS, false);
             break;
         case UPDATE_UI_CURRENT:
-            snprintf(status_msg, sizeof(status_msg), "You're up to date");
+            snprintf(status_msg, sizeof(status_msg), "Up to date (latest version %s)",
+                     status.latest_version);
             status_color = Theme_getColor(THEME_ROLE_SECONDARY, false);
+            break;
+        case UPDATE_UI_RESTART:
+            snprintf(status_msg, sizeof(status_msg), "Update installed: %s", status.latest_version);
+            status_color = Theme_getColor(THEME_ROLE_STATUS_SUCCESS, false);
             break;
         case UPDATE_UI_FAILED:
             snprintf(status_msg, sizeof(status_msg), "%s",
@@ -325,6 +330,9 @@ void render_about(SDL_Surface* screen, int show_setting) {
         case UPDATE_UI_UNCHECKED:
         case UPDATE_UI_FAILED:
             GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CHECK UPDATE", NULL}, 1, screen, 1);
+            break;
+        case UPDATE_UI_RESTART:
+            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "RESTART", NULL}, 1, screen, 1);
             break;
         case UPDATE_UI_CHECKING:
         case UPDATE_UI_CURRENT:

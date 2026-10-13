@@ -15,6 +15,7 @@ src/build/
 bin/tg5040/musicplayer.elf
 bin/tg5050/musicplayer.elf
 bin/my355/musicplayer.elf
+bin/h700/musicplayer.elf
 bin/desktop/musicplayer.elf
 # Records the build kind that the binary beside it has
 bin/*/.kind

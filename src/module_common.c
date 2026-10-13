@@ -64,6 +64,29 @@ void ModuleCommon_init(void) {
     overlay_release_time = 0;
 }
 
+// The status pill shows Bluetooth, and no event of the platform redraws it when a
+// device connects or goes. Two things do here: a change of the audio sink (at once),
+// and a change of the Bluetooth state that the network poll of the platform caches
+// (each 5 s). The poll also sees a link that outlives its audio stream, as a headset
+// that is switched off does until its supervision timeout.
+static bool audio_sink_status_changed(void) {
+    static unsigned seen_generation = 0;
+    static int seen_bluetooth = -1;
+    bool changed = false;
+
+    unsigned generation = Player_getAudioSinkGeneration();
+    if (generation != seen_generation) {
+        seen_generation = generation;
+        changed = true;
+    }
+    int bluetooth = PLAT_btIsConnected() ? 1 : 0;
+    if (bluetooth != seen_bluetooth) {
+        if (seen_bluetooth != -1) changed = true;
+        seen_bluetooth = bluetooth;
+    }
+    return changed;
+}
+
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
@@ -152,12 +175,6 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             }
         }
     }
-
-    // Handle volume controls - only when NOT in a combo with MENU or SELECT
-    // (Menu + Vol = brightness, Select + Vol = color temp - handled by platform)
-    // Note: We don't consume input or return early here - let PWR_update detect
-    // the volume button press and set show_setting to display the volume UI
-    ModuleCommon_handleHardwareVolume();
 
     // Handle quit confirmation dialog
     if (show_quit_confirm) {
@@ -364,6 +381,7 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
 
     // Call platform PWR_update
     PWR_update(dirty, show_setting, NULL, NULL);
+    if (audio_sink_status_changed()) *dirty = 1;
 
     // After visible period, force hide overlay
     if (overlay_release_time > 0) {
@@ -411,6 +429,9 @@ void ModuleCommon_markLayerDrawn(void) {
 }
 
 void ModuleCommon_frameEnd(SDL_Surface* screen) {
+    // A new audio sink (Bluetooth, USB DAC) moves the audio on the main thread
+    Player_handleAudioSinkChange();
+
     switch (FrameState_take(&frame)) {
         case FRAME_CHANGED_SURFACE: GFX_flip(screen);  break;
         case FRAME_CHANGED_LAYERS:  PLAT_GPU_Flip();   break;
@@ -431,22 +452,8 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     } else {
         vol = (vol > 0) ? vol - 1 : 0;
     }
-    // USB HID events only come from USB DAC, so always use software volume
+    // keymon does not see these buttons: set the system volume, which NextUI puts on
+    // the mixer of the output
     SetVolume(vol);
-    float v = vol / 20.0f;
-    Player_setVolume(v * v * v);
     return true;
-}
-
-void ModuleCommon_handleHardwareVolume(void) {
-    if (PAD_isPressed(BTN_MENU) || PAD_isPressed(BTN_SELECT)) return;
-    if (!PAD_justRepeated(BTN_PLUS) && !PAD_justRepeated(BTN_MINUS)) return;
-
-    // Don't increment volume here - keymon already handles SetVolume().
-    // We only need to sync software volume for BT/USB DAC output.
-    if (Player_isBluetoothActive() || Player_isUSBDACActive()) {
-        int vol = GetVolume();
-        float v = vol / 20.0f;
-        Player_setVolume(v * v * v);
-    }
 }

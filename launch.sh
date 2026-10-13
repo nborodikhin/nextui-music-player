@@ -7,6 +7,12 @@ cd "$DIR"
 
 export LD_LIBRARY_PATH="$DIR:$DIR/bin:$DIR/bin/$PLATFORM:$LD_LIBRARY_PATH:/usr/bin"
 
+# With its thread-safe PCM locking, alsa-lib leaves a lock held on some BlueALSA
+# streams: the SDL audio thread then never runs (no sound over Bluetooth), and the
+# close of the device waits for it (a hang on exit). Only the SDL audio thread
+# drives the PCM, thus the locking gives nothing here. NextUI issue #810, PR #811.
+export LIBASOUND_THREAD_SAFE=0
+
 CPU_FREQ=/sys/devices/system/cpu/cpu0/cpufreq
 
 # Save current CPU scaling state and restore on exit (including crash)

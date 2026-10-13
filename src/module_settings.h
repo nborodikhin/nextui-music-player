@@ -22,7 +22,6 @@ void SettingsModule_cycleSoftLimiterNext(void);
 void SettingsModule_cycleSoftLimiterPrev(void);
 const char* SettingsModule_getSoftLimiterDisplayStr(void);
 
-void SettingsModule_toggleAutoUpdate(void);
-const char* SettingsModule_getAutoUpdateDisplayStr(void);
+const char* SettingsModule_getUpdateChannelDisplayStr(void);
 
 #endif

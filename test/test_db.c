@@ -223,24 +223,59 @@ static bool write_resume_file(const char* contents) {
     return success;
 }
 
-static bool create_schema_at_version_six(const char* path) {
-    DbMigrationStep* steps = DbSchema_getSteps();
-    if (!steps) return false;
-    bool success =
-        sqlite_exec(path,
-                    "CREATE TABLE settings (name TEXT PRIMARY KEY NOT NULL, "
-                    "type TEXT NOT NULL, value NOT NULL)") &&
-        sqlite_exec(path, steps[5].sql) &&
-        sqlite_exec(path, "PRAGMA user_version = 6");
-    free(steps);
-    return success;
+// Creates a database at schema version 7: the settings, and none of the tables of the index.
+static bool create_schema_before_the_index(const char* path) {
+    return sqlite_exec(path,
+                       "CREATE TABLE settings (name TEXT PRIMARY KEY NOT NULL, "
+                       "type TEXT NOT NULL, value NOT NULL)") &&
+           sqlite_exec(path, "PRAGMA user_version = 7");
+}
+
+static bool sqlite_has_settings(const char* path) {
+    sqlite3* database = NULL;
+    sqlite3_stmt* statement = NULL;
+    bool exists = false;
+
+    if (sqlite3_open(path, &database) == SQLITE_OK &&
+        sqlite3_prepare_v2(
+            database,
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
+            -1, &statement, NULL) == SQLITE_OK) {
+        exists = sqlite3_step(statement) == SQLITE_ROW;
+    }
+    if (statement) sqlite3_finalize(statement);
+    if (database) sqlite3_close(database);
+    return exists;
+}
+
+// Returns true when the row of the name has the type and the value.
+static bool sqlite_setting_is(const char* path, const char* name,
+                              const char* type, const char* value) {
+    sqlite3* database = NULL;
+    sqlite3_stmt* statement = NULL;
+    bool matches = false;
+
+    if (sqlite3_open(path, &database) == SQLITE_OK &&
+        sqlite3_prepare_v2(database,
+                           "SELECT type, value FROM settings WHERE name = ?",
+                           -1, &statement, NULL) == SQLITE_OK &&
+        sqlite3_bind_text(statement, 1, name, -1, SQLITE_STATIC) == SQLITE_OK &&
+        sqlite3_step(statement) == SQLITE_ROW) {
+        const char* row_type = (const char*)sqlite3_column_text(statement, 0);
+        const char* row_value = (const char*)sqlite3_column_text(statement, 1);
+        matches = row_type && row_value && strcmp(row_type, type) == 0 &&
+                  strcmp(row_value, value) == 0;
+    }
+    if (statement) sqlite3_finalize(statement);
+    if (database) sqlite3_close(database);
+    return matches;
 }
 
 TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
     CHECK(Db_isAvailable());
-    CHECK_EQ_INT(sqlite_user_version(database_path), 12);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 14);
     CHECK(sqlite_has_table(database_path, "settings"));
     CHECK(sqlite_has_table(database_path, "dirs"));
     CHECK(sqlite_has_table(database_path, "files"));
@@ -259,6 +294,7 @@ TEST(fresh_database_gets_schema) {
     CHECK(Db_getRootDirId() > 0);
     CHECK(!sqlite_has_index(database_path, "files_parent"));
     CHECK(sqlite_has_index(database_path, "dirs_parent"));
+    CHECK(sqlite_has_settings(database_path));
     stop_test();
 }
 
@@ -290,7 +326,10 @@ TEST(settings_file_migration_runs_ordered_actions) {
     CHECK(result && result->count == 5);
     Db_freeResult(result);
     CHECK(access(settings_path, F_OK) != 0);
-    CHECK_EQ_INT(sqlite_user_version(database_path), 12);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 14);
+    CHECK(sqlite_setting_is(database_path, "update_channel", "string", "off"));
+    char value[16];
+    CHECK(!sqlite_setting_value(database_path, "auto_update", value, sizeof(value)));
 
     Db_quit();
     CHECK(Db_initInternal(database_path));
@@ -329,8 +368,63 @@ TEST(failed_settings_migration_keeps_no_partial_rows) {
     CHECK(sqlite_exec(database_path, "DROP TRIGGER fail_bass"));
     CHECK(Db_initInternal(database_path));
     CHECK_EQ_INT(sqlite_settings_count(database_path), 2);
-    CHECK_EQ_INT(sqlite_user_version(database_path), 12);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 14);
     CHECK(access(settings_path, F_OK) != 0);
+    stop_test();
+}
+
+// Makes a database at the schema version before the update channel step.
+static bool create_version_6_database(const char* rows) {
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "CREATE TABLE settings (name TEXT PRIMARY KEY NOT NULL, type TEXT NOT NULL, "
+             "value NOT NULL);"
+             "%s"
+             "PRAGMA user_version = 6",
+             rows);
+    return sqlite_exec(database_path, sql);
+}
+
+TEST(auto_update_on_becomes_stable_channel) {
+    CHECK(start_test());
+    CHECK(create_version_6_database(
+        "INSERT INTO settings VALUES ('auto_update', 'bool', 'true');"));
+    CHECK(Db_initInternal(database_path));
+    CHECK(sqlite_setting_is(database_path, "update_channel", "string", "stable"));
+    CHECK_EQ_INT(sqlite_settings_count(database_path), 1);
+    stop_test();
+}
+
+TEST(auto_update_off_becomes_off_channel) {
+    CHECK(start_test());
+    CHECK(create_version_6_database(
+        "INSERT INTO settings VALUES ('auto_update', 'bool', 'false');"));
+    CHECK(Db_initInternal(database_path));
+    CHECK(sqlite_setting_is(database_path, "update_channel", "string", "off"));
+    CHECK_EQ_INT(sqlite_settings_count(database_path), 1);
+    stop_test();
+}
+
+TEST(no_auto_update_row_gives_no_channel_row) {
+    CHECK(start_test());
+    CHECK(create_version_6_database(
+        "INSERT INTO settings VALUES ('soft_limiter', 'int', '1');"));
+    CHECK(Db_initInternal(database_path));
+    char value[16];
+    CHECK(!sqlite_setting_value(database_path, "update_channel", value, sizeof(value)));
+    CHECK_EQ_INT(sqlite_settings_count(database_path), 1);
+    stop_test();
+}
+
+TEST(selected_channel_stays_after_restart) {
+    CHECK(start_test());
+    CHECK(create_version_6_database(
+        "INSERT INTO settings VALUES ('auto_update', 'bool', 'true');"));
+    CHECK(Db_initInternal(database_path));
+    CHECK(Db_saveStringSetting("update_channel", "beta"));
+    Db_quit();
+    CHECK(Db_initInternal(database_path));
+    CHECK(sqlite_setting_is(database_path, "update_channel", "string", "beta"));
     stop_test();
 }
 
@@ -363,7 +457,7 @@ TEST(failed_schema_migration_rolls_back) {
     CHECK_EQ_INT(sqlite_user_version(database_path), 0);
     CHECK(sqlite_exec(database_path, "DROP TABLE settings"));
     CHECK(Db_initInternal(database_path));
-    CHECK_EQ_INT(sqlite_user_version(database_path), 12);
+    CHECK_EQ_INT(sqlite_user_version(database_path), 14);
     stop_test();
 }
 
@@ -375,7 +469,7 @@ TEST(resume_file_is_removed_without_copying) {
         "track_path=/mnt/SDCARD/Music/Album/song.mp3\n"
         "position_ms=90000\n";
     CHECK(write_resume_file(resume));
-    CHECK(create_schema_at_version_six(database_path));
+    CHECK(create_schema_before_the_index(database_path));
     CHECK(Db_initInternal(database_path));
 
     DbLastPlayedResult* last_played = Db_readLastPlayed();
@@ -1125,6 +1219,10 @@ int main(void) {
     RUN(fresh_database_gets_schema);
     RUN(settings_file_migration_runs_ordered_actions);
     RUN(failed_settings_migration_keeps_no_partial_rows);
+    RUN(auto_update_on_becomes_stable_channel);
+    RUN(auto_update_off_becomes_off_channel);
+    RUN(no_auto_update_row_gives_no_channel_row);
+    RUN(selected_channel_stays_after_restart);
     RUN(open_failure_disables_database);
     RUN(newer_database_is_not_changed);
     RUN(failed_schema_migration_rolls_back);

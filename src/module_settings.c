@@ -30,6 +30,15 @@ static const int bass_filter_values[] = {0, 80, 100, 120, 150, 200};
 #define SOFT_LIMITER_VALUE_COUNT 4
 #define DEFAULT_SOFT_LIMITER_INDEX 2
 
+// The order of the values on the row.
+static const UpdateChannel update_channel_values[] = {
+    UPDATE_CHANNEL_OFF,
+    UPDATE_CHANNEL_STABLE,
+    UPDATE_CHANNEL_BETA,
+};
+#define UPDATE_CHANNEL_VALUE_COUNT 3
+#define DEFAULT_UPDATE_CHANNEL_INDEX 1
+
 static int screen_off_index(void) {
     int current = Settings_getInt(&SETTING_SCREEN_OFF_TIMEOUT);
     for (int index = 0; index < SCREEN_OFF_VALUE_COUNT; index++) {
@@ -112,12 +121,30 @@ const char* SettingsModule_getSoftLimiterDisplayStr(void) {
     }
 }
 
-void SettingsModule_toggleAutoUpdate(void) {
-    Settings_toggleBool(&SETTING_AUTO_UPDATE);
+static int update_channel_index(void) {
+    UpdateChannel current = Settings_getEnum(&SETTING_UPDATE_CHANNEL);
+    for (int index = 0; index < UPDATE_CHANNEL_VALUE_COUNT; index++) {
+        if (update_channel_values[index] == current) return index;
+    }
+    return DEFAULT_UPDATE_CHANNEL_INDEX;
 }
 
-const char* SettingsModule_getAutoUpdateDisplayStr(void) {
-    return Settings_getBool(&SETTING_AUTO_UPDATE) ? "On" : "Off";
+// Pass true in next to move to the next channel, false to move to the previous
+// one. Forgets the result of the last check.
+static void cycle_update_channel(bool next) {
+    int step = next ? 1 : UPDATE_CHANNEL_VALUE_COUNT - 1;
+    int index = (update_channel_index() + step) % UPDATE_CHANNEL_VALUE_COUNT;
+    Settings_setEnum(&SETTING_UPDATE_CHANNEL, update_channel_values[index]);
+    SelfUpdate_forgetCheck();
+}
+
+const char* SettingsModule_getUpdateChannelDisplayStr(void) {
+    switch (Settings_getEnum(&SETTING_UPDATE_CHANNEL)) {
+        case UPDATE_CHANNEL_OFF:    return "Off";
+        case UPDATE_CHANNEL_STABLE: return "Stable";
+        case UPDATE_CHANNEL_BETA:   return "Beta";
+    }
+    return "Stable";
 }
 
 // Internal states
@@ -196,8 +223,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                             cycleNext ? SettingsModule_cycleSoftLimiterNext() : SettingsModule_cycleSoftLimiterPrev();
                             buttonHandledByItem = true;
                             break;
-                        case SETTINGS_ITEM_AUTO_UPDATE:
-                            SettingsModule_toggleAutoUpdate();
+                        case SETTINGS_ITEM_UPDATE_CHANNEL:
+                            cycle_update_channel(cycleNext);
                             buttonHandledByItem = true;
                             break;
                         default:
@@ -227,8 +254,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                             SettingsModule_cycleSoftLimiterNext();
                             dirty = 1;
                             break;
-                        case SETTINGS_ITEM_AUTO_UPDATE:
-                            SettingsModule_toggleAutoUpdate();
+                        case SETTINGS_ITEM_UPDATE_CHANNEL:
+                            cycle_update_channel(true);
                             dirty = 1;
                             break;
                         case SETTINGS_ITEM_CLEAR_CACHE:
@@ -284,7 +311,12 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                 }
 
                 if (PAD_justPressed(BTN_A)) {
-                    if (update_ui == UPDATE_UI_AVAILABLE) {
+                    if (update_ui == UPDATE_UI_RESTART) {
+                        // The new binary is already on disk; exiting with the
+                        // flag set lets launch.sh bring it straight back up
+                        SelfUpdate_requestRestart();
+                        return MODULE_EXIT_QUIT;
+                    } else if (update_ui == UPDATE_UI_AVAILABLE) {
                         SelfUpdate_startUpdate();
                         state = SETTINGS_STATE_UPDATING;
                         dirty = 1;

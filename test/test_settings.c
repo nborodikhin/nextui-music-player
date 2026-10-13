@@ -63,7 +63,7 @@ TEST(empty_table_returns_fallbacks) {
     CHECK(Settings_getBool(&SETTING_LYRICS_ENABLED));
     CHECK_EQ_INT(Settings_getInt(&SETTING_BASS_FILTER_HZ), 120);
     CHECK_EQ_INT(Settings_getInt(&SETTING_SOFT_LIMITER), 2);
-    CHECK(Settings_getBool(&SETTING_AUTO_UPDATE));
+    CHECK_EQ_INT(Settings_getEnum(&SETTING_UPDATE_CHANNEL), UPDATE_CHANNEL_STABLE);
     CHECK_EQ_INT(Settings_getInt(&test_int), 7);
     CHECK(Settings_getBool(&test_bool));
     char* string = Settings_getString(&test_string);
@@ -196,6 +196,50 @@ TEST(unknown_type_is_skipped) {
     stop_test();
 }
 
+static bool stored_string_is(const char* name, const char* expected) {
+    DbSettingsResult* result = Db_readSettings();
+    const DbSetting* setting = find_setting(result, name);
+    bool matches = setting && setting->type == DB_SETTING_STRING &&
+                   setting->string_value && strcmp(setting->string_value, expected) == 0;
+    Db_freeResult(result);
+    return matches;
+}
+
+TEST(enum_stores_spelling_as_string) {
+    CHECK(start_test());
+    Settings_init();
+    Settings_setEnum(&SETTING_UPDATE_CHANNEL, UPDATE_CHANNEL_BETA);
+    CHECK_EQ_INT(Settings_getEnum(&SETTING_UPDATE_CHANNEL), UPDATE_CHANNEL_BETA);
+    CHECK(stored_string_is("update_channel", "beta"));
+
+    Settings_init();
+    CHECK_EQ_INT(Settings_getEnum(&SETTING_UPDATE_CHANNEL), UPDATE_CHANNEL_BETA);
+    stop_test();
+}
+
+TEST(enum_unknown_spelling_returns_fallback_and_stays) {
+    CHECK(start_test());
+    CHECK(Db_execute(
+        "INSERT INTO settings (name, type, value) VALUES ('update_channel', 'string', 'nightly')"));
+    Settings_init();
+    CHECK_EQ_INT(Settings_getEnum(&SETTING_UPDATE_CHANNEL), UPDATE_CHANNEL_STABLE);
+    CHECK(stored_string_is("update_channel", "nightly"));
+    stop_test();
+}
+
+TEST(enum_value_out_of_range_is_ignored) {
+    CHECK(start_test());
+    Settings_init();
+    Settings_setEnum(&SETTING_UPDATE_CHANNEL, UPDATE_CHANNEL_OFF);
+    int before = Db_dataVersion();
+    Settings_setEnum(&SETTING_UPDATE_CHANNEL, 3);
+    Settings_setEnum(&SETTING_UPDATE_CHANNEL, -1);
+    CHECK_EQ_INT(Db_dataVersion(), before);
+    CHECK_EQ_INT(Settings_getEnum(&SETTING_UPDATE_CHANNEL), UPDATE_CHANNEL_OFF);
+    CHECK(stored_string_is("update_channel", "off"));
+    stop_test();
+}
+
 int main(void) {
     RUN(empty_table_returns_fallbacks);
     RUN(setter_reaches_all_threads);
@@ -206,5 +250,8 @@ int main(void) {
     RUN(string_buffer_returns_required_count);
     RUN(second_init_reads_stored_values);
     RUN(unknown_type_is_skipped);
+    RUN(enum_stores_spelling_as_string);
+    RUN(enum_unknown_spelling_returns_fallback_and_stays);
+    RUN(enum_value_out_of_range_is_ignored);
     return test_summary();
 }

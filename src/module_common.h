@@ -87,8 +87,6 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting);
 // Handle a single HID volume event. Returns true if the event was a volume event.
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);
 
-// Handle hardware volume buttons (BTN_PLUS/BTN_MINUS).
-void ModuleCommon_handleHardwareVolume(void);
 
 // Begin one module-loop iteration: start the frame timer, poll input.
 // MUST be the first statement of every module's loop body.

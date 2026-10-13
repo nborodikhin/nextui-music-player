@@ -1,4 +1,5 @@
 #include "selfupdate.h"
+#include "version.h"
 #include "wget_fetch.h"
 #include "file_utils.h"
 
@@ -8,7 +9,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <errno.h>
 #include <zip.h>
 
@@ -18,7 +18,11 @@
 #include "debug.h"
 #include "settings.h"
 
-#define RELEASE_JSON_MAX 32768
+// One release with its notes fits the first. The notes of the recent releases
+// of the Beta channel do not.
+#define RELEASE_JSON_MAX      32768
+#define RELEASE_LIST_JSON_MAX 262144
+#define RELEASE_LIST_COUNT    10
 
 // How the progress bar is shared out. Download dominates, but unpacking and
 // installing move tens of megabytes on and off the SD card and are slow enough
@@ -30,14 +34,34 @@
 
 // Paths
 static char pak_path[512] = "";
-static char version_file[512] = "";
 static char current_version[32] = "";
 
-// Update status
+// Update status. A worker writes the progress fields directly, and publishes
+// its result under status_mutex.
 static SelfUpdateStatus update_status = {0};
+static pthread_mutex_t status_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t update_thread;
 static volatile bool update_running = false;
 static volatile bool update_cancel = false;
+
+// The number of the last request. A worker publishes its result only when no
+// later request came, thus a change of the channel discards a running check.
+static int request_id = 0;
+
+// What the running worker answers. Set before the worker starts.
+static int worker_request = 0;
+static UpdateChannel worker_channel = UPDATE_CHANNEL_STABLE;
+
+// The result fields of the status, which a worker publishes once at its end.
+typedef struct {
+    SelfUpdateState state;
+    bool            update_available;
+    char            latest_version[32];
+    char            download_url[512];
+    char            release_notes[1024];
+    char            status_message[256];
+    char            error_message[256];
+} WorkerResult;
 
 // Files the last extraction wrote out, which is what the install then copies
 static int extracted_files = 0;
@@ -85,44 +109,8 @@ static bool report_download_progress(long written, int speed_bps, void* ctx) {
     return !update_cancel;
 }
 
-// Compare semantic versions: returns positive if v1 > v2, negative if v1 < v2, 0 if equal
-static int compare_versions(const char* v1, const char* v2) {
-    int major1 = 0, minor1 = 0, patch1 = 0;
-    int major2 = 0, minor2 = 0, patch2 = 0;
-
-    // Skip 'v' prefix if present
-    if (v1[0] == 'v' || v1[0] == 'V') v1++;
-    if (v2[0] == 'v' || v2[0] == 'V') v2++;
-
-    sscanf(v1, "%d.%d.%d", &major1, &minor1, &patch1);
-    sscanf(v2, "%d.%d.%d", &major2, &minor2, &patch2);
-
-    if (major1 != major2) return major1 - major2;
-    if (minor1 != minor2) return minor1 - minor2;
-    return patch1 - patch2;
-}
 
 
-// Written on the device rather than shipped, keyed by their path relative to the
-// pak root. They are absent from the package on purpose, so orphan removal must
-// not treat them as leftovers: the binaries cost tens of megabytes to re-fetch,
-// and the queue is the user's own pending work.
-// state/yt-dlp_version.txt is deliberately absent: it is a cache the next launch
-// rebuilds from the binary.
-static const char* const preserved_paths[] = {
-    "bin/yt-dlp",
-    "bin/qjs",
-    "bin/ffmpeg",
-    "state/youtube_queue.txt",
-    NULL
-};
-
-static bool is_preserved(const char* rel_path) {
-    for (int i = 0; preserved_paths[i]; i++) {
-        if (strcmp(preserved_paths[i], rel_path) == 0) return true;
-    }
-    return false;
-}
 
 // Drives the extract slice of the progress bar from the archive's entry count.
 static void note_entry_extracted(long done, long total, void* ctx) {
@@ -154,45 +142,13 @@ static void note_file_installed(const char* rel_path, void* ctx) {
         "%d / %d files", done, extracted_files);
 }
 
-// Delete anything in dst that the update no longer carries, except the paths
-// written on the device rather than shipped.
-// rel is the path of dst relative to the pak root ("" at the top level).
-static void remove_orphans(const char* src, const char* dst, const char* rel) {
-    DIR* dir = opendir(dst);
-    if (!dir) return;
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-
-        char src_path[600], dst_path[600], rel_path[600];
-        snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
-        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst, entry->d_name);
-        snprintf(rel_path, sizeof(rel_path), "%s%s%s", rel, rel[0] ? "/" : "", entry->d_name);
-
-        if (access(src_path, F_OK) != 0) {
-            if (is_preserved(rel_path)) {
-                continue;
-            }
-            rm_rf(dst_path);
-        }
-        else if (entry->d_type == DT_DIR) {
-            remove_orphans(src_path, dst_path, rel_path);
-        }
-    }
-
-    closedir(dir);
-}
-
 // Install the unpacked update over the pak: copy everything across, then drop
 // whatever the new package no longer has.
 static int sync_directories(const char* src, const char* dst) {
     int installed = 0;
     if (!cp_rf(src, dst, note_file_installed, &installed)) return -1;
 
-    remove_orphans(src, dst, "");
+    SelfUpdate_removeObsoleteFiles(src, dst);
     return 0;
 }
 
@@ -202,28 +158,12 @@ int SelfUpdate_init(const char* path) {
 
     strncpy(pak_path, path, sizeof(pak_path) - 1);
 
-    // Set up paths
-    snprintf(version_file, sizeof(version_file), "%s/state/app_version.txt", pak_path);
-
-    // Read version from file (primary source)
-    strncpy(current_version, APP_VERSION_FALLBACK, sizeof(current_version) - 1);
-    FILE* f = fopen(version_file, "r");
-    if (f) {
-        char file_version[32] = "";
-        if (fgets(file_version, sizeof(file_version), f)) {
-            char* nl = strchr(file_version, '\n');
-            if (nl) *nl = '\0';
-            if (strlen(file_version) > 0) {
-                strncpy(current_version, file_version, sizeof(current_version) - 1);
-            }
-        }
-        fclose(f);
-    }
+    snprintf(current_version, sizeof(current_version), "%s", APP_VERSION);
 
     memset(&update_status, 0, sizeof(update_status));
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
 
-    if (Settings_getBool(&SETTING_AUTO_UPDATE)) {
+    if (Settings_getEnum(&SETTING_UPDATE_CHANNEL) != UPDATE_CHANNEL_OFF) {
         SelfUpdate_checkForUpdate();
     }
 
@@ -241,46 +181,113 @@ const char* SelfUpdate_getVersion(void) {
     return current_version;
 }
 
-int SelfUpdate_checkForUpdate(void) {
-    if (update_running) return -1;
+// Call with status_mutex held.
+static void clear_result(void) {
+    update_status.state = SELFUPDATE_STATE_IDLE;
+    update_status.update_available = false;
+    update_status.latest_version[0] = '\0';
+    update_status.download_url[0] = '\0';
+    update_status.release_notes[0] = '\0';
+    update_status.status_message[0] = '\0';
+    update_status.error_message[0] = '\0';
+    update_status.progress_percent = 0;
+}
+
+// Call with status_mutex held.
+static void copy_result_from_status(WorkerResult* result) {
+    result->state = update_status.state;
+    result->update_available = update_status.update_available;
+    memcpy(result->latest_version, update_status.latest_version, sizeof(result->latest_version));
+    memcpy(result->download_url, update_status.download_url, sizeof(result->download_url));
+    memcpy(result->release_notes, update_status.release_notes, sizeof(result->release_notes));
+    memcpy(result->status_message, update_status.status_message, sizeof(result->status_message));
+    memcpy(result->error_message, update_status.error_message, sizeof(result->error_message));
+}
+
+// Publishes the result of a worker and ends it. A result of an earlier request
+// is discarded, except a completed install: its files are on the card already.
+static void finish_worker(const WorkerResult* result, int request) {
+    pthread_mutex_lock(&status_mutex);
+    if (request == request_id || result->state == SELFUPDATE_STATE_COMPLETED) {
+        update_status.state = result->state;
+        update_status.update_available = result->update_available;
+        memcpy(update_status.latest_version, result->latest_version,
+               sizeof(update_status.latest_version));
+        memcpy(update_status.download_url, result->download_url,
+               sizeof(update_status.download_url));
+        memcpy(update_status.release_notes, result->release_notes,
+               sizeof(update_status.release_notes));
+        memcpy(update_status.status_message, result->status_message,
+               sizeof(update_status.status_message));
+        memcpy(update_status.error_message, result->error_message,
+               sizeof(update_status.error_message));
+    } else {
+        clear_result();
+    }
+    update_running = false;
+    pthread_mutex_unlock(&status_mutex);
+}
+
+// Call with status_mutex held. Returns false when a worker runs or the thread
+// cannot start.
+static bool start_worker(void* (*worker)(void*), UpdateChannel channel) {
+    if (update_running) return false;
 
     update_cancel = false;
     update_running = true;
+    worker_request = ++request_id;
+    worker_channel = channel;
+
+    if (pthread_create(&update_thread, NULL, worker, NULL) != 0) {
+        update_running = false;
+        return false;
+    }
+    return true;
+}
+
+int SelfUpdate_checkForUpdate(void) {
+    UpdateChannel channel = Settings_getEnum(&SETTING_UPDATE_CHANNEL);
+    if (channel == UPDATE_CHANNEL_OFF) channel = UPDATE_CHANNEL_STABLE;
+
+    pthread_mutex_lock(&status_mutex);
+    if (update_running) {
+        pthread_mutex_unlock(&status_mutex);
+        return -1;
+    }
 
     memset(&update_status, 0, sizeof(update_status));
     update_status.state = SELFUPDATE_STATE_CHECKING;
     strncpy(update_status.current_version, current_version, sizeof(update_status.current_version));
     strcpy(update_status.status_message, "Checking for updates...");
 
-    if (pthread_create(&update_thread, NULL, check_thread_func, NULL) != 0) {
-        update_running = false;
+    bool started = start_worker(check_thread_func, channel);
+    if (!started) {
         update_status.state = SELFUPDATE_STATE_ERROR;
         strcpy(update_status.error_message, "Failed to start update check");
-        return -1;
     }
-
-    return 0;
+    pthread_mutex_unlock(&status_mutex);
+    return started ? 0 : -1;
 }
 
 int SelfUpdate_startUpdate(void) {
-    if (update_running) return -1;
-    if (!update_status.update_available) return -1;
-
-    update_cancel = false;
-    update_running = true;
+    pthread_mutex_lock(&status_mutex);
+    if (update_running || !update_status.update_available ||
+        update_status.state == SELFUPDATE_STATE_COMPLETED) {
+        pthread_mutex_unlock(&status_mutex);
+        return -1;
+    }
 
     update_status.state = SELFUPDATE_STATE_DOWNLOADING;
     update_status.progress_percent = 0;
     strcpy(update_status.status_message, "Starting download...");
 
-    if (pthread_create(&update_thread, NULL, update_thread_func, NULL) != 0) {
-        update_running = false;
+    bool started = start_worker(update_thread_func, worker_channel);
+    if (!started) {
         update_status.state = SELFUPDATE_STATE_ERROR;
         strcpy(update_status.error_message, "Failed to start update");
-        return -1;
     }
-
-    return 0;
+    pthread_mutex_unlock(&status_mutex);
+    return started ? 0 : -1;
 }
 
 void SelfUpdate_cancelUpdate(void) {
@@ -289,13 +296,26 @@ void SelfUpdate_cancelUpdate(void) {
     }
 }
 
+void SelfUpdate_forgetCheck(void) {
+    pthread_mutex_lock(&status_mutex);
+    request_id++;
+    if (!update_running && update_status.state != SELFUPDATE_STATE_COMPLETED) {
+        clear_result();
+    }
+    pthread_mutex_unlock(&status_mutex);
+}
+
 SelfUpdateStatus SelfUpdate_getStatus(void) {
-    return update_status;
+    pthread_mutex_lock(&status_mutex);
+    SelfUpdateStatus status = update_status;
+    pthread_mutex_unlock(&status_mutex);
+    return status;
 }
 
 UpdateUiState SelfUpdate_uiState(const SelfUpdateStatus* status) {
     if (!status) return UPDATE_UI_UNCHECKED;
 
+    if (status->state == SELFUPDATE_STATE_COMPLETED) return UPDATE_UI_RESTART;
     if (status->state == SELFUPDATE_STATE_CHECKING) return UPDATE_UI_CHECKING;
     if (status->state == SELFUPDATE_STATE_ERROR) return UPDATE_UI_FAILED;
     if (status->update_available) return UPDATE_UI_AVAILABLE;
@@ -314,7 +334,7 @@ void SelfUpdate_update(void) {
 }
 
 bool SelfUpdate_isPendingRestart(void) {
-    return update_status.state == SELFUPDATE_STATE_COMPLETED;
+    return SelfUpdate_getState() == SELFUPDATE_STATE_COMPLETED;
 }
 
 void SelfUpdate_requestRestart(void) {
@@ -327,52 +347,50 @@ void SelfUpdate_requestRestart(void) {
 }
 
 SelfUpdateState SelfUpdate_getState(void) {
-    return update_status.state;
+    pthread_mutex_lock(&status_mutex);
+    SelfUpdateState state = update_status.state;
+    pthread_mutex_unlock(&status_mutex);
+    return state;
 }
 
-// Check for update thread
-static void* check_thread_func(void* arg) {
-    (void)arg;
+static void fail(WorkerResult* result, const char* message) {
+    result->state = SELFUPDATE_STATE_ERROR;
+    snprintf(result->error_message, sizeof(result->error_message), "%s", message);
+}
 
-    // Check connectivity
+// Fills result with the release that the channel selects. Leaves the state IDLE
+// with no version after a cancel.
+static void run_check(UpdateChannel channel, WorkerResult* result) {
     int conn = system("ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1");
     if (conn != 0) {
         conn = system("ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1");
     }
-
     if (conn != 0) {
-        strcpy(update_status.error_message, "No internet connection");
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, "No internet connection");
+        return;
     }
-
-    if (update_cancel) {
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
-    }
+    if (update_cancel) return;
 
     update_status.progress_percent = 20;
 
-    // Fetch latest release info from GitHub API
+    bool beta = channel == UPDATE_CHANNEL_BETA;
     char api_url[256];
-    snprintf(api_url, sizeof(api_url),
-        "https://api.github.com/repos/%s/releases/latest", APP_GITHUB_REPO);
-
-    char* release_json = fetch_to_memory(api_url, RELEASE_JSON_MAX);
-    if (!release_json) {
-        strcpy(update_status.error_message, "Failed to check GitHub");
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+    if (beta) {
+        snprintf(api_url, sizeof(api_url), "https://api.github.com/repos/%s/releases?per_page=%d",
+                 APP_GITHUB_REPO, RELEASE_LIST_COUNT);
+    } else {
+        snprintf(api_url, sizeof(api_url), "https://api.github.com/repos/%s/releases/latest",
+                 APP_GITHUB_REPO);
     }
 
+    char* release_json = fetch_to_memory(api_url, beta ? RELEASE_LIST_JSON_MAX : RELEASE_JSON_MAX);
+    if (!release_json) {
+        fail(result, "Failed to check GitHub");
+        return;
+    }
     if (update_cancel) {
         free(release_json);
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        return;
     }
 
     update_status.progress_percent = 50;
@@ -380,87 +398,69 @@ static void* check_thread_func(void* arg) {
     JSON_Value* json_root = json_parse_string(release_json);
     free(release_json);
 
-    JSON_Object* release = json_root ? json_value_get_object(json_root) : NULL;
-    const char* latest_version = release ? json_object_get_string(release, "tag_name") : NULL;
-
-    if (!latest_version || latest_version[0] == '\0') {
+    VersionReleaseStatus found = Version_bestReleaseExists(json_root, APP_RELEASE_ASSET);
+    if (found != VERSION_RELEASE_FOUND) {
         json_value_free(json_root);
-        strcpy(update_status.error_message, "Could not parse version");
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, found == VERSION_RELEASE_NO_ASSET ? "Release package not found"
+                                                       : "Could not parse version");
+        return;
     }
 
-    strncpy(update_status.latest_version, latest_version, sizeof(update_status.latest_version) - 1);
+    const JSON_Object* release = Version_getBestRelease(json_root, APP_RELEASE_ASSET);
+    const char* tag = json_object_get_string(release, "tag_name");
+    // A tag longer than the field is cut for display only.
+    snprintf(result->latest_version, sizeof(result->latest_version), "%s", tag);
 
     update_status.progress_percent = 70;
 
-    // Compare versions using semantic versioning
-    if (compare_versions(latest_version, current_version) <= 0) {
+    if (Version_compare(tag, current_version) <= 0) {
         json_value_free(json_root);
-        update_status.update_available = false;
-        strcpy(update_status.status_message, "Already up to date");
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        strcpy(result->status_message, "Already up to date");
+        return;
     }
 
-    // Locate the pak.zip among the release assets
-    const char* download_url = NULL;
-    JSON_Array* assets = json_object_get_array(release, "assets");
-    for (size_t i = 0; assets && i < json_array_get_count(assets); i++) {
-        JSON_Object* asset = json_array_get_object(assets, i);
-        const char* name = asset ? json_object_get_string(asset, "name") : NULL;
-        if (name && strcmp(name, APP_RELEASE_ASSET) == 0) {
-            download_url = json_object_get_string(asset, "browser_download_url");
-            break;
-        }
-    }
-
-    if (!download_url || download_url[0] == '\0') {
-        json_value_free(json_root);
-        strcpy(update_status.error_message, "Release package not found");
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
-    }
-
-    strncpy(update_status.download_url, download_url, sizeof(update_status.download_url) - 1);
+    snprintf(result->download_url, sizeof(result->download_url), "%s",
+             Version_getAssetUrl(release, APP_RELEASE_ASSET));
 
     const char* body = json_object_get_string(release, "body");
     if (body) {
-        strncpy(update_status.release_notes, body, sizeof(update_status.release_notes) - 1);
-        update_status.release_notes[sizeof(update_status.release_notes) - 1] = '\0';
+        snprintf(result->release_notes, sizeof(result->release_notes), "%s", body);
     }
 
     json_value_free(json_root);
 
-    update_status.update_available = true;
-    snprintf(update_status.status_message, sizeof(update_status.status_message),
-        "Update available: %s", update_status.latest_version);
+    result->update_available = true;
+    snprintf(result->status_message, sizeof(result->status_message),
+        "Update available: %s", result->latest_version);
     update_status.progress_percent = 100;
-    update_status.state = SELFUPDATE_STATE_IDLE;
-    update_running = false;
+}
 
+static void* check_thread_func(void* arg) {
+    (void)arg;
+
+    int request = worker_request;
+    WorkerResult result = {
+        .state = SELFUPDATE_STATE_IDLE,
+    };
+    run_check(worker_channel, &result);
+    finish_worker(&result, request);
     return NULL;
 }
 
+// Shows the phase of the install. The About screen and the update screen read
+// the state and the message as one snapshot.
+static void set_install_phase(SelfUpdateState state, const char* message) {
+    pthread_mutex_lock(&status_mutex);
+    update_status.state = state;
+    snprintf(update_status.status_message, sizeof(update_status.status_message), "%s", message);
+    pthread_mutex_unlock(&status_mutex);
+}
 
-// Update thread - downloads and applies update
-static void* update_thread_func(void* arg) {
-    (void)arg;
-
-    char temp_dir[512];
-    if (!mk_tempdir("app_update", temp_dir, sizeof(temp_dir))) {
-        strcpy(update_status.error_message, "No room to stage the update");
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
-    }
-
+// Downloads, unpacks and installs the release of the last check. Sets the state
+// of result to IDLE after a cancel, COMPLETED after the install, or ERROR.
+static void run_install(WorkerResult* result, const char* temp_dir) {
     // Download the ZIP file
-    update_status.state = SELFUPDATE_STATE_DOWNLOADING;
-    strcpy(update_status.status_message, "Downloading update...");
+    set_install_phase(SELFUPDATE_STATE_DOWNLOADING, "Downloading update...");
     update_status.progress_percent = 0;
     update_status.download_bytes = 0;
     update_status.download_total = 0;
@@ -470,13 +470,11 @@ static void* update_thread_func(void* arg) {
     snprintf(zip_file, sizeof(zip_file), "%s/update.zip", temp_dir);
 
     if (update_cancel) {
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        result->state = SELFUPDATE_STATE_IDLE;
+        return;
     }
 
-    long total_size = wget_probe_size(update_status.download_url);
+    long total_size = wget_probe_size(result->download_url);
 
     // Fallback to ~5MB if size detection fails
     if (total_size <= 0) {
@@ -484,22 +482,17 @@ static void* update_thread_func(void* arg) {
     }
     update_status.download_total = total_size;
 
-    int downloaded = wget_download_file(update_status.download_url, zip_file,
+    int downloaded = wget_download_file(result->download_url, zip_file,
                                        report_download_progress, NULL);
 
     if (update_cancel) {
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        result->state = SELFUPDATE_STATE_IDLE;
+        return;
     }
 
     if (downloaded < 0) {
-        strcpy(update_status.error_message, "Download failed");
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, "Download failed");
+        return;
     }
 
     update_status.download_bytes = downloaded;
@@ -509,15 +502,12 @@ static void* update_thread_func(void* arg) {
     update_status.progress_percent = 40;
 
     if (update_cancel) {
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        result->state = SELFUPDATE_STATE_IDLE;
+        return;
     }
 
     // Extract the ZIP file
-    update_status.state = SELFUPDATE_STATE_EXTRACTING;
-    strcpy(update_status.status_message, "Extracting update...");
+    set_install_phase(SELFUPDATE_STATE_EXTRACTING, "Extracting update...");
     strcpy(update_status.status_detail, "");  // Clear size detail for non-download phases
     update_status.progress_percent = 45;
 
@@ -528,11 +518,8 @@ static void* update_thread_func(void* arg) {
     // Extract using libzip
     extracted_files = extract_zip(zip_file, extract_dir, note_entry_extracted, NULL);
     if (extracted_files < 0) {
-        strcpy(update_status.error_message, "Extraction failed");
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, "Extraction failed");
+        return;
     }
 
     update_status.progress_percent = 60;
@@ -540,11 +527,8 @@ static void* update_thread_func(void* arg) {
     // The package may nest the pak inside a wrapper directory; launch.sh marks the root
     char update_root[600];
     if (!find_file(extract_dir, "launch.sh", update_root, sizeof(update_root))) {
-        strcpy(update_status.error_message, "Invalid update package");
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, "Invalid update package");
+        return;
     }
 
     char* last_slash = strrchr(update_root, '/');
@@ -553,47 +537,50 @@ static void* update_thread_func(void* arg) {
     update_status.progress_percent = 65;
 
     if (update_cancel) {
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_IDLE;
-        update_running = false;
-        return NULL;
+        result->state = SELFUPDATE_STATE_IDLE;
+        return;
     }
 
     // Apply update
-    update_status.state = SELFUPDATE_STATE_APPLYING;
-    strcpy(update_status.status_message, "Installing update...");
+    set_install_phase(SELFUPDATE_STATE_APPLYING, "Installing update...");
     update_status.progress_percent = 70;
 
-    // Sync all files: copy everything from update, remove orphaned files
+    // Sync all files: copy everything from update, remove obsolete files
     // This handles: musicplayer.elf, launch.sh, bin/, fonts/, stations/, state/, etc.
     // Note: Linux allows replacing a running binary - it continues from memory
     if (sync_directories(update_root, pak_path) != 0) {
-        strcpy(update_status.error_message, "Failed to install update");
-        rm_rf(temp_dir);
-        update_status.state = SELFUPDATE_STATE_ERROR;
-        update_running = false;
-        return NULL;
+        fail(result, "Failed to install update");
+        return;
     }
 
     update_status.progress_percent = 95;
 
-    // Update version file (in case state/ wasn't in the package or needs override)
-    FILE* vf = fopen(version_file, "w");
-    if (vf) {
-        fprintf(vf, "%s\n", update_status.latest_version);
-        fclose(vf);
-    }
-
     // Sync filesystem
     sync();
 
-    // Cleanup temp directory
-    rm_rf(temp_dir);
-
     update_status.progress_percent = 100;
-    strcpy(update_status.status_message, "Update complete!");
-    update_status.state = SELFUPDATE_STATE_COMPLETED;
-    update_running = false;
+    strcpy(result->status_message, "Update complete!");
+    result->state = SELFUPDATE_STATE_COMPLETED;
+}
 
+static void* update_thread_func(void* arg) {
+    (void)arg;
+
+    int request = worker_request;
+    WorkerResult result;
+    pthread_mutex_lock(&status_mutex);
+    copy_result_from_status(&result);
+    pthread_mutex_unlock(&status_mutex);
+    result.error_message[0] = '\0';
+
+    char temp_dir[512];
+    if (!mk_tempdir("app_update", temp_dir, sizeof(temp_dir))) {
+        fail(&result, "No room to stage the update");
+    } else {
+        run_install(&result, temp_dir);
+        rm_rf(temp_dir);
+    }
+
+    finish_worker(&result, request);
     return NULL;
 }

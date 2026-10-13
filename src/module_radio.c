@@ -390,7 +390,6 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             // Handle screen off hint
             if (ModuleCommon_isScreenOffHintActive()) {
                 handle_hid_events();
-                ModuleCommon_handleHardwareVolume();
                 Radio_update();
 
                 // SELECT+A during hint -> full wake
@@ -417,7 +416,6 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             // Handle screen off
             if (screen_off) {
                 handle_hid_events();
-                ModuleCommon_handleHardwareVolume();
                 Radio_update();
 
                 // Any button -> show hint
