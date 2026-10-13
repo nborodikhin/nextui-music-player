@@ -1,10 +1,10 @@
 // Tests for src/mp3_seek.c - the seek point from the table in an MP3 file.
 //
 // The files are synthetic: an ID3v2 tag, a header frame (Info, Xing or VBRI),
-// then frames with real headers and empty data. The tests pin that a point is on
+// or no header frame, then frames with real headers and empty data. The tests pin that a point is on
 // a real frame header, that its index is the index of that frame, that it is not
-// past the target, and that a file without a table, or with a table that does
-// not agree with the decoder, gives no point.
+// past the target, and that invalid files or tables that do not agree with the
+// decoder give no point.
 
 #include <stdlib.h>
 #include <string.h>
@@ -27,10 +27,12 @@ typedef struct {
     int64_t size;
     int64_t first_frame;     // the first audio frame
     int64_t frame_pos[FRAMES + 1];
+    int read_calls;
 } File;
 
 static int64_t file_read(void* ctx, int64_t offset, uint8_t* buf, int64_t len) {
     File* f = (File*)ctx;
+    f->read_calls++;
     if (offset >= f->size) return 0;
     if (offset + len > f->size) len = f->size - offset;
     memcpy(buf, f->data + offset, (size_t)len);
@@ -147,10 +149,206 @@ TEST(stream_start_that_does_not_agree_gives_none) {
     free(f.data);
 }
 
-TEST(file_without_a_header_frame_gives_none) {
+TEST(file_without_a_header_frame_builds_cbr_index) {
     File f; make_file(&f, 0);
     Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    CHECK_EQ_INT(info.kind, MP3_SEEK_CBR_INDEX);
+    CHECK_EQ_INT((int)info.frame_count, FRAMES);
+    // Buffered reads, rather than one callback per frame.
+    CHECK(f.read_calls < 100);
+    for (int n = 0; n < FRAMES; n += MP3_SEEK_INDEX_STRIDE) {
+        CHECK(info.cbr_offsets[n / MP3_SEEK_INDEX_STRIDE] == f.frame_pos[n]);
+    }
+    Mp3Seek_free(&info);
+    CHECK(info.cbr_offsets == NULL);
+    free(f.data);
+}
+
+// A constant bitrate does not require the encoder to use the usual padding
+// pattern. Exact offsets must work even when arithmetic would drift.
+TEST(indexed_cbr_points_are_exact_with_unusual_padding) {
+    File f; make_file(&f, 0);
+    int64_t pos = f.first_frame;
+    for (int n = 0; n < FRAMES; n++) {
+        static const uint8_t hdr[] = {HDR_NO_PAD};
+        f.frame_pos[n] = pos;
+        memset(f.data + pos, 0, 417);
+        memcpy(f.data + pos, hdr, 4);
+        pos += 417;
+    }
+    f.frame_pos[FRAMES] = f.size = pos;
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    for (int n = MP3_SEEK_LEAD_FRAMES + 3; n < FRAMES; n++) {
+        Mp3SeekPoint p;
+        CHECK(Mp3Seek_pointFor(&info, file_read, &f, f.size, (int64_t)n * SPF + 500, &p));
+        // Two extra frames are reserved for the bit reservoir; these synthetic
+        // frames use no reservoir, so the very first one can be decoded.
+        int start = n - MP3_SEEK_LEAD_FRAMES - 2;
+        CHECK(p.byte_pos == f.frame_pos[start]);
+        CHECK(p.pcm_frame == (int64_t)start * SPF);
+        CHECK_EQ_INT(p.frames_to_discard, 1);
+    }
+    Mp3SeekPoint p;
+    CHECK(!Mp3Seek_pointFor(&info, file_read, &f, f.size, 3 * SPF, &p));
+    CHECK(!Mp3Seek_pointFor(&info, file_read, &f, f.size, (int64_t)FRAMES * SPF, &p));
+    Mp3Seek_free(&info);
+    free(f.data);
+}
+
+TEST(indexed_cbr_accounts_for_frames_skipped_by_reservoir) {
+    File f; make_file(&f, 0);
+    for (int n = 1; n < FRAMES; n++) {
+        // MPEG-1 main_data_begin = 511: two frames must fill the reservoir
+        // before the decoder produces its first PCM frame after a jump.
+        uint8_t* side = f.data + f.frame_pos[n] + 4;
+        side[0] = 255;
+        side[1] = 128;
+    }
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    int targets[] = {6, 258, 1000, FRAMES - 1};
+    for (unsigned i = 0; i < sizeof(targets) / sizeof(targets[0]); i++) {
+        int n = targets[i];
+        Mp3SeekPoint p;
+        CHECK(Mp3Seek_pointFor(&info, file_read, &f, f.size, (int64_t)n * SPF, &p));
+        CHECK(p.byte_pos == f.frame_pos[n - MP3_SEEK_LEAD_FRAMES - 2]);
+        CHECK(p.pcm_frame == (int64_t)(n - MP3_SEEK_LEAD_FRAMES) * SPF);
+        CHECK_EQ_INT(p.frames_to_discard, 1);
+    }
+    Mp3Seek_free(&info);
+    free(f.data);
+}
+
+TEST(indexed_low_bitrate_mpeg2_and_mpeg25_warm_up) {
+    for (int version = 0; version <= 2; version += 2) {
+        File f; make_file(&f, 0);
+        int frame_bytes = version == 2 ? 26 : 52; // 8 kbps, mono, 22050 / 11025 Hz
+        int reservoir_frames = version == 2 ? 85 : 9; // conservative stereo + CRC bound
+        int skipped = (255 + (frame_bytes - 13) - 1) / (frame_bytes - 13);
+        memset(f.data + ID3_BYTES, 0, (size_t)(f.size - ID3_BYTES));
+        for (int n = 0; n < FRAMES; n++) {
+            int64_t pos = ID3_BYTES + (int64_t)n * frame_bytes;
+            f.frame_pos[n] = pos;
+            uint8_t hdr[] = {0xFF, version == 2 ? 0xF3 : 0xE3, 0x10, 0xC4};
+            memcpy(f.data + pos, hdr, 4);
+            if (n > 0) f.data[pos + 4] = 255; // MPEG-2 uses an 8-bit reservoir offset
+        }
+        f.size = ID3_BYTES + (int64_t)FRAMES * frame_bytes;
+        Mp3SeekInfo info;
+        CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+        CHECK_EQ_INT(info.samples_per_frame, 576);
+        Mp3SeekPoint p;
+        int start = 1000 - MP3_SEEK_LEAD_FRAMES - reservoir_frames;
+        CHECK(Mp3Seek_pointFor(&info, file_read, &f, f.size, 1000 * 576, &p));
+        CHECK(p.byte_pos == f.frame_pos[start]);
+        CHECK(p.pcm_frame == (int64_t)(start + skipped) * 576);
+        CHECK_EQ_INT(p.frames_to_discard, 1);
+        Mp3Seek_free(&info);
+        free(f.data);
+    }
+}
+
+TEST(headerless_missing_initial_reservoir_gives_none) {
+    File f; make_file(&f, 0);
+    f.data[f.first_frame + 4] = 1;
+    Mp3SeekInfo info;
     CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    CHECK(info.cbr_offsets == NULL);
+    free(f.data);
+}
+
+TEST(headerless_long_file_grows_index) {
+    File f; make_file(&f, 0);
+    int frames = MP3_SEEK_INDEX_STRIDE * 300 + 1;
+    f.size = ID3_BYTES + (int64_t)frames * 417;
+    f.data = realloc(f.data, (size_t)f.size);
+    CHECK(f.data != NULL);
+    memset(f.data + ID3_BYTES, 0, (size_t)(f.size - ID3_BYTES));
+    for (int n = 0; n < frames; n++) {
+        static const uint8_t hdr[] = {HDR_NO_PAD};
+        memcpy(f.data + ID3_BYTES + (int64_t)n * 417, hdr, 4);
+    }
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    CHECK_EQ_INT((int)info.frame_count, frames);
+    CHECK(info.cbr_offsets[300] == ID3_BYTES + (int64_t)300 * MP3_SEEK_INDEX_STRIDE * 417);
+    Mp3SeekPoint p;
+    CHECK(Mp3Seek_pointFor(&info, file_read, &f, f.size, (int64_t)(frames - 1) * SPF, &p));
+    CHECK(p.pcm_frame == (int64_t)(frames - 6) * SPF);
+    Mp3Seek_free(&info);
+    free(f.data);
+}
+
+TEST(headerless_cbr_without_id3_builds_index) {
+    File f; make_file(&f, 0);
+    memmove(f.data, f.data + ID3_BYTES, (size_t)(f.size - ID3_BYTES));
+    f.size -= ID3_BYTES;
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, 0));
+    CHECK(info.first_frame == 0);
+    CHECK(info.cbr_offsets[0] == 0);
+    Mp3Seek_free(&info);
+    free(f.data);
+}
+
+TEST(headerless_cbr_with_id3v1_builds_index) {
+    File f; make_file(&f, 0);
+    memset(f.data + f.size, 0, 128);
+    memcpy(f.data + f.size, "TAG", 3);
+    f.size += 128;
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    CHECK_EQ_INT((int)info.frame_count, FRAMES);
+    Mp3Seek_free(&info);
+    free(f.data);
+}
+
+TEST(headerless_stream_start_mismatch_gives_none) {
+    File f; make_file(&f, 0);
+    Mp3SeekInfo info;
+    CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame + 417));
+    CHECK_EQ_INT(info.kind, MP3_SEEK_NONE);
+    CHECK(info.cbr_offsets == NULL);
+    free(f.data);
+}
+
+TEST(headerless_late_bitrate_or_rate_change_gives_none) {
+    for (int changed = 0; changed < 2; changed++) {
+        File f; make_file(&f, 0);
+        // Check the entire stream, not just a sample near its start.
+        uint8_t* hdr = f.data + f.frame_pos[FRAMES - 10];
+        hdr[2] = changed == 0 ? 0xA0 : 0x94; // 160 kbps, or 48 kHz
+        Mp3SeekInfo info;
+        CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+        CHECK_EQ_INT(info.kind, MP3_SEEK_NONE);
+        CHECK(info.cbr_offsets == NULL);
+        free(f.data);
+    }
+}
+
+TEST(headerless_truncated_or_broken_frame_gives_none) {
+    for (int broken = 0; broken < 2; broken++) {
+        File f; make_file(&f, 0);
+        if (broken) f.data[f.frame_pos[1000]] = 0;
+        else f.size--;
+        Mp3SeekInfo info;
+        CHECK(!Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+        CHECK_EQ_INT(info.kind, MP3_SEEK_NONE);
+        CHECK(info.cbr_offsets == NULL);
+        free(f.data);
+    }
+}
+
+TEST(indexed_cbr_changed_file_gives_no_point) {
+    File f; make_file(&f, 0);
+    Mp3SeekInfo info;
+    CHECK(Mp3Seek_init(&info, file_read, &f, f.size, f.first_frame));
+    f.data[f.frame_pos[1000]] = 0;
+    Mp3SeekPoint p;
+    CHECK(!Mp3Seek_pointFor(&info, file_read, &f, f.size, 1010 * SPF, &p));
+    Mp3Seek_free(&info);
     free(f.data);
 }
 
@@ -214,7 +412,18 @@ int main(void) {
     RUN(cbr_point_is_the_exact_frame);
     RUN(target_near_the_start_gives_no_point);
     RUN(stream_start_that_does_not_agree_gives_none);
-    RUN(file_without_a_header_frame_gives_none);
+    RUN(file_without_a_header_frame_builds_cbr_index);
+    RUN(indexed_cbr_points_are_exact_with_unusual_padding);
+    RUN(indexed_cbr_accounts_for_frames_skipped_by_reservoir);
+    RUN(indexed_low_bitrate_mpeg2_and_mpeg25_warm_up);
+    RUN(headerless_missing_initial_reservoir_gives_none);
+    RUN(headerless_long_file_grows_index);
+    RUN(headerless_cbr_without_id3_builds_index);
+    RUN(headerless_cbr_with_id3v1_builds_index);
+    RUN(headerless_stream_start_mismatch_gives_none);
+    RUN(headerless_late_bitrate_or_rate_change_gives_none);
+    RUN(headerless_truncated_or_broken_frame_gives_none);
+    RUN(indexed_cbr_changed_file_gives_no_point);
     RUN(xing_without_toc_gives_none);
     RUN(xing_point_is_a_real_frame_near_the_toc_position);
     RUN(vbri_point_is_the_start_of_a_group);

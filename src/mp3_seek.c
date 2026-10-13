@@ -95,6 +95,85 @@ static int64_t align_to_frame(const Mp3SeekInfo* info, Mp3SeekRead read, void* c
     return found;
 }
 
+// Buffer sequential header reads: a callback/stdio seek per frame would turn
+// the scan into tens of thousands of small reads. The buffer is temporary.
+#define SCAN_BUFFER_BYTES 65536
+typedef struct {
+    uint8_t* data;
+    int64_t start;
+    int64_t size;
+} HeaderBuffer;
+
+static const uint8_t* buffered_bytes(Mp3SeekRead read, void* ctx, int64_t file_size,
+                                      int64_t pos, int len, HeaderBuffer* buf) {
+    if (pos < 0 || pos > file_size - len) return NULL;
+    if (pos < buf->start || pos + len > buf->start + buf->size) {
+        int64_t want = file_size - pos;
+        if (want > SCAN_BUFFER_BYTES) want = SCAN_BUFFER_BYTES;
+        buf->start = pos;
+        buf->size = read(ctx, pos, buf->data, want);
+        if (buf->size < len) return NULL;
+    }
+    return buf->data + (pos - buf->start);
+}
+
+static bool read_stream_header(const Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
+                               int64_t file_size, int64_t pos, HeaderBuffer* buf,
+                               FrameHeader* h) {
+    const uint8_t* p = buffered_bytes(read, ctx, file_size, pos, 4, buf);
+    if (!p || !parse_header(p, h)) return false;
+    return h->version == info->version && h->sample_rate == info->sample_rate &&
+           h->bitrate_kbps == info->bitrate_kbps && h->frame_bytes <= file_size - pos;
+}
+
+static bool build_cbr_index(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
+                            int64_t file_size) {
+    // ID3v1 is metadata after the last audio frame, not a broken frame.
+    uint8_t tag[3];
+    if (file_size >= 128 && read(ctx, file_size - 128, tag, 3) == 3 &&
+        memcmp(tag, "TAG", 3) == 0) file_size -= 128;
+
+    HeaderBuffer buf = {.data = malloc(SCAN_BUFFER_BYTES), .start = -1};
+    if (!buf.data) return false;
+    size_t capacity = 256;
+    info->cbr_offsets = malloc(capacity * sizeof(*info->cbr_offsets));
+    bool ok = info->cbr_offsets != NULL;
+    int64_t pos = info->first_frame;
+    while (ok && pos < file_size) {
+        FrameHeader h;
+        if (!read_stream_header(info, read, ctx, file_size, pos, &buf, &h)) {
+            ok = false;
+            break;
+        }
+        if (info->frame_count % MP3_SEEK_INDEX_STRIDE == 0) {
+            size_t entry = (size_t)(info->frame_count / MP3_SEEK_INDEX_STRIDE);
+            if (entry == capacity) {
+                if (capacity > SIZE_MAX / (2 * sizeof(*info->cbr_offsets))) {
+                    ok = false;
+                    break;
+                }
+                int64_t* next = realloc(info->cbr_offsets, 2 * capacity * sizeof(*next));
+                if (!next) {
+                    ok = false;
+                    break;
+                }
+                info->cbr_offsets = next;
+                capacity *= 2;
+            }
+            info->cbr_offsets[entry] = pos;
+        }
+        info->frame_count++;
+        pos += h.frame_bytes;
+    }
+    free(buf.data);
+    if (!ok || info->frame_count == 0) {
+        Mp3Seek_free(info);
+        return false;
+    }
+    info->kind = MP3_SEEK_CBR_INDEX;
+    return true;
+}
+
 bool Mp3Seek_init(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int64_t file_size,
                   int64_t stream_start) {
     memset(info, 0, sizeof(*info));
@@ -175,7 +254,15 @@ bool Mp3Seek_init(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int64_t file_s
         info->first_frame = pos;
         info->kind = MP3_SEEK_VBRI;
     } else {
-        return false;
+        info->first_frame = pos;
+        if (pos != stream_start) return false;
+        // A cropped stream can start with a frame that needs missing audio.
+        // dr_mp3 skips such frames, so header counts would not be PCM counts.
+        const uint8_t* side = frame + 4 + (h.crc ? 2 : 0);
+        if (side + 2 > end || side[0] != 0 || (h.version == 3 && (side[1] & 0x80))) {
+            return false;
+        }
+        return build_cbr_index(info, read, ctx, file_size);
     }
 
     // The decoder must count frames from the same byte, else each index is wrong
@@ -188,6 +275,7 @@ bool Mp3Seek_init(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int64_t file_s
 
 void Mp3Seek_free(Mp3SeekInfo* info) {
     free(info->vbri_offsets);
+    free(info->cbr_offsets);
     memset(info, 0, sizeof(*info));
 }
 
@@ -202,8 +290,70 @@ bool Mp3Seek_pointFor(const Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int6
 
     int64_t frame = 0;
     int64_t pos = -1;
+    int discard = 0;
 
-    if (info->kind == MP3_SEEK_CBR) {
+    if (info->kind == MP3_SEEK_CBR_INDEX) {
+        if (target_mp3_frame >= info->frame_count) return false;
+        // Reserve enough frames to fill even the largest bit reservoir. Until
+        // it fills, dr_mp3 skips frames instead of producing/counting samples.
+        // The smallest main-data payload is stereo with CRC and no padding.
+        int side_info = info->version == 3 ? 32 : 17;
+        int min_payload = (info->samples_per_frame / 8) * info->bitrate_kbps * 1000 /
+                          info->sample_rate - 6 - side_info;
+        if (min_payload <= 0) return false;
+        int reservoir_max = info->version == 3 ? 511 : 255;
+        int reservoir_frames = (reservoir_max + min_payload - 1) / min_payload;
+        int64_t start_frame = want_frame - reservoir_frames;
+        if (start_frame < 1) return false;
+        int64_t entry = start_frame / MP3_SEEK_INDEX_STRIDE;
+        frame = entry * MP3_SEEK_INDEX_STRIDE;
+        pos = info->cbr_offsets[entry];
+        HeaderBuffer buf = {.data = malloc(SCAN_BUFFER_BYTES), .start = -1};
+        if (!buf.data) return false;
+        bool ok = true;
+        for (;;) {
+            FrameHeader h;
+            if (!read_stream_header(info, read, ctx, file_size, pos, &buf, &h)) {
+                ok = false;
+                break;
+            }
+            if (frame == start_frame) break;
+            pos += h.frame_bytes;
+            frame++;
+        }
+        int reservoir = 0;
+        int64_t first_decoded = frame;
+        int64_t next_pos = pos;
+        while (ok) {
+            FrameHeader h;
+            if (!read_stream_header(info, read, ctx, file_size, next_pos, &buf, &h)) {
+                ok = false;
+                break;
+            }
+            int crc_bytes = h.crc ? 2 : 0;
+            const uint8_t* side = buffered_bytes(read, ctx, file_size,
+                                                  next_pos + 4 + crc_bytes, 2, &buf);
+            if (!side) {
+                ok = false;
+                break;
+            }
+            int needed = h.version == 3 ? ((side[0] << 1) | (side[1] >> 7)) : side[0];
+            if (reservoir >= needed) break;
+            // A frame with insufficient reservoir is not decoded. Its complete
+            // main data is saved, together with the available previous bytes.
+            reservoir += h.frame_bytes - 4 - crc_bytes - h.side_info_bytes;
+            if (reservoir > reservoir_max) reservoir = reservoir_max;
+            first_decoded++;
+            next_pos += h.frame_bytes;
+            if (first_decoded > want_frame) ok = false;
+        }
+        free(buf.data);
+        if (!ok) return false;
+        frame = first_decoded;
+        // dr_mp3 decodes through the skipped frames and leaves the first usable
+        // frame in its PCM buffer. Count from that frame, not from byte_pos.
+        discard = 1;
+    } else if (info->kind == MP3_SEEK_CBR) {
         int64_t estimate = info->first_frame + (int64_t)(want_frame * info->frame_bytes);
         pos = align_to_frame(info, read, ctx, file_size, estimate);
         if (pos < 0) return false;
@@ -233,7 +383,7 @@ bool Mp3Seek_pointFor(const Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int6
     if (frame < 1) return false;
 
     point->byte_pos = pos;
-    point->frames_to_discard = 0;
+    point->frames_to_discard = discard;
     point->pcm_frame = frame * info->samples_per_frame;
     // The point must not pass the target, else the decoder counts back past it
     if (point->pcm_frame > target_frame) return false;

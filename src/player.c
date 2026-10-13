@@ -405,7 +405,7 @@ static size_t circular_buffer_read(CircularBuffer* cb, int16_t* data, size_t fra
 
 // ============ STREAMING DECODER INTERFACE ============
 
-// The seek table of an MP3 file (Info, Xing or VBRI header), and the one point
+// The seek table of an MP3 file (embedded or indexed CBR), and the one point
 // that the next seek binds to the decoder
 typedef struct {
     Mp3SeekInfo info;
@@ -420,8 +420,9 @@ static int64_t mp3_seek_read(void* ctx, int64_t offset, uint8_t* buf, int64_t le
     return (int64_t)fread(buf, 1, (size_t)len, f);
 }
 
-// Read the seek table of an MP3 file. Returns NULL where the file has none.
-static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3) {
+// Read an embedded table, or scan headerless CBR synchronously to build an index.
+// Returns NULL where neither is usable. Duration scanning stays separate.
+static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3, int64_t total_frames) {
     Mp3SeekState* state = calloc(1, sizeof(Mp3SeekState));
     if (!state) return NULL;
     state->file = fopen(filepath, "rb");
@@ -430,7 +431,13 @@ static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3) {
         state->file_size = ftell(state->file);
         if (Mp3Seek_init(&state->info, mp3_seek_read, state->file, state->file_size,
                          (int64_t)mp3->streamStartOffset)) {
-            return state;
+            // Header counts must agree with the decoder's separate duration
+            // scan: damaged audio can make the decoder skip complete frames.
+            if (state->info.kind != MP3_SEEK_CBR_INDEX ||
+                state->info.frame_count * state->info.samples_per_frame == total_frames) {
+                return state;
+            }
+            Mp3Seek_free(&state->info);
         }
         fclose(state->file);
     }
@@ -484,7 +491,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             sd->source_sample_rate = mp3->sampleRate;
             sd->source_channels = mp3->channels;
             sd->total_frames = drmp3_get_pcm_frame_count(mp3);
-            sd->mp3_seek = mp3_seek_open(filepath, mp3);
+            sd->mp3_seek = mp3_seek_open(filepath, mp3, sd->total_frames);
             break;
         }
         case AUDIO_FORMAT_WAV: {
