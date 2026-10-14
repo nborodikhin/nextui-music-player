@@ -283,8 +283,9 @@ static bool rows_have_file(const DbReadDirResult* rows, const char* name) {
     return false;
 }
 
-// Pass a flag in gone to learn whether the directory no longer exists as a
-// real directory.
+// Reads the visible directories and regular files of a directory. Returns false when the
+// directory cannot be read in full; a caller then keeps its rows. Pass a flag in gone to
+// learn whether the directory no longer exists as a real directory.
 static bool read_card_directory(const char* relative_path, CardEntry** output,
                                 int* count, bool* gone) {
     *gone = false;
@@ -302,21 +303,32 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
     CardEntry* entries = NULL;
     int entry_count = 0;
     int capacity = 0;
-    bool stopped = false;
-    struct dirent* item;
-    while ((item = readdir(directory)) != NULL) {
+    bool failed = false;
+    while (true) {
+        // readdir() returns NULL both at the end and on an error, thus only errno tells them
+        // apart.
+        errno = 0;
+        struct dirent* item = readdir(directory);
+        if (!item) {
+            failed = errno != 0;
+            break;
+        }
         if (filedb_is_stopping()) {
-            stopped = true;
+            failed = true;
             break;
         }
         if (item->d_name[0] == '.') continue;
         if (strlen(item->d_name) >= sizeof(entries[0].name)) continue;
 
         struct stat status;
-        if (fstatat(dirfd(directory), item->d_name, &status,
-                    AT_SYMLINK_NOFOLLOW) != 0 || S_ISLNK(status.st_mode)) {
-            continue;
+        if (fstatat(dirfd(directory), item->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0) {
+            // An entry removed after readdir() is absent. Any other error does not show
+            // that the entry is gone.
+            if (errno == ENOENT) continue;
+            failed = true;
+            break;
         }
+        if (S_ISLNK(status.st_mode)) continue;
 
         CardEntry entry = {
             .is_dir = S_ISDIR(status.st_mode),
@@ -339,7 +351,7 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
     }
     closedir(directory);
 
-    if (stopped) {
+    if (failed) {
         free(entries);
         return false;
     }

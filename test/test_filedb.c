@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "test.h"
@@ -305,6 +306,40 @@ static int add_file_row(int parent_id, const char* filename, DbFileType type) {
     return id > 0 && typed ? id : 0;
 }
 
+static int file_id_at(const char* path) {
+    DbFileResult* result = Db_getFileByPath(path);
+    int id = result ? result->file.id : 0;
+    Db_freeResult(result);
+    return id;
+}
+
+TEST(entry_read_error_keeps_the_rows) {
+    // Root reads each entry, thus the error cannot occur.
+    if (geteuid() == 0) return;
+    CHECK(start_test());
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Locked"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH "/Locked", "song.mp3"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), true));
+    DbDirResult* locked = Db_getDirByPath("Locked");
+    CHECK(locked);
+    int locked_id = locked ? locked->dir.id : 0;
+    Db_freeResult(locked);
+    int song_id = file_id_at("Locked/song.mp3");
+    CHECK(song_id > 0);
+
+    // With read and no search permission, readdir() gives the names and fstatat() fails.
+    CHECK(chmod(FILEDB_MUSIC_PATH "/Locked", 0444) == 0);
+    bool scanned = wait_for_directory_scan(locked_id, false);
+    chmod(FILEDB_MUSIC_PATH "/Locked", 0755);
+    CHECK(scanned);
+    CHECK_EQ_INT(file_id_at("Locked/song.mp3"), song_id);
+
+    CHECK(wait_for_directory_scan(locked_id, false));
+    CHECK_EQ_INT(file_id_at("Locked/song.mp3"), song_id);
+    stop_test();
+}
+
 TEST(directory_that_is_gone_loses_its_rows) {
     CHECK(start_test());
     FileDb_start();
@@ -408,13 +443,6 @@ TEST(walk_starts_at_last_played_directory) {
     Db_freeResult(blue);
     Db_freeResult(root);
     stop_test();
-}
-
-static int file_id_at(const char* path) {
-    DbFileResult* result = Db_getFileByPath(path);
-    int id = result ? result->file.id : 0;
-    Db_freeResult(result);
-    return id;
 }
 
 TEST(walk_keeps_breadth_first_order_after_last_played_directory) {
@@ -669,6 +697,32 @@ TEST(refresh_keeps_the_row_index_when_the_selected_file_is_gone) {
     stop_test();
 }
 
+TEST(failed_first_load_shows_an_empty_root) {
+    CHECK(start_test());
+    BrowserContext browser = {0};
+    Browser_loadDirectory(&browser, 999);
+    CHECK(browser.is_root);
+    CHECK(browser.entries == NULL);
+    CHECK_EQ_INT(browser.entry_count, 0);
+    stop_test();
+}
+
+TEST(failed_load_keeps_the_current_list) {
+    CHECK(start_test());
+    CHECK(add_rows_with_a_shared_id());
+    BrowserContext browser = {0};
+    Browser_loadDirectory(&browser, 50);
+    CHECK(!browser.is_root);
+    CHECK(browser.entries && strcmp(browser.entries[0].name, "..") == 0);
+
+    Browser_loadDirectory(&browser, 999);
+    CHECK(!browser.is_root);
+    CHECK_EQ_INT(browser.dir_id, 50);
+    CHECK(browser.entries && strcmp(browser.entries[0].name, "..") == 0);
+    Browser_freeEntries(&browser);
+    stop_test();
+}
+
 int main(void) {
     RUN(invalid_directory_scan_is_a_noop);
     RUN(wait_returns_false_while_worker_is_not_running);
@@ -681,6 +735,7 @@ int main(void) {
     RUN(symlink_is_not_listed);
     RUN(stale_directory_rows_do_not_follow_symlink_ancestors);
     RUN(failed_directory_listing_keeps_its_row);
+    RUN(entry_read_error_keeps_the_rows);
     RUN(directory_that_is_gone_loses_its_rows);
     RUN(start_lists_playlists_and_counts_tracks);
     RUN(walk_lists_directories_breadth_first);
@@ -695,5 +750,7 @@ int main(void) {
     RUN(refresh_keeps_the_selected_file_when_a_directory_has_its_id);
     RUN(refresh_keeps_the_selected_play_all_entry);
     RUN(refresh_keeps_the_row_index_when_the_selected_file_is_gone);
+    RUN(failed_first_load_shows_an_empty_root);
+    RUN(failed_load_keeps_the_current_list);
     return test_summary();
 }
