@@ -214,11 +214,21 @@ tests:
 ./dev test
 
 # Build, install, and run on connected devices
-./dev devices
+./dev devices                          # the app, the pak version and the paths
 ./dev install device
 ./dev install device dist/Music.Player.pak.zip   # install a prebuilt pak (no build)
 ./dev run device
 ./dev log device --follow
+./dev kill -r                          # restart the app where it runs
+
+# Examine the one connected device. The words pakdir, userdata, db and log
+# change to the paths of the app on the device.
+./dev device ls -la userdata
+./dev device pull db saved.db
+./dev device push saved.db db          # stop the app first with ./dev kill
+./dev device rm -f log
+./dev device shell 'ls /mnt | head -1'
+./dev shell                            # same as ./dev device shell
 
 # Build the pak zip and one .pakz package for each platform, using the
 # distribution manifest
