@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parent
@@ -100,6 +100,12 @@ class CommandHelpFormatter(argparse.HelpFormatter):
                 format_action(command) for command in sorted_subactions(action)
             )
         return super()._format_action(action)
+
+
+class RawEpilogCommandHelpFormatter(
+    CommandHelpFormatter, argparse.RawDescriptionHelpFormatter
+):
+    """Keeps the line breaks of the description and the epilog."""
 
 
 @dataclass(frozen=True)
@@ -1514,6 +1520,42 @@ def remote_pak_path(platform):
     return "{}/{}/{}".format(REMOTE_ROOT, platform, PAK_NAME)
 
 
+@dataclass(frozen=True)
+class DevicePaths:
+    """The paths of the app on one device."""
+
+    pakdir: str
+    userdata: str
+    db: str
+    log: str
+
+
+# The words that a device command changes to a path of DevicePaths.
+PATH_WORDS = {
+    "pakdir": "pakdir",
+    "userdata": "userdata",
+    "db": "db",
+    "log": "log",
+}
+
+
+def device_paths(device):
+    return DevicePaths(
+        pakdir   = remote_pak_path(device.platform),
+        userdata = REMOTE_USERDATA,
+        db       = REMOTE_USERDATA + "/music-player.db",
+        log      = "/mnt/SDCARD/.userdata/{}/logs/music-player.txt".format(
+            device.platform
+        ),
+    )
+
+
+def expand_path_word(paths, word):
+    """Returns the device path of a path word, or the word when it is not one."""
+    field = PATH_WORDS.get(word)
+    return getattr(paths, field) if field else word
+
+
 def get_pids(device, process):
     lines = adb_shell(device, "pidof", process, check=False)
     pids = " ".join(lines).split()
@@ -2103,23 +2145,46 @@ def command_version(args):
     return args.version_handler(pak, args)
 
 
+def device_details(device):
+    """Returns the lines that describe the app on a ready device of a supported
+    platform."""
+    paths = device_paths(device)
+    pids = get_pids(device, "musicplayer.elf")
+    lines = []
+    if pids:
+        for pid in pids:
+            exe = " ".join(adb_shell(
+                device, "readlink", "/proc/{}/exe".format(pid), check=False
+            )) or "?"
+            lines.append(("running", "pid {} {}".format(pid, exe)))
+    else:
+        lines.append(("running", "not running"))
+    try:
+        pak = json.loads("\n".join(adb_shell(
+            device, "cat", paths.pakdir + "/pak.json", check=False
+        )))
+        version = pak.get("version") or "?"
+    except (ValueError, AttributeError):
+        version = "not installed"
+    lines.append(("pak", version))
+    lines.extend((name, getattr(paths, name)) for name in PATH_WORDS.values())
+    return ["  {:<9} {}".format(name, value) for name, value in lines]
+
+
 def command_devices(_args):
     devices = list_devices()
     if not devices:
         print("No ADB devices found.")
         return 0
-    print(
-        "{:<24} {:<14} {:<10} {}".format(
-            "SERIAL", "STATE", "PLATFORM", "HARDWARE"
-        )
-    )
-    for device in devices:
+    for index, device in enumerate(devices):
+        if index:
+            print()
         state = "connected" if device.state == "device" else device.state
-        print(
-            "{:<24} {:<14} {:<10} {}".format(
-                device.serial, state, device.platform, device.hardware
-            )
-        )
+        print("{}  {}  {}  ({})".format(
+            device.serial, state, device.platform, device.hardware
+        ))
+        if device.state == "device" and device.platform in DEVICE_PLATFORMS:
+            print("\n".join(device_details(device)))
     return 0
 
 
@@ -2343,24 +2408,40 @@ def command_kill(args):
         state = "Killed" if kill_desktop() else "Not running:"
         print("{} Music Player on desktop".format(state), flush=True)
     for device in targets:
-        state = "Killed" if stop_player(device, restart=False) else "Not running:"
+        state = "Killed" if stop_player(device, args.restart) else "Not running:"
         print("{} Music Player on {}".format(state, device.serial), flush=True)
     return 0
 
 
-def command_log(args):
-    selectors = args.targets or ["device"]
+def select_one_device(selectors=None):
+    """Returns the one device that the selectors give. With no selector, uses
+    the one connected device of a supported platform. Raises DevError that names
+    each device that ADB found when the selection gives no device or more than
+    one."""
     devices = list_devices()
-    _platforms, targets = resolve_device_targets(selectors, devices, allow_desktop=False)
-    if len(targets) != 1:
-        details = ", ".join(
-            "{} ({})".format(device.serial, device.platform) for device in targets
-        ) or "none"
-        raise DevError("log requires exactly one device; resolved: " + details)
-    device = targets[0]
-    log_path = "/mnt/SDCARD/.userdata/{}/logs/music-player.txt".format(
-        device.platform
+    try:
+        _platforms, targets = resolve_device_targets(
+            selectors or ["device"], devices, allow_desktop=False
+        )
+        if len(targets) == 1:
+            return targets[0]
+        reason = "{} devices match".format(len(targets))
+    except DevError as error:
+        reason = str(error)
+    found = "\n".join(
+        "  {} {} {}".format(device.serial, device.state, device.platform)
+        for device in devices
+    ) or "  none"
+    raise DevError(
+        "{}; exactly one connected device is necessary. ADB found:\n{}".format(
+            reason, found
+        )
     )
+
+
+def command_log(args):
+    device = select_one_device(args.targets)
+    log_path = device_paths(device).log
     command = ["tail", "-n", str(args.lines)]
     if args.follow:
         command.append("-f")
@@ -2372,6 +2453,61 @@ def command_log(args):
         ["adb", "-s", device.serial, "shell", remote_command],
         check=False,
     ).returncode
+
+
+def adb_terminal(device, *args):
+    """Run ADB with the terminal of the person. Returns the exit status."""
+    command = ["adb", "-s", device.serial]
+    command.extend(args)
+    return run_command(command, check=False).returncode
+
+
+def device_run_quoted(device, args):
+    """Run args.device_program on the device, with each path word changed and
+    each word quoted."""
+    paths = device_paths(device)
+    words = [expand_path_word(paths, word) for word in args.device_args]
+    return adb_terminal(
+        device, "shell", shlex.join([args.device_program] + words)
+    )
+
+
+def device_shell(device, args):
+    return adb_terminal(device, "shell", *args.device_args)
+
+
+def warn(text):
+    print(colorize("WARNING: " + text, YELLOW), file=sys.stderr, flush=True)
+
+
+def device_pull(device, args):
+    paths = device_paths(device)
+    source = expand_path_word(paths, args.source)
+    local = args.local or PurePosixPath(source).name
+    if source == paths.db:
+        if get_pids(device, "musicplayer.elf"):
+            warn("the app is running, thus the copy can be older than the data "
+                 "of the app. Stop it with ./dev kill.")
+        wal = source + "-wal"
+        if run_command(
+            ["adb", "-s", device.serial, "shell", shlex.join(["test", "-s", wal])],
+            capture=True,
+            check=False,
+        ).returncode == 0:
+            warn("{} holds data that the copy does not have.".format(wal))
+    return adb_terminal(device, "pull", source, local)
+
+
+def device_push(device, args):
+    destination = expand_path_word(device_paths(device), args.destination)
+    return adb_terminal(device, "push", args.local, destination)
+
+
+def command_device(args):
+    if args.device_handler is None:
+        args.command_parser.print_help()
+        return 0
+    return args.device_handler(select_one_device(), args)
 
 
 def add_version_option(parser):
@@ -2447,6 +2583,11 @@ def add_install_options(parser, include_run, target_help):
         parser.add_argument("--run", action="store_true", help="run after installing")
 
 
+# The commands that main() changes into a command at another level. Each has a
+# line in the help of its parent, but no block of its own.
+ALIAS_COMMANDS = {("shell",): ("device", "shell")}
+
+
 def parser_tree_help(parser, path=()):
     """The help of this parser and of each command below it, deepest last.
     Returns one block of text for each, in the sequence that a reader follows."""
@@ -2459,6 +2600,8 @@ def parser_tree_help(parser, path=()):
         if not isinstance(action, argparse._SubParsersAction):
             continue
         for command in sorted_subactions(action):
+            if path + (command.dest,) in ALIAS_COMMANDS:
+                continue
             subparser = action.choices[command.dest]
             blocks.extend(parser_tree_help(subparser, path + (command.dest,)))
     return blocks
@@ -2669,8 +2812,8 @@ def create_parser():
     kill = subparsers.add_parser(
         "kill",
         help="stop the app",
-        description="stop the app, with no build and no restart",
-        usage="%(prog)s target [-h]",
+        description="stop the app, with no build",
+        usage="%(prog)s target [-h] [-r]",
     )
     kill.add_argument(
         "targets",
@@ -2680,6 +2823,12 @@ def create_parser():
             "one or more of all (default), desktop, tg5040, tg5050, my355, h700, device, "
             "or an ADB serial; all is desktop and every connected device"
         ),
+    )
+    kill.add_argument(
+        "-r",
+        "--restart",
+        action="store_true",
+        help="start the app again on each device where it ran (no effect on the desktop)",
     )
     kill.set_defaults(handler=command_kill)
 
@@ -2701,6 +2850,100 @@ def create_parser():
     log.add_argument("-f", "--follow", action="store_true")
     log.add_argument("-n", "--lines", type=int, default=10)
     log.set_defaults(handler=command_log)
+
+    help_paths = device_paths(Device(serial="", state="", platform="<platform>"))
+    device = subparsers.add_parser(
+        "device",
+        help="operate on the one connected device",
+        description=(
+            "operate on the connected device of a supported platform;\n"
+            "exactly one such device must be connected"
+        ),
+        epilog=(
+            "In the arguments of ls and rm, the source of pull and the destination\n"
+            "of push, these words change to a path on the device:\n"
+            "\n"
+            "  pakdir    {pakdir}\n"
+            "  userdata  {userdata}\n"
+            "  db        {db}\n"
+            "  log       {log}\n"
+            "\n"
+            "Each word after ls, rm or shell goes to the device, -h too."
+        ).format(**vars(help_paths)),
+        formatter_class=RawEpilogCommandHelpFormatter,
+    )
+    device_commands = device.add_subparsers(
+        dest="device_command",
+        title="commands",
+        metavar="command",
+    )
+
+    device_ls_parser = device_commands.add_parser(
+        "ls",
+        help="list files on the device",
+        description="run ls on the device; each word goes to ls",
+        usage="%(prog)s [ls-option ...] [path ...]",
+        add_help=False,
+    )
+    device_ls_parser.set_defaults(device_handler=device_run_quoted, device_program="ls")
+
+    device_rm_parser = device_commands.add_parser(
+        "rm",
+        help="remove files on the device",
+        description="run rm on the device; each word goes to rm",
+        usage="%(prog)s [rm-option ...] path ...",
+        add_help=False,
+    )
+    device_rm_parser.set_defaults(device_handler=device_run_quoted, device_program="rm")
+
+    device_pull_parser = device_commands.add_parser(
+        "pull",
+        help="copy a file from the device",
+        description="copy a file from the device; pull db prints a warning when the "
+        "copy can be older than the data of the app",
+        usage="%(prog)s source [local-path] [-h]",
+    )
+    device_pull_parser.add_argument(
+        "source", help="a path word or a full device path"
+    )
+    device_pull_parser.add_argument(
+        "local",
+        nargs="?",
+        metavar="local-path",
+        help="the local destination (default: the name of the source file)",
+    )
+    device_pull_parser.set_defaults(device_handler=device_pull)
+
+    device_push_parser = device_commands.add_parser(
+        "push",
+        help="copy a file to the device",
+        description="copy a file to the device; stop the app first with ./dev kill",
+        usage="%(prog)s local-file destination [-h]",
+    )
+    device_push_parser.add_argument("local", metavar="local-file", help="the local file")
+    device_push_parser.add_argument(
+        "destination", help="a path word or a full device path"
+    )
+    device_push_parser.set_defaults(device_handler=device_push)
+
+    device_shell_parser = device_commands.add_parser(
+        "shell",
+        help="run a command on the device, as adb shell does",
+        description="run a command on the device, as adb shell does; with no "
+        "command, open an interactive shell",
+        usage="%(prog)s [command ...]",
+        add_help=False,
+    )
+    device_shell_parser.set_defaults(device_handler=device_shell)
+
+    device.usage = "%(prog)s [-h] command args"
+    device.set_defaults(handler=command_device, command_parser=device, device_handler=None)
+
+    subparsers.add_parser(
+        "shell",
+        help="same as device shell",
+        add_help=False,
+    )
 
     devices = subparsers.add_parser(
         "devices",
@@ -2863,6 +3106,25 @@ def split_app_args(argv):
     return argv[:separator], argv[separator + 1:]
 
 
+# The device commands that give each word after their name to the device.
+DEVICE_PASSTHROUGH_COMMANDS = ("ls", "rm", "shell")
+
+
+def split_device_args(argv):
+    """Take the words for the device that follow device ls, rm or shell.
+
+    Changes shell into device shell first. Returns the arguments for dev and the
+    words for the device. argparse would read a word such as -la as an option
+    of dev, thus these words skip the parse.
+    """
+    argv = list(argv)
+    if argv[:1] == ["shell"]:
+        argv.insert(0, "device")
+    if len(argv) < 2 or argv[0] != "device" or argv[1] not in DEVICE_PASSTHROUGH_COMMANDS:
+        return argv, []
+    return argv[:2], argv[2:]
+
+
 def normalize_container_options(argv):
     argv = list(argv)
     if argv[:1] != ["docker"]:
@@ -2884,6 +3146,7 @@ def normalize_container_options(argv):
 def main():
     parser = create_parser()
     argv, app_args = split_app_args(normalize_container_options(sys.argv[1:]))
+    argv, device_args = split_device_args(argv)
     # --help exits inside argparse, thus --all is read before the parse. The scan
     # stops at the first "--", because what follows belongs to the app.
     scan = argv[: argv.index("--")] if "--" in argv else argv
@@ -2892,6 +3155,7 @@ def main():
         return 0
     args = parser.parse_args(argv)
     args.app_args = app_args
+    args.device_args = device_args
     if args.command is None:
         parser.print_help()
         return 0
