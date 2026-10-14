@@ -171,6 +171,8 @@ static void refresh_gpu_layers(int* dirty) {
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     RadioPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 
@@ -432,7 +434,8 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
 
             // Reset input timer on any button press
-            if (PAD_anyPressed()) {
+            bool key_locked = ModuleCommon_isKeyLocked();
+            if (!key_locked && PAD_anyPressed()) {
                 ModuleCommon_recordInputTime();
             }
 
@@ -440,7 +443,10 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             RadioStation* stations;
             int station_count = Radio_getStations(&stations);
 
-            if (PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_R1)) {
+            if (key_locked) {
+                // the screen draws, and the keys do nothing
+            }
+            else if (PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_R1)) {
                 if (station_count > 1) {
                     radio_nav.selected = (radio_nav.selected + 1) % station_count;
                     hand_station_to_screen(stations[radio_nav.selected].url, true);
@@ -496,7 +502,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
             }
             else if (PAD_tappedSelect(SDL_GetTicks())) {
                 ModuleCommon_startScreenOffHint();
-                RadioPlaying_leave();
+                if (!ModuleCommon_shouldDrawContentWhileLocked()) RadioPlaying_leave();
                 dirty = 1;
             }
 

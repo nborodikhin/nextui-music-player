@@ -1,12 +1,13 @@
 {
   "name": "Music Player",
-  "version": "v1.17.0",
+  "version": "v1.18.1",
   "type": "TOOL",
   "description": "A comprehensive music playback application for NextUI featuring local file playback, online radio streaming, and music downloading.",
   "author": "nborodikhin",
   "repo_url": "https://github.com/nborodikhin/nextui-music-player",
   "release_filename": "Music.Player.pak.zip",
   "changelog": {
+    "v1.18.1": "Anbernic H700 support, better HDMI/BT/USB playback, pitch-preserving speedup, better MP3 seeking and OGG metadata support, beta update channel",
     "v1.17.0": "UI improvements, spectrum on all playing screens, Miyoo jpeg",
     "v1.16.0": "100% NextUI theme support",
     "v1.15.0": "Better keyboard, Miyoo Flip support",
@@ -15,9 +16,7 @@
     "v1.12.0": "Rebuild against NextUI 6.14",
     "v1.11.0": "Rebuild against NextUI 6.13x",
     "v1.10.0": "Allow to add folder to a playlist, usability updates",
-    "v1.9.0": "Fix regression in scrolling text display",
-    "v1.8.0": "Usability updates, new maintainer",
-    "v1.7.6": "Added playback speed control for podcasts and fixed the volume stepping issue"
+    "v1.9.0": "Fix regression in scrolling text display"
   },
   "screenshots": [
     ".github/resources/screenshots/main.jpg"
@@ -25,6 +24,7 @@
   "platforms": [
     "tg5040",
     "tg5050",
-    "my355"
+    "my355",
+    "h700"
   ]
 }

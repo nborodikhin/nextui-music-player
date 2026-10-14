@@ -147,6 +147,8 @@ static void refresh_gpu_layers(int* dirty) {
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     PodcastPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 // The screen goes dark after the hint, thus its layers go now and the hint
@@ -163,6 +165,8 @@ static void return_to_episodes(PodcastInternalState *state, int *dirty) {
     PodcastPlaying_leave();
     Toast_dismiss(seek_toast);
     ModuleCommon_setAutosleepDisabled(false);
+    // The keys lock the playback only
+    ModuleCommon_resetScreenOffHint();
     podcast_episodes_nav.selected = podcast_current_episode_index;
     *state = PODCAST_INTERNAL_EPISODES;
     *dirty = 1;
@@ -885,11 +889,15 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 continue;
             }
             else {
-                if (ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
+                bool key_locked = ModuleCommon_isKeyLocked();
+                if (!key_locked && ModuleCommon_updateSeekScan(PODCAST_SEEK_BACK_MS, PODCAST_SEEK_FORWARD_MS)) {
                     dirty = 1;
                 }
 
-                if (PAD_justPressed(BTN_A)) {
+                if (key_locked) {
+                    // the screen draws, and the keys do nothing
+                }
+                else if (PAD_justPressed(BTN_A)) {
                     if (Player_getState() == PLAYER_STATE_PAUSED) Player_play();
                     else Player_pause();
                     ModuleCommon_recordInputTime();
@@ -917,9 +925,11 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                 }
                 else if (PAD_tappedSelect(SDL_GetTicks())) {
                     ModuleCommon_startScreenOffHint();
-                    clear_and_show_screen_off_hint(screen);
-                    ModuleCommon_frameEnd(screen);
-                    continue;
+                    if (!ModuleCommon_shouldDrawContentWhileLocked()) {
+                        clear_and_show_screen_off_hint(screen);
+                        ModuleCommon_frameEnd(screen);
+                        continue;
+                    }
                 }
                 else if (PAD_justPressed(BTN_UP)) {
                     float speed = Player_getPlaybackSpeed();

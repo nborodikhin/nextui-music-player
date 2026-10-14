@@ -77,6 +77,8 @@ static int pending_resume_position = 0;
 // again, whatever the caches of the screen say.
 static void display_recreated(void) {
     MusicPlaying_invalidate();
+    // A new display is on and has no content
+    screen_off = false;
 }
 
 // Load a directory and trigger a refresh.
@@ -512,15 +514,19 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
 
     // Normal input handling
-    if (PAD_anyPressed()) {
+    bool key_locked = ModuleCommon_isKeyLocked();
+    if (!key_locked && PAD_anyPressed()) {
         ModuleCommon_recordInputTime();
     }
 
-    if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+    if (!key_locked && ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
         *dirty = 1;
     }
 
-    if (PAD_justPressed(BTN_A)) {
+    if (key_locked) {
+        // the screen draws, and the keys do nothing
+    }
+    else if (PAD_justPressed(BTN_A)) {
         Player_togglePause();
         *dirty = 1;
     }
@@ -572,7 +578,7 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     }
     else if (PAD_tappedSelect(SDL_GetTicks())) {
         ModuleCommon_startScreenOffHint();
-        MusicPlaying_leave();
+        if (!ModuleCommon_shouldDrawContentWhileLocked()) MusicPlaying_leave();
         *dirty = 1;
     }
 
@@ -581,6 +587,8 @@ static bool handle_playing_input(SDL_Surface *screen, PlayerInternalState *state
     if (Player_getState() == PLAYER_STATE_STOPPED) {
         if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
             Resume_clear();
+            // The keys lock the playback only
+            ModuleCommon_resetScreenOffHint();
             cleanup_playback(false);
             load_directory(Db_getRootDirId());
             nav_stack_top = 0;
@@ -939,15 +947,19 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
 
         // Normal input handling
-        if (PAD_anyPressed()) {
+        bool key_locked = ModuleCommon_isKeyLocked();
+        if (!key_locked && PAD_anyPressed()) {
             ModuleCommon_recordInputTime();
         }
 
-        if (ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
+        if (!key_locked && ModuleCommon_updateSeekScan(MUSIC_SEEK_STEP_MS, MUSIC_SEEK_STEP_MS)) {
             dirty = 1;
         }
 
-        if (PAD_justPressed(BTN_A)) {
+        if (key_locked) {
+            // the screen draws, and the keys do nothing
+        }
+        else if (PAD_justPressed(BTN_A)) {
             Player_togglePause();
             dirty = 1;
         }
@@ -995,7 +1007,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         }
         else if (PAD_tappedSelect(SDL_GetTicks())) {
             ModuleCommon_startScreenOffHint();
-            MusicPlaying_leave();
+            if (!ModuleCommon_shouldDrawContentWhileLocked()) MusicPlaying_leave();
             dirty = 1;
         }
 
@@ -1003,7 +1015,9 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
         Player_update();
         if (Player_getState() == PLAYER_STATE_STOPPED) {
             if (!handle_track_ended() && Player_getState() == PLAYER_STATE_STOPPED) {
-                    Resume_clear();
+                Resume_clear();
+                // The keys lock the playback only
+                ModuleCommon_resetScreenOffHint();
                 cleanup_album_art_background();
                 cleanup_playback(true);
                 return MODULE_EXIT_TO_MENU;

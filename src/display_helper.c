@@ -1,9 +1,13 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <unistd.h>
+
+#include <msettings.h>
 
 #include "defines.h"
 #include "api.h"
 #include "display_helper.h"
+#include "selfupdate.h"
 #include "ui_theme.h"
 
 #define MAX_RECREATED_CALLBACKS 8
@@ -11,6 +15,12 @@
 // Time for the button that launched an external program to be released, so
 // neither that program nor we mistake the held press for input of our own.
 #define INPUT_SETTLE_MS 100
+
+// Interval between reads of the cable state. Each read is a sysfs file read.
+#define OUTPUT_POLL_MS 500
+
+// Time for a cable to seat before the app reads its state again.
+#define CABLE_SETTLE_MS 1000
 
 // Dimensions are cached rather than read off the surface: they stay queryable
 // while the display is released for an external binary, when there is no
@@ -82,16 +92,7 @@ static void notify_recreated(void) {
 	}
 }
 
-void DisplayHelper_prepareForExternal(void) {
-	// Clear our data to avoid any chance of flickering.
-	if (context.surface) GFX_clearAll();
-
-	// The launching press is probably still held - let it go before the external
-	// program starts reading input and takes it as its own.
-	SDL_Delay(INPUT_SETTLE_MS);
-	PAD_poll();
-	PAD_reset();
-
+static void release_video(void) {
 	// Keep SDL alive during video subsystem teardown.
 	// PLAT_quitVideo calls SDL_QuitSubSystem(SDL_INIT_VIDEO) — if no other
 	// subsystem is alive, SDL would fully quit and lose all state.
@@ -102,13 +103,15 @@ void DisplayHelper_prepareForExternal(void) {
 	display_released = true;
 }
 
-void DisplayHelper_recoverDisplay(void) {
-	if (!display_released)
-		return;
-
+// Restarts the app when the platform gives no surface: the modules cannot run
+// without one, and a new start sets up the video again.
+static void rebuild_video(void) {
 	SDL_Surface* screen = PLAT_initVideo();
-	if (!screen)
-		return;
+	if (!screen) {
+		LOG_error("the platform gave no display surface, restarting\n");
+		SelfUpdate_requestRestart();
+		exit(EXIT_FAILURE);
+	}
 
 	context.surface = screen;
 	context.width = screen->w;
@@ -121,10 +124,70 @@ void DisplayHelper_recoverDisplay(void) {
 
 	SDL_QuitSubSystem(SDL_INIT_EVENTS);
 	display_released = false;
+}
+
+void DisplayHelper_prepareForExternal(void) {
+	// Clear our data to avoid any chance of flickering.
+	if (context.surface) GFX_clearAll();
+
+	// The button that triggered the external program could still be pressed.
+	// Wait a bit to get it released before the external program starts reading input.
+	SDL_Delay(INPUT_SETTLE_MS);
+	PAD_poll();
+	PAD_reset();
+
+	release_video();
+}
+
+void DisplayHelper_recoverDisplay(void) {
+	if (!display_released)
+		return;
+
+	rebuild_video();
 
 	// Drop whatever the external program left behind, including the press that
 	// dismissed it.
 	SDL_Delay(INPUT_SETTLE_MS);
 	PAD_poll();
+	PAD_reset();
+}
+
+// Time of the last read of the cable state.
+static uint32_t last_output_poll = 0;
+
+bool DisplayHelper_outputChanged(void) {
+	if (display_released)
+		return false;
+
+	uint32_t now = SDL_GetTicks();
+	if (now - last_output_poll < OUTPUT_POLL_MS)
+		return false;
+	last_output_poll = now;
+
+	return GetHDMI() != hdmi_active;
+}
+
+void DisplayHelper_moveToOutput(void) {
+	// A cable that is not fully in can connect and disconnect for a short time.
+	SDL_Delay(CABLE_SETTLE_MS);
+	int has_hdmi = GetHDMI();
+
+	// The teardown and SetHDMI() fill the framebuffer with black. A clear here
+	// would show the page background for one frame before the black.
+	LOG_info("switching the display to %s\n", has_hdmi ? "HDMI" : "the panel");
+	release_video();
+
+	// The macros of the screen size, the refresh rate and the panel rotation
+	// read hdmi_active, thus it changes before the platform makes the new surface.
+	hdmi_active = has_hdmi;
+	PLAT_initPlatform();
+	SetHDMI(hdmi_active);
+
+	rebuild_video();
+	// The panel can be dark from the screen-off of a module
+	if (!hdmi_active)
+		PLAT_enableBacklight(1);
+
+	last_output_poll = SDL_GetTicks();
 	PAD_reset();
 }
