@@ -140,7 +140,10 @@ static bool build_directory(BrowserContext* ctx, int dir_id, bool preserve_selec
 }
 
 void Browser_loadDirectory(BrowserContext* ctx, int dir_id) {
-    build_directory(ctx, dir_id, false);
+    if (build_directory(ctx, dir_id, false)) return;
+    // A directory that a scan removed has no rows, thus show the root
+    int root_id = Db_getRootDirId();
+    if (root_id >= 0 && root_id != dir_id) build_directory(ctx, root_id, false);
 }
 
 bool Browser_hasUpdate(const BrowserContext* ctx) {

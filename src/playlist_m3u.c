@@ -18,10 +18,11 @@ void M3U_init(void) {
     userdata_mkdir("playlists");
 }
 
-// Count non-comment, non-empty lines in an m3u file (= track count)
+// Returns the number of non-comment, non-empty lines in an m3u file, or -1 when the read
+// failed.
 static int count_tracks_in_file(const char* path) {
     FILE* f = fopen(path, "r");
-    if (!f) return 0;
+    if (!f) return -1;
 
     int count = 0;
     char line[1024];
@@ -33,8 +34,9 @@ static int count_tracks_in_file(const char* path) {
         if (len == 0 || line[0] == '#') continue;
         count++;
     }
+    bool error = ferror(f) != 0;
     fclose(f);
-    return count;
+    return error ? -1 : count;
 }
 
 static bool playlist_file_path(const char* relative, char* out, size_t out_size) {
@@ -207,7 +209,9 @@ static int rewrite_playlist(const char* m3u_path, int remove_file_id, int extra_
                             int** kept_ids, int* removed) {
     *kept_ids = NULL;
     *removed = 0;
+    // The count sets the size of ids, thus an incomplete count would drop entries
     int entry_lines = count_tracks_in_file(m3u_path);
+    if (entry_lines < 0) return -1;
     char temp_path[1100];
     int length = snprintf(temp_path, sizeof(temp_path), "%s.tmp", m3u_path);
     if (length < 0 || (size_t)length >= sizeof(temp_path)) return -1;

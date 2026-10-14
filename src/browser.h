@@ -33,7 +33,8 @@ typedef struct {
 // Free browser entries
 void Browser_freeEntries(BrowserContext* ctx);
 
-// Load directory contents
+// Loads the contents of a directory. Loads the root when the directory cannot be read, and keeps
+// the current list when the root cannot be read too.
 void Browser_loadDirectory(BrowserContext* ctx, int dir_id);
 
 // Returns true when the database changed after the list was built. Does not change ctx.

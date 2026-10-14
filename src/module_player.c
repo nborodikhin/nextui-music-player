@@ -347,6 +347,11 @@ static void browser_go_up(void) {
     }
 
     load_directory(parent_id);
+    // The browser shows the root when the parent is gone, thus the history is stale
+    if (browser.dir_id != parent_id) {
+        nav_stack_top = 0;
+        sel = -1;
+    }
 
     if (sel < 0) {
         sel = 0;

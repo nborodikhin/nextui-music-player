@@ -582,6 +582,8 @@ static bool playlist_path(const char* relative, char* path, size_t path_size) {
     return length >= 0 && (size_t)length < path_size;
 }
 
+// Lists the playlists in the playlists directory. Returns false when the directory cannot be read
+// in full; a caller then keeps its rows.
 static bool read_card_playlists(CardPlaylist** output, int* count) {
     char directory_path[1024];
     if (userdata_snpath("playlists", directory_path, sizeof(directory_path)) < 0) {
@@ -595,8 +597,16 @@ static bool read_card_playlists(CardPlaylist** output, int* count) {
     CardPlaylist* entries = NULL;
     int entry_count = 0;
     int capacity = 0;
-    struct dirent* item;
-    while ((item = readdir(directory)) != NULL) {
+    bool failed = false;
+    while (true) {
+        // readdir() returns NULL both at the end and on an error, thus only errno tells them
+        // apart.
+        errno = 0;
+        struct dirent* item = readdir(directory);
+        if (!item) {
+            failed = errno != 0;
+            break;
+        }
         if (item->d_name[0] == '.') continue;
         const char* extension = strrchr(item->d_name, '.');
         if (!extension || strcasecmp(extension, ".m3u") != 0) continue;
@@ -605,10 +615,20 @@ static bool read_card_playlists(CardPlaylist** output, int* count) {
         char path[1024];
         if (!playlist_path(item->d_name, path, sizeof(path))) continue;
         struct stat status;
-        if (lstat(path, &status) != 0 || !S_ISREG(status.st_mode)) continue;
+        if (lstat(path, &status) != 0) {
+            // A playlist removed after readdir() is absent. Any other error does not show
+            // that the playlist is gone.
+            if (errno == ENOENT) continue;
+            failed = true;
+            break;
+        }
+        if (!S_ISREG(status.st_mode)) continue;
 
         int num_files = count_playlist_tracks(path);
-        if (num_files < 0) continue;
+        if (num_files < 0) {
+            failed = true;
+            break;
+        }
         if (entry_count == capacity) {
             int next_capacity = capacity ? capacity * 2 : 16;
             CardPlaylist* next = realloc(entries,
@@ -628,6 +648,10 @@ static bool read_card_playlists(CardPlaylist** output, int* count) {
         entries[entry_count++] = entry;
     }
     closedir(directory);
+    if (failed) {
+        free(entries);
+        return false;
+    }
     qsort(entries, (size_t)entry_count, sizeof(*entries), playlist_compare);
     *output = entries;
     *count = entry_count;
@@ -784,7 +808,13 @@ static bool scan_playlist(int playlist_id) {
     char path[1024];
     bool present = playlist_path(result->playlist.path, path, sizeof(path));
     struct stat status;
-    present = present && lstat(path, &status) == 0 && S_ISREG(status.st_mode);
+    bool stat_ok = present && lstat(path, &status) == 0;
+    if (present && !stat_ok && errno != ENOENT && errno != ENOTDIR) {
+        // The error does not show that the playlist is gone, thus keep its row
+        Db_freeResult(result);
+        return false;
+    }
+    present = stat_ok && S_ISREG(status.st_mode);
     bool success = present ? true : Db_deletePlaylist(result->playlist.id);
     if (success && present) {
         int count = count_playlist_tracks(path);

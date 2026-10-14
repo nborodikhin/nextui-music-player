@@ -594,6 +594,77 @@ TEST(playlists_request_adds_and_removes_rows) {
     stop_test();
 }
 
+// Writes a playlist with one entry to the playlists directory of the user data.
+static bool write_playlist(const char* name) {
+    char relative[256];
+    char path[512];
+    snprintf(relative, sizeof(relative), "playlists/%s", name);
+    if (!userdata_mkdir("playlists") || userdata_snpath(relative, path, sizeof(path)) < 0) {
+        return false;
+    }
+    FILE* m3u = fopen(path, "w");
+    if (!m3u) return false;
+    fputs("#EXTM3U\none.mp3\n", m3u);
+    return fclose(m3u) == 0;
+}
+
+// Returns the id of the playlist row of a file name, or 0.
+static int playlist_id_of(const char* name) {
+    DbPlaylistsResult* rows = Db_readPlaylists();
+    int id = 0;
+    for (int i = 0; rows && i < rows->count; i++) {
+        if (strcmp(rows->items[i].path, name) == 0) id = rows->items[i].id;
+    }
+    Db_freeResult(rows);
+    return id;
+}
+
+TEST(playlist_read_error_keeps_the_rows) {
+    // Root reads each file, thus the error cannot occur.
+    if (geteuid() == 0) return;
+    CHECK(start_test());
+    CHECK(write_playlist("open.m3u"));
+    CHECK(write_playlist("locked.m3u"));
+    FileDb_start();
+    for (int i = 0; i < 5000 && !FileDb_isIdle(); i++) usleep(1000);
+    int open_id = playlist_id_of("open.m3u");
+    int locked_id = playlist_id_of("locked.m3u");
+    CHECK(open_id > 0 && locked_id > 0);
+
+    char path[512];
+    CHECK(userdata_snpath("playlists/locked.m3u", path, sizeof(path)) >= 0);
+    CHECK(chmod(path, 0) == 0);
+    int request = FileDb_scanPlaylists();
+    bool scanned = request > 0 && wait_for_request(request);
+    chmod(path, 0644);
+    CHECK(scanned);
+    CHECK_EQ_INT(playlist_id_of("open.m3u"), open_id);
+    CHECK_EQ_INT(playlist_id_of("locked.m3u"), locked_id);
+    stop_test();
+}
+
+TEST(playlist_check_keeps_the_row_on_a_stat_error) {
+    // Root searches each directory, thus the error cannot occur.
+    if (geteuid() == 0) return;
+    CHECK(start_test());
+    CHECK(write_playlist("mix.m3u"));
+    FileDb_start();
+    for (int i = 0; i < 5000 && !FileDb_isIdle(); i++) usleep(1000);
+    int playlist_id = playlist_id_of("mix.m3u");
+    CHECK(playlist_id > 0);
+
+    // With no search permission on the directory, lstat() fails with EACCES.
+    char directory[512];
+    CHECK(userdata_snpath("playlists", directory, sizeof(directory)) >= 0);
+    CHECK(chmod(directory, 0600) == 0);
+    int request = FileDb_scanPlaylist(playlist_id);
+    bool scanned = request > 0 && wait_for_request(request);
+    chmod(directory, 0755);
+    CHECK(scanned);
+    CHECK_EQ_INT(playlist_id_of("mix.m3u"), playlist_id);
+    stop_test();
+}
+
 TEST(playlist_check_lists_the_directories_of_its_entries) {
     CHECK(start_test());
     FileDb_start();
@@ -699,6 +770,8 @@ TEST(refresh_keeps_the_row_index_when_the_selected_file_is_gone) {
 
 TEST(failed_first_load_shows_an_empty_root) {
     CHECK(start_test());
+    // With no root, no directory can be read.
+    CHECK(Db_execute("DELETE FROM dirs"));
     BrowserContext browser = {0};
     Browser_loadDirectory(&browser, 999);
     CHECK(browser.is_root);
@@ -709,14 +782,51 @@ TEST(failed_first_load_shows_an_empty_root) {
     stop_test();
 }
 
-TEST(failed_load_keeps_the_current_list) {
+TEST(load_of_a_missing_directory_shows_the_root) {
     CHECK(start_test());
     CHECK(add_rows_with_a_shared_id());
     BrowserContext browser = {0};
     Browser_loadDirectory(&browser, 50);
     CHECK(!browser.is_root);
-    CHECK(browser.entries && strcmp(browser.entries[0].name, "..") == 0);
 
+    Browser_loadDirectory(&browser, 999);
+    CHECK(browser.is_root);
+    CHECK_EQ_INT(browser.dir_id, Db_getRootDirId());
+    CHECK(entry_index(&browser, "A") >= 0);
+    Browser_freeEntries(&browser);
+    stop_test();
+}
+
+TEST(parent_that_a_scan_removed_shows_the_root) {
+    CHECK(start_test());
+    CHECK(add_rows_with_a_shared_id());
+    CHECK(Db_execute("INSERT INTO dirs (id, parent_id, path, filename) "
+                     "VALUES (60, 50, 'A/B', 'B')"));
+    BrowserContext browser = {0};
+    Browser_loadDirectory(&browser, 60);
+    CHECK(browser.entries && browser.entries[0].db_id == 50);
+
+    // The removal of A also removes A/B, thus the refresh keeps the list.
+    CHECK(Db_deleteDir(50));
+    CHECK(!Browser_refresh(&browser));
+    CHECK_EQ_INT(browser.dir_id, 60);
+
+    // The ".." row names A, which is gone.
+    Browser_loadDirectory(&browser, browser.entries[0].db_id);
+    CHECK(browser.is_root);
+    CHECK_EQ_INT(browser.dir_id, Db_getRootDirId());
+    Browser_freeEntries(&browser);
+    stop_test();
+}
+
+TEST(failed_load_with_no_root_keeps_the_current_list) {
+    CHECK(start_test());
+    CHECK(add_rows_with_a_shared_id());
+    BrowserContext browser = {0};
+    Browser_loadDirectory(&browser, 50);
+    CHECK(!browser.is_root);
+
+    CHECK(Db_execute("DELETE FROM dirs"));
     Browser_loadDirectory(&browser, 999);
     CHECK(!browser.is_root);
     CHECK_EQ_INT(browser.dir_id, 50);
@@ -748,11 +858,15 @@ int main(void) {
     RUN(file_check_removes_row_when_directory_takes_its_path);
     RUN(playlist_check_removes_gone_playlist);
     RUN(playlists_request_adds_and_removes_rows);
+    RUN(playlist_read_error_keeps_the_rows);
+    RUN(playlist_check_keeps_the_row_on_a_stat_error);
     RUN(playlist_check_lists_the_directories_of_its_entries);
     RUN(refresh_keeps_the_selected_file_when_a_directory_has_its_id);
     RUN(refresh_keeps_the_selected_play_all_entry);
     RUN(refresh_keeps_the_row_index_when_the_selected_file_is_gone);
     RUN(failed_first_load_shows_an_empty_root);
-    RUN(failed_load_keeps_the_current_list);
+    RUN(load_of_a_missing_directory_shows_the_root);
+    RUN(parent_that_a_scan_removed_shows_the_root);
+    RUN(failed_load_with_no_root_keeps_the_current_list);
     return test_summary();
 }
