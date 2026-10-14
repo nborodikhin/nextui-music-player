@@ -1,5 +1,5 @@
 #include "file_utils.h"
-#ifndef FILE_UTILS_USERDATA_DIR
+#if !defined(FILE_UTILS_USERDATA_DIR) || !defined(MUSIC_PATH)
 #include "defines.h"
 #endif
 
@@ -22,6 +22,10 @@
 
 #ifndef FILE_UTILS_TEMP_DIR
 #define FILE_UTILS_TEMP_DIR "/tmp"
+#endif
+
+#ifndef MUSIC_PATH
+#define MUSIC_PATH SDCARD_PATH "/Music"
 #endif
 
 void shell_escape(const char* src, char* dst, int dst_size) {
@@ -65,6 +69,35 @@ bool mkdir_p(const char* path) {
 
     free(work);
     return ok;
+}
+
+const char* get_music_path(void) {
+    return MUSIC_PATH;
+}
+
+bool get_music_abspath(const char* rel, char* out, size_t out_size) {
+    int length = rel && rel[0]
+        ? snprintf(out, out_size, "%s/%s", MUSIC_PATH, rel)
+        : snprintf(out, out_size, "%s", MUSIC_PATH);
+    return length >= 0 && (size_t)length < out_size;
+}
+
+bool get_music_relpath(const char* path, char* out, size_t out_size) {
+    size_t root_length = strlen(MUSIC_PATH);
+    if (strncmp(path, MUSIC_PATH, root_length) != 0 ||
+        (path[root_length] != '/' && path[root_length] != '\0')) {
+        return false;
+    }
+    const char* relative = path + root_length;
+    if (relative[0] == '/') relative++;
+    int length = snprintf(out, out_size, "%s", relative);
+    return length >= 0 && (size_t)length < out_size;
+}
+
+void get_file_display_name(const char* filename, char* out, size_t out_size) {
+    snprintf(out, out_size, "%s", filename);
+    char* dot = strrchr(out, '.');
+    if (dot && dot != out) *dot = '\0';
 }
 
 int userdata_snpath(const char* rel, char* out, size_t out_size) {

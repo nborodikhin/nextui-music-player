@@ -22,15 +22,13 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
 ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
                                               PlaylistTrack* tracks,
                                               int track_count,
-                                              int start_index);
+                                              int start_index,
+                                              int playlist_id);
 
 // Run player with resume state (restores folder/playlist, seeks to position)
 ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeState* resume);
 
 void PlayerModule_quit(void);
-
-// Set the M3U playlist path for resume tracking (call before runWithPlaylist)
-void PlayerModule_setResumePlaylistPath(const char* m3u_path);
 
 // Check if music player module is active (playing/paused)
 bool PlayerModule_isActive(void);

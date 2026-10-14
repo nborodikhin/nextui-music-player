@@ -1,84 +1,48 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "file_utils.h"
 #include "resume.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "db.h"
+#include "filedb.h"
+#include "platform.h"
 
 // In-memory state
 static ResumeState state = { .type = RESUME_TYPE_NONE };
 static char label_buf[300];
 
-static bool resume_path(char* path, size_t path_size) {
-    int length = userdata_snpath("resume.cfg", path, path_size);
-    return length >= 0 && (size_t)length < path_size;
-}
-
-// Write state to disk
-static void save_to_disk(void) {
-    if (!userdata_mkdir("")) return;
-
-    char path[512];
-    if (!resume_path(path, sizeof(path))) return;
-
-    FILE* f = fopen(path, "w");
-    if (!f) return;
-
-    fprintf(f, "type=%d\n", (int)state.type);
-    fprintf(f, "folder_path=%s\n", state.folder_path);
-    fprintf(f, "playlist_path=%s\n", state.playlist_path);
-    fprintf(f, "track_path=%s\n", state.track_path);
-    fprintf(f, "track_name=%s\n", state.track_name);
-    fprintf(f, "track_index=%d\n", state.track_index);
-    fprintf(f, "position_ms=%d\n", state.position_ms);
-    fclose(f);
-}
-
 void Resume_init(void) {
     memset(&state, 0, sizeof(state));
     state.type = RESUME_TYPE_NONE;
 
-    char path[512];
-    if (!resume_path(path, sizeof(path))) return;
+    DbLastPlayedResult* last_played_result = Db_readLastPlayed();
+    if (!last_played_result) return;
 
-    FILE* f = fopen(path, "r");
-    if (!f) return;
+    const DbLastPlayed last_played = last_played_result->last_played;
+    Db_freeResult(last_played_result);
 
-    char line[1024];
-    while (fgets(line, sizeof(line), f)) {
-        // Strip newline
-        char* nl = strchr(line, '\n');
-        if (nl) *nl = '\0';
-
-        int ival;
-        if (sscanf(line, "type=%d", &ival) == 1) {
-            if (ival >= RESUME_TYPE_NONE && ival <= RESUME_TYPE_PLAYLIST)
-                state.type = (ResumeType)ival;
+    DbFileResult* file_result = Db_getFile(last_played.id2);
+    if (file_result && FileDb_fileExists(last_played.id2)) {
+        if (last_played.type == DB_LAST_PLAYED_PLAYLIST) {
+            state.type = RESUME_TYPE_PLAYLIST;
+            state.dir_id = 0;
+            state.playlist_id = last_played.id1;
+        } else if (last_played.type == DB_LAST_PLAYED_FOLDER) {
+            state.type = RESUME_TYPE_FILES;
+            state.dir_id = last_played.id1;
+            state.playlist_id = 0;
         }
-        else if (strncmp(line, "folder_path=", 12) == 0) {
-            snprintf(state.folder_path, sizeof(state.folder_path), "%s", line + 12);
-        }
-        else if (strncmp(line, "playlist_path=", 14) == 0) {
-            snprintf(state.playlist_path, sizeof(state.playlist_path), "%s", line + 14);
-        }
-        else if (strncmp(line, "track_path=", 11) == 0) {
-            snprintf(state.track_path, sizeof(state.track_path), "%s", line + 11);
-        }
-        else if (strncmp(line, "track_name=", 11) == 0) {
-            snprintf(state.track_name, sizeof(state.track_name), "%s", line + 11);
-        }
-        else if (sscanf(line, "track_index=%d", &ival) == 1) {
-            state.track_index = ival;
-        }
-        else if (sscanf(line, "position_ms=%d", &ival) == 1) {
-            state.position_ms = ival;
+        state.file_id = last_played.id2;
+        state.position_ms = last_played.position;
+        if (last_played.track_name[0]) {
+            snprintf(state.track_name, sizeof(state.track_name), "%s", last_played.track_name);
+        } else {
+            snprintf(state.track_name, sizeof(state.track_name), "%s", file_result->file.filename);
+            char* extension = strrchr(state.track_name, '.');
+            if (extension && extension != state.track_name) *extension = '\0';
         }
     }
-    fclose(f);
-
-    // Validate: must have a track path
-    if (state.type != RESUME_TYPE_NONE && state.track_path[0] == '\0') {
-        state.type = RESUME_TYPE_NONE;
-    }
+    Db_freeResult(file_result);
 }
 
 bool Resume_isAvailable(void) {
@@ -92,51 +56,42 @@ const ResumeState* Resume_getState(void) {
 
 const char* Resume_getLabel(void) {
     if (state.type == RESUME_TYPE_NONE) return NULL;
-
-    if (state.track_name[0]) {
-        snprintf(label_buf, sizeof(label_buf), "Resume: %s", state.track_name);
-    } else {
-        // Fallback: extract filename from track_path
-        const char* slash = strrchr(state.track_path, '/');
-        const char* name = slash ? slash + 1 : state.track_path;
-        snprintf(label_buf, sizeof(label_buf), "Resume: %s", name);
-    }
+    snprintf(label_buf, sizeof(label_buf), "Resume: %s", state.track_name);
     return label_buf;
 }
 
-void Resume_saveFiles(const char* folder_path, const char* track_path,
-                      const char* track_name, int track_index, int position_ms) {
+void Resume_saveFiles(int dir_id, int file_id, const char* track_name, int position_ms) {
+    memset(&state, 0, sizeof(state));
     state.type = RESUME_TYPE_FILES;
-    snprintf(state.folder_path, sizeof(state.folder_path), "%s", folder_path ? folder_path : "");
-    state.playlist_path[0] = '\0';
-    snprintf(state.track_path, sizeof(state.track_path), "%s", track_path ? track_path : "");
-    snprintf(state.track_name, sizeof(state.track_name), "%s", track_name ? track_name : "");
-    state.track_index = track_index;
+    state.dir_id = dir_id;
+    state.playlist_id = 0;
+    state.file_id = file_id;
     state.position_ms = position_ms;
-    save_to_disk();
+    snprintf(state.track_name, sizeof(state.track_name), "%s", track_name ? track_name : "");
+    Db_saveLastPlayed(DB_LAST_PLAYED_FOLDER, dir_id, file_id, track_name,
+                      position_ms);
 }
 
-void Resume_savePlaylist(const char* playlist_path, const char* track_path,
-                         const char* track_name, int track_index, int position_ms) {
+void Resume_savePlaylist(int playlist_id, int file_id, const char* track_name,
+                         int position_ms) {
+    memset(&state, 0, sizeof(state));
     state.type = RESUME_TYPE_PLAYLIST;
-    state.folder_path[0] = '\0';
-    snprintf(state.playlist_path, sizeof(state.playlist_path), "%s", playlist_path ? playlist_path : "");
-    snprintf(state.track_path, sizeof(state.track_path), "%s", track_path ? track_path : "");
-    snprintf(state.track_name, sizeof(state.track_name), "%s", track_name ? track_name : "");
-    state.track_index = track_index;
+    state.dir_id = 0;
+    state.playlist_id = playlist_id;
+    state.file_id = file_id;
     state.position_ms = position_ms;
-    save_to_disk();
+    snprintf(state.track_name, sizeof(state.track_name), "%s", track_name ? track_name : "");
+    Db_saveLastPlayed(DB_LAST_PLAYED_PLAYLIST, playlist_id, file_id, track_name,
+                      position_ms);
 }
 
 void Resume_updatePosition(int position_ms) {
     if (state.type == RESUME_TYPE_NONE) return;
     state.position_ms = position_ms;
-    save_to_disk();
+    Db_saveLastPlayedPosition(position_ms);
 }
 
 void Resume_clear(void) {
     memset(&state, 0, sizeof(state));
-    state.type = RESUME_TYPE_NONE;
-    char path[512];
-    if (resume_path(path, sizeof(path))) remove(path);
+    Db_clearLastPlayed();
 }

@@ -37,6 +37,33 @@ char* userdata_path(const char* rel);
 int userdata_snpath(const char* rel, char* out, size_t out_size);
 
 /**
+ * Return the absolute path of the Music root.
+ */
+const char* get_music_path(void);
+
+/**
+ * Write the absolute path of a path relative to the Music root to out. Pass NULL or ""
+ * in rel for the Music root itself.
+ *
+ * @return false if the path does not fit in out
+ */
+bool get_music_abspath(const char* rel, char* out, size_t out_size);
+
+/**
+ * Write the path relative to the Music root of an absolute path to out. The Music root
+ * itself gives "".
+ *
+ * @return false if path is not in the Music root, or the result does not fit in out
+ */
+bool get_music_relpath(const char* path, char* out, size_t out_size);
+
+/**
+ * Write the display name of a file to out: the filename without its extension.
+ */
+void get_file_display_name(const char* filename, char* out, size_t out_size);
+
+
+/**
  * Make a directory under the user data directory of the app.
  *
  * @return true if the directory exists when the function returns

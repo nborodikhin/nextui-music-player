@@ -1,474 +1,208 @@
+#include "playlist.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
+#include <unistd.h>
 
-#include "defines.h"
-#include "api.h"
-#include "debug.h"
-#include "playlist.h"
-#include "player.h"
+#include "browser.h"
+#include "db.h"
+#include "filedb.h"
+#include "file_utils.h"
 
-// Forward declarations for internal helpers
-static int scan_directory_recursive(PlaylistContext* ctx, const char* path, int depth);
-static int compare_strings(const void* a, const void* b);
-
-// Initialize playlist context
 void Playlist_init(PlaylistContext* ctx) {
     if (!ctx) return;
-
     ctx->tracks = malloc(sizeof(PlaylistTrack) * PLAYLIST_MAX_TRACKS);
     ctx->track_count = 0;
     ctx->current_index = 0;
 }
 
-// Free playlist memory
 void Playlist_free(PlaylistContext* ctx) {
     if (!ctx) return;
-
-    if (ctx->tracks) {
-        free(ctx->tracks);
-        ctx->tracks = NULL;
-    }
+    free(ctx->tracks);
+    ctx->tracks = NULL;
     ctx->track_count = 0;
     ctx->current_index = 0;
 }
 
-// Clear playlist (reset count but keep memory)
 void Playlist_clear(PlaylistContext* ctx) {
     if (!ctx) return;
     ctx->track_count = 0;
     ctx->current_index = 0;
 }
 
-// Check if file is a supported audio format
-static bool is_audio_file(const char* filename) {
-    AudioFormat fmt = Player_detectFormat(filename);
-    return fmt != AUDIO_FORMAT_UNKNOWN;
+static bool copy_text(char* out, size_t out_size, const char* value) {
+    int length = snprintf(out, out_size, "%s", value ? value : "");
+    return length >= 0 && (size_t)length < out_size;
 }
 
-// String comparison for qsort (case-insensitive)
-static int compare_strings(const void* a, const void* b) {
-    return strcasecmp(*(const char**)a, *(const char**)b);
+static bool fill_track(PlaylistTrack* track, const DbFile* file) {
+    if (!get_music_abspath(file->path, track->path, sizeof(track->path)) ||
+        !copy_text(track->name, sizeof(track->name), file->filename)) {
+        return false;
+    }
+    track->file_id = file->id;
+    track->format = Player_detectFormat(file->filename);
+    return true;
 }
 
-// Add a track to the playlist
-static int add_track(PlaylistContext* ctx, const char* path, const char* name) {
-    if (ctx->track_count >= PLAYLIST_MAX_TRACKS) {
-        return -1;  // Playlist full
+static int append_tracks(PlaylistTrack* tracks, int count, int max_tracks,
+                         const PlaylistTrack* items, int item_count) {
+    for (int i = 0; i < item_count && count < max_tracks; i++) {
+        tracks[count++] = items[i];
     }
-
-    PlaylistTrack* track = &ctx->tracks[ctx->track_count];
-    strncpy(track->path, path, sizeof(track->path) - 1);
-    track->path[sizeof(track->path) - 1] = '\0';
-    strncpy(track->name, name, sizeof(track->name) - 1);
-    track->name[sizeof(track->name) - 1] = '\0';
-    track->format = Player_detectFormat(name);
-
-    ctx->track_count++;
-    return 0;
+    return count;
 }
 
-// Scan a directory and add audio files, then recurse into subdirectories
-// This is used for subdirectories (not the starting directory)
-static int scan_directory_recursive(PlaylistContext* ctx, const char* path, int depth) {
-    if (depth > PLAYLIST_MAX_DEPTH) {
-        return 0;  // Prevent stack overflow
+// Pages the playable files of an indexed subtree into tracks, which holds
+// max_tracks items. The file start_file_id and the files after it come first.
+// When the start file is in dir_id itself, the files before it follow the
+// other files of dir_id, and the files of the subdirectories come last.
+// Otherwise the files before it come last. Returns the number of tracks, or -1
+// on error.
+static int collect_tracks(int dir_id, int start_file_id, PlaylistTrack* tracks,
+                          int max_tracks) {
+    PlaylistTrack* before = NULL;
+    if (start_file_id > 0) {
+        before = malloc((size_t)max_tracks * sizeof(*before));
+        if (!before) return -1;
     }
 
-    DIR* dir = opendir(path);
-    if (!dir) {
-        return 0;
-    }
-
-    // Collect file names and directory names separately
-    char** files = NULL;
-    char** dirs = NULL;
-    int file_count = 0;
-    int dir_count = 0;
-    int files_capacity = 64;
-    int dirs_capacity = 32;
-
-    files = malloc(sizeof(char*) * files_capacity);
-    dirs = malloc(sizeof(char*) * dirs_capacity);
-
-    if (!files || !dirs) {
-        if (files) free(files);
-        if (dirs) free(dirs);
-        closedir(dir);
-        return 0;
-    }
-
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != NULL) {
-        // Skip hidden files and . / ..
-        if (ent->d_name[0] == '.') continue;
-
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, ent->d_name);
-
-        struct stat st;
-        if (lstat(full_path, &st) != 0) continue;  // Use lstat to detect symlinks
-
-        // Skip symlinks to prevent infinite loops
-        if (S_ISLNK(st.st_mode)) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            // Add directory name
-            if (dir_count >= dirs_capacity) {
-                dirs_capacity *= 2;
-                char** new_dirs = realloc(dirs, sizeof(char*) * dirs_capacity);
-                if (!new_dirs) continue;
-                dirs = new_dirs;
-            }
-            dirs[dir_count] = strdup(ent->d_name);
-            if (dirs[dir_count]) dir_count++;
-        } else if (is_audio_file(ent->d_name)) {
-            // Add audio file name
-            if (file_count >= files_capacity) {
-                files_capacity *= 2;
-                char** new_files = realloc(files, sizeof(char*) * files_capacity);
-                if (!new_files) continue;
-                files = new_files;
-            }
-            files[file_count] = strdup(ent->d_name);
-            if (files[file_count]) file_count++;
+    int count = 0;
+    int before_count = 0;
+    bool found = start_file_id <= 0;
+    bool start_in_dir = false;
+    bool before_done = false;
+    int token = 0;
+    bool more = true;
+    bool success = true;
+    while (success && more && count < max_tracks) {
+        DbFilesResult* page = Db_getFiles(dir_id, DB_FILE_TYPE_MUSIC, true, PLAYLIST_MAX_TRACKS, token);
+        if (!page) {
+            success = false;
+            break;
         }
-    }
-    closedir(dir);
-
-    // Sort files and directories alphabetically
-    if (file_count > 1) {
-        qsort(files, file_count, sizeof(char*), compare_strings);
-    }
-    if (dir_count > 1) {
-        qsort(dirs, dir_count, sizeof(char*), compare_strings);
-    }
-
-    int added = 0;
-
-    // Add all audio files first
-    for (int i = 0; i < file_count && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
-        if (add_track(ctx, full_path, files[i]) == 0) {
-            added++;
+        for (int i = 0; success && i < page->count && count < max_tracks; i++) {
+            const DbFile* file = &page->items[i];
+            if (!found && file->id == start_file_id) {
+                found = true;
+                start_in_dir = file->parent_id == dir_id;
+            } else if (found && start_in_dir && !before_done &&
+                       file->parent_id != dir_id) {
+                count = append_tracks(tracks, count, max_tracks, before,
+                                      before_count);
+                before_done = true;
+                if (count >= max_tracks) break;
+            }
+            if (found) {
+                success = fill_track(&tracks[count], file);
+                if (success) count++;
+            } else if (before_count < max_tracks) {
+                success = fill_track(&before[before_count], file);
+                if (success) before_count++;
+            }
         }
+        more = page->has_more && page->count > 0;
+        if (page->count > 0) token = page->items[page->count - 1].id;
+        Db_freeResult(page);
     }
 
-    // Then recurse into subdirectories
-    for (int i = 0; i < dir_count && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, dirs[i]);
-        added += scan_directory_recursive(ctx, full_path, depth + 1);
+    if (success && before && !before_done) {
+        if (!found) count = 0;
+        count = append_tracks(tracks, count, max_tracks, before, before_count);
     }
-
-    // Free memory
-    for (int i = 0; i < file_count; i++) free(files[i]);
-    for (int i = 0; i < dir_count; i++) free(dirs[i]);
-    free(files);
-    free(dirs);
-
-    return added;
+    free(before);
+    return success ? count : -1;
 }
 
-// Build playlist from a directory recursively
-// Order: selected → files after → files before → subdirectories
-// If start_track_path is NULL or empty, starts from first track
-int Playlist_buildFromDirectory(PlaylistContext* ctx, const char* path, const char* start_track_path) {
-    if (!ctx || !path) return -1;
-
-    // Ensure playlist memory is allocated
+int Playlist_buildFromDirectory(PlaylistContext* ctx, int dir_id,
+                                int start_file_id) {
+    if (!ctx || dir_id < 0) return -1;
     if (!ctx->tracks) {
         Playlist_init(ctx);
         if (!ctx->tracks) return -1;
     }
 
     Playlist_clear(ctx);
+    int request = FileDb_scanDir(dir_id, true);
+    if (!FileDb_waitBlocking(request)) return -1;
 
-    DIR* dir = opendir(path);
-    if (!dir) {
-        LOG_error("Failed to open directory: %s\n", path);
-        return -1;
-    }
-
-    // Collect file names and directory names
-    char** files = NULL;
-    char** dirs = NULL;
-    int file_count = 0;
-    int dir_count = 0;
-    int files_capacity = 64;
-    int dirs_capacity = 32;
-
-    files = malloc(sizeof(char*) * files_capacity);
-    dirs = malloc(sizeof(char*) * dirs_capacity);
-
-    if (!files || !dirs) {
-        if (files) free(files);
-        if (dirs) free(dirs);
-        closedir(dir);
-        return -1;
-    }
-
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, ent->d_name);
-
-        struct stat st;
-        if (lstat(full_path, &st) != 0) continue;
-
-        // Skip symlinks
-        if (S_ISLNK(st.st_mode)) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            if (dir_count >= dirs_capacity) {
-                dirs_capacity *= 2;
-                char** new_dirs = realloc(dirs, sizeof(char*) * dirs_capacity);
-                if (!new_dirs) continue;
-                dirs = new_dirs;
-            }
-            dirs[dir_count] = strdup(ent->d_name);
-            if (dirs[dir_count]) dir_count++;
-        } else if (is_audio_file(ent->d_name)) {
-            if (file_count >= files_capacity) {
-                files_capacity *= 2;
-                char** new_files = realloc(files, sizeof(char*) * files_capacity);
-                if (!new_files) continue;
-                files = new_files;
-            }
-            files[file_count] = strdup(ent->d_name);
-            if (files[file_count]) file_count++;
-        }
-    }
-    closedir(dir);
-
-    // Sort files and directories
-    if (file_count > 1) {
-        qsort(files, file_count, sizeof(char*), compare_strings);
-    }
-    if (dir_count > 1) {
-        qsort(dirs, dir_count, sizeof(char*), compare_strings);
-    }
-
-    // Find the index of the selected track in the sorted files list
-    int selected_idx = -1;
-    if (start_track_path && start_track_path[0] != '\0') {
-        for (int i = 0; i < file_count; i++) {
-            char full_path[512];
-            snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
-            if (strcmp(full_path, start_track_path) == 0) {
-                selected_idx = i;
-                break;
-            }
-        }
-    }
-
-    // If start track not found or not specified, start from beginning
-    if (selected_idx < 0) {
-        selected_idx = 0;
-    }
-
-    // Add files in order: selected → after → before
-    // First: selected track
-    if (file_count > 0 && selected_idx < file_count) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[selected_idx]);
-        add_track(ctx, full_path, files[selected_idx]);
-    }
-
-    // Then: files after selected
-    for (int i = selected_idx + 1; i < file_count && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
-        add_track(ctx, full_path, files[i]);
-    }
-
-    // Then: files before selected
-    for (int i = 0; i < selected_idx && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
-        add_track(ctx, full_path, files[i]);
-    }
-
-    // Then: recurse into subdirectories
-    for (int i = 0; i < dir_count && ctx->track_count < PLAYLIST_MAX_TRACKS; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, dirs[i]);
-        scan_directory_recursive(ctx, full_path, 1);
-    }
-
-    // Free memory
-    for (int i = 0; i < file_count; i++) free(files[i]);
-    for (int i = 0; i < dir_count; i++) free(dirs[i]);
-    free(files);
-    free(dirs);
-
-    // Current index is always 0 (the selected track)
+    int count = collect_tracks(dir_id, start_file_id, ctx->tracks,
+                               PLAYLIST_MAX_TRACKS);
+    if (count < 0) return -1;
+    ctx->track_count = count;
     ctx->current_index = 0;
-
-    return ctx->track_count;
-}
-
-// Recursive helper for Playlist_collectPaths
-static void collect_paths_recursive(const char* path, int depth,
-                                    char*** out_paths, int* count, int max_count) {
-    if (depth > PLAYLIST_MAX_DEPTH || *count >= max_count) return;
-
-    DIR* dir = opendir(path);
-    if (!dir) return;
-
-    char** files = NULL;
-    char** dirs = NULL;
-    int file_count = 0, dir_count = 0;
-    int files_cap = 64, dirs_cap = 32;
-
-    files = malloc(sizeof(char*) * files_cap);
-    dirs  = malloc(sizeof(char*) * dirs_cap);
-    if (!files || !dirs) {
-        if (files) free(files);
-        if (dirs)  free(dirs);
-        closedir(dir);
-        return;
-    }
-
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, ent->d_name);
-        struct stat st;
-        if (lstat(full_path, &st) != 0) continue;
-        if (S_ISLNK(st.st_mode)) continue;
-        if (S_ISDIR(st.st_mode)) {
-            if (dir_count >= dirs_cap) {
-                dirs_cap *= 2;
-                char** nd = realloc(dirs, sizeof(char*) * dirs_cap);
-                if (!nd) continue;
-                dirs = nd;
-            }
-            dirs[dir_count] = strdup(ent->d_name);
-            if (dirs[dir_count]) dir_count++;
-        } else if (is_audio_file(ent->d_name)) {
-            if (file_count >= files_cap) {
-                files_cap *= 2;
-                char** nf = realloc(files, sizeof(char*) * files_cap);
-                if (!nf) continue;
-                files = nf;
-            }
-            files[file_count] = strdup(ent->d_name);
-            if (files[file_count]) file_count++;
-        }
-    }
-    closedir(dir);
-
-    if (file_count > 1) qsort(files, file_count, sizeof(char*), compare_strings);
-    if (dir_count  > 1) qsort(dirs,  dir_count,  sizeof(char*), compare_strings);
-
-    for (int i = 0; i < file_count && *count < max_count; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, files[i]);
-        (*out_paths)[*count] = strdup(full_path);
-        if ((*out_paths)[*count]) (*count)++;
-    }
-    for (int i = 0; i < dir_count && *count < max_count; i++) {
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, dirs[i]);
-        collect_paths_recursive(full_path, depth + 1, out_paths, count, max_count);
-    }
-
-    for (int i = 0; i < file_count; i++) free(files[i]);
-    for (int i = 0; i < dir_count;  i++) free(dirs[i]);
-    free(files);
-    free(dirs);
-}
-
-int Playlist_collectPaths(const char* dir_path, char*** out_paths, int max_count) {
-    if (!dir_path || !out_paths || max_count <= 0) return 0;
-
-    *out_paths = malloc(sizeof(char*) * max_count);
-    if (!*out_paths) return 0;
-
-    int count = 0;
-    collect_paths_recursive(dir_path, 0, out_paths, &count, max_count);
     return count;
 }
 
-void Playlist_freePaths(char** paths, int count) {
-    if (!paths) return;
-    for (int i = 0; i < count; i++) free(paths[i]);
-    free(paths);
+int Playlist_collectDirectory(int dir_id, int max_tracks, PlaylistTrack** tracks) {
+    if (!tracks) return -1;
+    *tracks = NULL;
+    if (dir_id < 0 || max_tracks <= 0) return -1;
+
+    int request = FileDb_scanDir(dir_id, true);
+    if (!FileDb_waitBlocking(request)) return -1;
+
+    PlaylistTrack* items = malloc((size_t)max_tracks * sizeof(*items));
+    if (!items) return -1;
+    int count = collect_tracks(dir_id, 0, items, max_tracks);
+    if (count <= 0) {
+        free(items);
+        return count;
+    }
+    *tracks = items;
+    return count;
 }
 
-// Navigation - next track (no wrap-around)
 int Playlist_next(PlaylistContext* ctx) {
-    if (!ctx || ctx->track_count == 0) return -1;
-    if (ctx->current_index >= ctx->track_count - 1) return -1;  // End of playlist
-
+    if (!ctx || ctx->track_count == 0 ||
+        ctx->current_index >= ctx->track_count - 1) return -1;
     ctx->current_index++;
     return ctx->current_index;
 }
 
-// Navigation - previous track (no wrap-around)
 int Playlist_prev(PlaylistContext* ctx) {
-    if (!ctx || ctx->track_count == 0) return -1;
-    if (ctx->current_index <= 0) return -1;  // Start of playlist
-
+    if (!ctx || ctx->track_count == 0 || ctx->current_index <= 0) return -1;
     ctx->current_index--;
     return ctx->current_index;
 }
 
-// Shuffle - pick a random track (different from current if possible)
 int Playlist_shuffle(PlaylistContext* ctx) {
     if (!ctx || ctx->track_count == 0) return -1;
-    if (ctx->track_count == 1) return 0;  // Only one track
-
-    // Pick a random track different from current
-    int new_idx;
+    if (ctx->track_count == 1) return 0;
+    int index;
     do {
-        new_idx = rand() % ctx->track_count;
-    } while (new_idx == ctx->current_index && ctx->track_count > 1);
-
-    ctx->current_index = new_idx;
-    return ctx->current_index;
+        index = rand() % ctx->track_count;
+    } while (index == ctx->current_index);
+    ctx->current_index = index;
+    return index;
 }
 
-// Set current track by index
 int Playlist_setCurrentIndex(PlaylistContext* ctx, int index) {
     if (!ctx || index < 0 || index >= ctx->track_count) return -1;
     ctx->current_index = index;
     return 0;
 }
 
-// Get current track
 const PlaylistTrack* Playlist_getCurrentTrack(const PlaylistContext* ctx) {
-    if (!ctx || !ctx->tracks || ctx->track_count == 0) return NULL;
-    if (ctx->current_index < 0 || ctx->current_index >= ctx->track_count) return NULL;
+    if (!ctx || !ctx->tracks || ctx->current_index < 0 ||
+        ctx->current_index >= ctx->track_count) return NULL;
     return &ctx->tracks[ctx->current_index];
 }
 
-// Get track by index
 const PlaylistTrack* Playlist_getTrack(const PlaylistContext* ctx, int index) {
     if (!ctx || !ctx->tracks || index < 0 || index >= ctx->track_count) return NULL;
     return &ctx->tracks[index];
 }
 
-// Get track count
 int Playlist_getCount(const PlaylistContext* ctx) {
-    if (!ctx) return 0;
-    return ctx->track_count;
+    return ctx ? ctx->track_count : 0;
 }
 
-// Get current index
 int Playlist_getCurrentIndex(const PlaylistContext* ctx) {
-    if (!ctx) return 0;
-    return ctx->current_index;
+    return ctx ? ctx->current_index : 0;
 }
 
-// Check if playlist is active (has tracks)
 bool Playlist_isActive(const PlaylistContext* ctx) {
     return ctx && ctx->tracks && ctx->track_count > 0;
 }

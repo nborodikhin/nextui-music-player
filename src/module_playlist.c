@@ -18,6 +18,7 @@
 #include "ui_main.h"
 #include "ui_utils.h"
 #include "list_nav.h"
+#include "filedb.h"
 
 // Internal states
 typedef enum {
@@ -58,13 +59,15 @@ static void refresh_playlists(void) {
 
 static void refresh_detail(void) {
     if (current_playlist_index < 0 || current_playlist_index >= playlist_count) return;
-    M3U_loadTracks(playlists[current_playlist_index].path, detail_tracks, PLAYLIST_MAX_TRACKS, &detail_track_count);
+    int count = M3U_loadTracks(playlists[current_playlist_index].id, detail_tracks,
+                               PLAYLIST_MAX_TRACKS);
+    detail_track_count = count > 0 ? count : 0;
 }
 
 
 ModuleExitReason PlaylistModule_run(DisplayContext* display) {
     M3U_init();
-    Keyboard_init();
+    FileDb_waitBlocking(FileDb_scanPlaylists());
     refresh_playlists();
 
     PlaylistInternalState state = PLAYLIST_INTERNAL_LIST;
@@ -86,7 +89,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                     // Delete playlist
                     int idx = confirm_target;
                     if (idx >= 0 && idx < playlist_count) {
-                        M3U_delete(playlists[idx].path);
+                        M3U_delete(playlists[idx].id);
                         refresh_playlists();
                         ListNav_onItemRemoved(&list_nav, idx);
                         Toast_show("Playlist deleted", TOAST_DURATION);
@@ -94,8 +97,10 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                 } else if (confirm_action == 1) {
                     // Remove track
                     int idx = confirm_target;
-                    if (current_playlist_index >= 0 && current_playlist_index < playlist_count) {
-                        M3U_removeTrack(playlists[current_playlist_index].path, idx);
+                    if (current_playlist_index >= 0 && current_playlist_index < playlist_count &&
+                        idx >= 0 && idx < detail_track_count) {
+                        M3U_removeTrack(playlists[current_playlist_index].id,
+                                        detail_tracks[idx].file_id);
                         refresh_detail();
                         // Update parent count
                         playlists[current_playlist_index].track_count = detail_track_count;
@@ -158,7 +163,7 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                 // New Playlist
                 char* name = Keyboard_open("Playlist name", MAX_PLAYLIST_NAME - 1);
                 if (name && name[0]) {
-                    if (M3U_create(name) == 0) {
+                    if (M3U_create(name) > 0) {
                         Toast_show("Playlist created", TOAST_DURATION);
                         refresh_playlists();
                     } else {
@@ -207,9 +212,10 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                 if (detail_track_count > 0) {
                     // Play the playlist starting from selected track
                     UiLayer_clear(UI_LAYER_ANIMATION);
-                    PlayerModule_setResumePlaylistPath(playlists[current_playlist_index].path);
-                    PlayerModule_runWithPlaylist(display, detail_tracks, detail_track_count, detail_nav.selected);
-                    PlayerModule_setResumePlaylistPath(NULL);
+                    PlayerModule_runWithPlaylist(display, detail_tracks,
+                                                 detail_track_count,
+                                                 detail_nav.selected,
+                                                 playlists[current_playlist_index].id);
                     // On return, refresh and go back to detail. The title starts
                     // again in the mode of this screen.
                     ScreenTitle_start(false);

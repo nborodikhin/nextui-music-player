@@ -98,6 +98,11 @@ typedef struct {
 // Returns 0 on success, -1 if yt-dlp is not installed
 int Downloader_init(void);
 
+// Scans the download directory in the file index and waits for the scan. Call it before a
+// search, thus the search results know which titles are already downloaded. Blocks, thus do
+// not call it at app start. Returns false when the directory is not indexed.
+bool Downloader_refreshIndex(void);
+
 // Re-read the yt-dlp version, probing the binary when the cached value is
 // missing or stale. Reports DOWNLOADER_VERSION_NOT_INSTALLED when absent.
 void Downloader_refreshVersion(void);
@@ -137,9 +142,9 @@ int Downloader_queueClear(void);
 int Downloader_queueCount(void);
 DownloaderQueueItem* Downloader_queueGet(int* count);
 
-// Check if video is already in queue or downloaded
+// Check if a title is already in the download directory.
 bool Downloader_isInQueue(const char* video_id);
-bool Downloader_isDownloaded(const char* video_id);
+bool Downloader_isDownloaded(const char* title);
 
 // Start downloading queue items (runs in background)
 int Downloader_downloadStart(void);

@@ -9,6 +9,7 @@
 #define MAX_PLAYLIST_NAME 128
 
 typedef struct {
+    int id;
     char name[MAX_PLAYLIST_NAME];  // Display name (without .m3u)
     char path[512];                // Full path to .m3u file
     int track_count;               // Number of tracks (from quick scan)
@@ -17,31 +18,31 @@ typedef struct {
 // Create playlists directory if it doesn't exist
 void M3U_init(void);
 
-// Scan playlists directory, fill out array. Returns count.
+// Read indexed playlists into an array. Returns count.
 int M3U_listPlaylists(PlaylistInfo* out, int max);
 
-// Create an empty .m3u file with the given name. Returns 0 on success.
+// Create an empty .m3u file with the given name. Returns the id of the playlist, or 0 on error.
 int M3U_create(const char* name);
 
-// Make a user-typed name safe to build a file name from: path separators and
-// control characters become '_', surrounding spaces go, and the copy is cut on
-// a character boundary. False when nothing usable is left ("", ".", "..").
-bool M3U_sanitizeName(const char* name, char* out, size_t out_size);
+// Returns the info of a playlist, or NULL when the playlist has no row. The caller frees it.
+PlaylistInfo* M3U_getInfo(int playlist_id);
 
-// Delete a playlist file. Returns 0 on success.
-int M3U_delete(const char* m3u_path);
+// Delete the file and the row of a playlist. Returns false on error.
+bool M3U_delete(int playlist_id);
 
-// Append a track to an .m3u file. Returns 0 on success.
-int M3U_addTrack(const char* m3u_path, const char* track_path, const char* display_name);
+// Appends files to the .m3u file of a playlist. The file then holds only entries that resolve
+// to indexed music files, thus an entry of a file that is gone goes. A file that is not music,
+// or that the playlist holds already, is not added. Returns the number of files added.
+int M3U_addTracks(int playlist_id, const int* file_ids, int file_count);
 
-// Rewrite the .m3u file without the track at the given index. Returns 0 on success.
-int M3U_removeTrack(const char* m3u_path, int index);
+// Rewrite the .m3u file of a playlist without the entries of a file. The file then holds only
+// entries that resolve to indexed music files. Returns false when the playlist has no row, held
+// no entry of the file, or the write failed.
+bool M3U_removeTrack(int playlist_id, int file_id);
 
-// Load tracks from an .m3u file into a PlaylistTrack array.
-// Skips missing files. Sets *count to number loaded. Returns 0 on success.
-int M3U_loadTracks(const char* m3u_path, PlaylistTrack* tracks, int max, int* count);
-
-// Check if a track path is already in the .m3u file.
-bool M3U_containsTrack(const char* m3u_path, const char* track_path);
+// Load the tracks of a playlist into a PlaylistTrack array, at most max. Skips entries that do
+// not resolve to indexed music files. Returns the count of tracks, or -1 when the playlist has
+// no row or its file cannot be read.
+int M3U_loadTracks(int playlist_id, PlaylistTrack* tracks, int max);
 
 #endif
