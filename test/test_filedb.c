@@ -704,6 +704,8 @@ TEST(failed_first_load_shows_an_empty_root) {
     CHECK(browser.is_root);
     CHECK(browser.entries == NULL);
     CHECK_EQ_INT(browser.entry_count, 0);
+    // A refresh reads the requested directory again.
+    CHECK_EQ_INT(browser.dir_id, 999);
     stop_test();
 }
 

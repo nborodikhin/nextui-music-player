@@ -28,8 +28,12 @@ static bool same_entry(const FileEntry* a, const FileEntry* b) {
 static bool build_directory(BrowserContext* ctx, int dir_id, bool preserve_selection) {
     DbReadDirResult* readDirResult = Db_readDir(dir_id);
     if (!readDirResult) {
-        // With no list to keep, show an empty root, thus B leaves the browser.
-        if (!ctx->entries) ctx->is_root = true;
+        // With no list to keep, show an empty root, thus B leaves the browser. Keep the id,
+        // thus a refresh reads the directory again.
+        if (!ctx->entries) {
+            ctx->dir_id = dir_id;
+            ctx->is_root = true;
+        }
         return false;
     }
 

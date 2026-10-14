@@ -228,11 +228,41 @@ TEST(add_removes_entries_that_do_not_resolve) {
     stop_test();
 }
 
+TEST(edit_keeps_audio_entries_that_have_no_row) {
+    CHECK(start_test());
+    M3U_init();
+    int playlist_id = 0;
+    CHECK((playlist_id = M3U_create("mix")) > 0);
+    int file_id = 0;
+    CHECK(add_file("song.mp3", &file_id));
+
+    // The index has no row for a file whose directory it could not read.
+    char playlist[512];
+    char kept[512];
+    CHECK(mkdir_p(TEST_MUSIC_PATH "/New"));
+    snprintf(kept, sizeof(kept), "%s/New/kept.mp3", TEST_MUSIC_PATH);
+    FILE* file = fopen(kept, "wb");
+    CHECK(file);
+    if (file) fclose(file);
+    CHECK(playlist_path("playlists/mix.m3u", playlist, sizeof(playlist)));
+    CHECK(append_entry(playlist, kept, "Kept"));
+
+    CHECK_EQ_INT(M3U_addTracks(playlist_id, &file_id, 1), 1);
+    CHECK_EQ_INT(entry_lines(playlist), 2);
+    CHECK_EQ_INT(listed_count("mix"), 2);
+
+    CHECK(M3U_removeTrack(playlist_id, file_id));
+    CHECK_EQ_INT(entry_lines(playlist), 1);
+    CHECK_EQ_INT(listed_count("mix"), 1);
+    stop_test();
+}
+
 int main(void) {
     RUN(create_and_delete_updates_the_index);
     RUN(load_tracks_resolves_ids_and_drops_missing_and_external_paths);
     RUN(add_and_remove_update_the_index_count);
     RUN(remove_finds_the_file_after_an_entry_that_does_not_resolve);
     RUN(add_removes_entries_that_do_not_resolve);
+    RUN(edit_keeps_audio_entries_that_have_no_row);
     return test_summary();
 }

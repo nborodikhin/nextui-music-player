@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "browser.h"
@@ -178,6 +179,16 @@ bool M3U_delete(int playlist_id) {
 }
 
 // Returns the id of the indexed music file that an entry line of an .m3u file names, or 0.
+// Returns true when an entry with no row names a supported audio file under the Music root on
+// the card. The index can miss such a file when it could not read its directory.
+static bool entry_is_audio_on_card(const char* entry) {
+    char relative_path[1024];
+    if (!get_music_relpath(entry, relative_path, sizeof(relative_path))) return false;
+    struct stat status;
+    return Player_detectFormat(entry) != AUDIO_FORMAT_UNKNOWN &&
+           lstat(entry, &status) == 0 && S_ISREG(status.st_mode);
+}
+
 static int entry_music_file_id(const char* entry) {
     char relative_path[1024];
     if (!get_music_relpath(entry, relative_path, sizeof(relative_path))) return 0;
@@ -228,9 +239,11 @@ static int rewrite_playlist(const char* m3u_path, int remove_file_id, int extra_
             continue;
         }
 
+        // An entry with no row keeps id 0, thus no file id matches it
         int id = entry_music_file_id(line);
         if (id > 0 && id == remove_file_id) (*removed)++;
-        if (id > 0 && id != remove_file_id && count < entry_lines) {
+        bool keep = id > 0 ? id != remove_file_id : entry_is_audio_on_card(line);
+        if (keep && count < entry_lines) {
             if (extinf[0]) fprintf(out, "%s\n", extinf);
             fprintf(out, "%s\n", line);
             ids[count++] = id;
