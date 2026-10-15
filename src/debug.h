@@ -1,6 +1,10 @@
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Debug timing and timed logging. A release build compiles each function to
 // nothing and keeps the logging of NextUI.
 
@@ -43,6 +47,10 @@ static inline DebugTime Debug_msSince(DebugTime time) {
     return 0;
 }
 
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

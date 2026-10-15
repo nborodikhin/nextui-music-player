@@ -1,6 +1,10 @@
 #ifndef __UI_SETTINGS_H__
 #define __UI_SETTINGS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 
 // Settings menu items - stable IDs, matching display order.
@@ -20,5 +24,9 @@
 void render_settings_menu(SDL_Surface* screen, int show_setting,
                           int menu_selected, int menu_scroll);
 
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

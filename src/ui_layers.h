@@ -1,6 +1,10 @@
 #ifndef __UI_LAYERS_H__
 #define __UI_LAYERS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 
 // The GPU layers of the app. The platform composes layers 1 and 2 under the
@@ -21,5 +25,9 @@ void UiLayer_clear(UiLayer layer);
 // Draw `surface` on `layer` at `x`, `y` and record the change for the presenter
 // of the frame. The surface keeps its size.
 void UiLayer_blit(SDL_Surface* surface, int x, int y, UiLayer layer);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

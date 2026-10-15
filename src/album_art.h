@@ -1,6 +1,10 @@
 #ifndef __ALBUM_ART_H__
 #define __ALBUM_ART_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // Forward declaration for SDL_Surface
@@ -30,5 +34,9 @@ long album_art_get_cache_size(void);
 
 // Clear all cached album art from disk
 void album_art_clear_disk_cache(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

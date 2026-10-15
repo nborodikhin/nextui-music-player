@@ -1,6 +1,10 @@
 #ifndef __PLAYLIST_H__
 #define __PLAYLIST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include "player.h"  // For AudioFormat
 
@@ -62,5 +66,9 @@ int Playlist_getCurrentIndex(const PlaylistContext* ctx);
 
 // Check if playlist is valid/active
 bool Playlist_isActive(const PlaylistContext* ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __PLAYLIST_H__

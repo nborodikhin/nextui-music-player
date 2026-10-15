@@ -1,6 +1,10 @@
 #ifndef __PLAYLIST_M3U_H__
 #define __PLAYLIST_M3U_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include "playlist.h"  // For PlaylistTrack
@@ -44,5 +48,9 @@ bool M3U_removeTrack(int playlist_id, int file_id);
 // not resolve to indexed music files. Returns the count of tracks, or -1 when the playlist has
 // no row or its file cannot be read.
 int M3U_loadTracks(int playlist_id, PlaylistTrack* tracks, int max);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

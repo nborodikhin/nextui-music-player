@@ -1,6 +1,10 @@
 #ifndef __UI_PLAYLIST_H__
 #define __UI_PLAYLIST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include "playlist_m3u.h"
 #include "playlist.h"
@@ -24,5 +28,9 @@ bool playlist_list_scroll_needs_render(void);
 
 // Animate playlist list scroll (GPU mode)
 void playlist_list_animate_scroll(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

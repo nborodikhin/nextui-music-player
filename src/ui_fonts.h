@@ -1,6 +1,10 @@
 #ifndef __UI_FONTS_H__
 #define __UI_FONTS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
 
@@ -60,5 +64,9 @@ TTF_Font* Fonts_open(int pixels);
 // Whether this font can draw the UTF-8 character at c. Shaped as a callback:
 // context is the TTF_Font*, and a NULL one answers yes to everything.
 bool Fonts_hasGlyph(void* context, const char* c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

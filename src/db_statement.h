@@ -1,6 +1,10 @@
 #ifndef NEXTUI_MUSIC_PLAYER_DB_STATEMENT_H
 #define NEXTUI_MUSIC_PLAYER_DB_STATEMENT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <sqlite3.h>
@@ -132,5 +136,9 @@ void* DbStatement_calloc(DbStatement* statement, size_t size);
 
 // Returns a copy of a string, or NULL for a NULL string or in case of error.
 char* DbStatement_strdup(DbStatement* statement, const char* value);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

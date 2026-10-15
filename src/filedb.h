@@ -1,6 +1,10 @@
 #ifndef __FILEDB_H__
 #define __FILEDB_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 void FileDb_start(void);
@@ -29,5 +33,9 @@ bool FileDb_waitBlocking(int request_id);
 // Returns true when the file has an index row and is a regular file on the card. Reads the card
 // on the thread of the caller, and does not change the index.
 bool FileDb_fileExists(int file_id);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -70,6 +70,27 @@ LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
 
+# C++ code is C++23 with no exceptions and no RTTI. A device build compiles it
+# with Zig, and Zig also makes the final link: it links libc++ statically and
+# uses no glibc symbol newer than the glibc of the sysroot of the platform. The
+# libraries of the sysroot use the symbols of that version. A desktop build
+# uses the g++ beside its gcc.
+ZIG ?= ../deps/zig/zig
+ifeq ($(PLATFORM), tg5050)
+GLIBC_VERSION = 2.33
+else
+GLIBC_VERSION = 2.28
+endif
+ifeq ($(PLATFORM), desktop)
+CXX = $(CROSS_COMPILE)g++
+else
+CXX = $(ZIG) c++ -target aarch64-linux-gnu.$(GLIBC_VERSION)
+# The container of a build is removed after it, thus the cache of Zig lives in
+# the project. It keeps the libc++ that Zig builds once for each target.
+export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/build/zig-cache
+export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/build/zig-cache
+endif
+
 # macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
 # the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
 # builds use the cross/system `ar` as before.
@@ -97,6 +118,11 @@ $(error No $(BUILD_DIR)/version_string.c - build through ./dev)
 endif
 ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
 $(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
+endif
+ifneq ($(PLATFORM), desktop)
+ifeq (,$(wildcard $(ZIG)))
+$(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
+endif
 endif
 endif
 
@@ -176,7 +202,7 @@ MBEDTLS_OBJS = $(patsubst %.c,$(MBEDTLS_OBJ_DIR)/%.o,$(MBEDTLS_SRC))
 
 LOCAL_SRC = \
     version.c \
-    musicplayer.c player.c filedb.c playlist.c playlist_m3u.c \
+    musicplayer.cpp player.c filedb.c playlist.c playlist_m3u.c \
     db.c db_schema.c db_statement.c debug.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
     downloader.c selfupdate.c selfupdate_install.c display_helper.c \
@@ -225,7 +251,8 @@ EXT_SRC = \
 
 APP_SRC = $(LOCAL_SRC) $(EXT_SRC)
 
-LOCAL_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(LOCAL_SRC))
+LOCAL_OBJS = $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(basename $(LOCAL_SRC))))
+CXX_OBJS   = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(LOCAL_SRC)))
 EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
 APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS) $(BUILD_DIR)/version_string.o
 
@@ -254,6 +281,12 @@ else
 MY_CFLAGS += -DUSE_GLES
 endif
 
+# The C++ flags are the C flags with the C++ language. The headers of the
+# sysroot come after the headers of the C++ library, because each C++ header
+# that wraps a C header includes the C header next on the path.
+MY_CXXFLAGS  = $(patsubst -I$(PREFIX)/include,-idirafter $(PREFIX)/include,$(filter-out -std=gnu99,$(MY_CFLAGS)))
+MY_CXXFLAGS += -std=c++23 -fno-exceptions -fno-rtti
+
 # A release binary carries no symbol table. Strip at the link, thus there is no
 # step after it that can be forgotten.
 ifeq ($(KIND), release)
@@ -263,9 +296,19 @@ MY_LDFLAGS  =
 endif
 MY_LDFLAGS += -L$(BUILD_DIR)
 MY_LDFLAGS += -L$(PREFIX)/lib -L$(PREFIX_LOCAL)/lib
-MY_LDFLAGS += -L$(PREFIX)/lib/$(CROSS_TRIPLE)
 MY_LDFLAGS += -L$(NEXTUI_ROOT)/$(PLATFORM)/libmsettings
-MY_LDFLAGS += -L$(NEXTUI_ROOT)/all/minarch/build/$(PLATFORM)
+# The linker of Zig warns about a library directory that does not exist
+MY_LDFLAGS += $(addprefix -L,$(wildcard $(PREFIX)/lib/$(CROSS_TRIPLE) \
+                                        $(NEXTUI_ROOT)/all/minarch/build/$(PLATFORM)))
+
+# Remove the code that nothing calls. Keep each library that LDLIBS names, as
+# the GNU linker does: the linker of Zig keeps a shared library only where the
+# binary uses one of its symbols, and a library that only the firmware needs
+# must stay loaded. The Apple linker of a macOS desktop build knows neither
+# option.
+ifneq ($(PLATFORM), desktop)
+MY_LDFLAGS += -Wl,--gc-sections -Wl,--no-as-needed
+endif
 
 LDLIBS  = -lopus -lmbedtls
 LDLIBS += -lSDL2_image -lSDL2_ttf
@@ -325,7 +368,7 @@ $(PRODUCT_KIND): FORCE
 
 $(PRODUCT): $(APP_OBJS) $(LIBOPUS) $(LIBMBEDTLS) $(PRODUCT_KIND)
 	@mkdir -p $(@D)
-	$(CC) $(APP_OBJS) $(MY_LDFLAGS) -o $@ $(LDLIBS)
+	$(CXX) $(APP_OBJS) $(MY_LDFLAGS) -o $@ $(LDLIBS)
 
 $(LIBOPUS): $(OPUS_OBJS)
 	$(AR) rcs $@ $^
@@ -340,6 +383,13 @@ $(BUILD_DIR)/version_string.o: $(BUILD_DIR)/version_string.c version.h
 $(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) -c $(MY_CFLAGS) -o $@ $<
+
+# A C++ object writes its dependency file under a name of its own. A file with
+# the C name can remain from a C source of the same name, and it names a source
+# that is gone.
+$(OBJ_DIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) -c $(MY_CXXFLAGS) -MF $(@:.o=.cpp.d) -o $@ $<
 
 # Compile sources that live outside src/ (see EXT_SRC above) into their own
 # per-platform subdirectory instead of $(OBJ_DIR)/%.o, so they can't collapse
@@ -370,6 +420,7 @@ clean:
 	rm -rf opus_obj
 
 # Auto-generated header dependency files
--include $(APP_OBJS:.o=.d)
+-include $(patsubst %.o,%.d,$(filter-out $(CXX_OBJS),$(APP_OBJS)))
+-include $(CXX_OBJS:.o=.cpp.d)
 -include $(OPUS_OBJS:.o=.d)
 -include $(MBEDTLS_OBJS:.o=.d)

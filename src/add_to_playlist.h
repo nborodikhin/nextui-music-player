@@ -1,6 +1,10 @@
 #ifndef __ADD_TO_PLAYLIST_H__
 #define __ADD_TO_PLAYLIST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <SDL2/SDL.h>
 
@@ -19,5 +23,9 @@ int AddToPlaylist_handleInput(void);
 
 // Render the dialog overlay
 void AddToPlaylist_render(SDL_Surface* screen);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

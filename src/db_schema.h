@@ -1,6 +1,10 @@
 #ifndef DB_SCHEMA_H
 #define DB_SCHEMA_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <sqlite3.h>
@@ -21,5 +25,9 @@ typedef struct {
 } DbMigrationStep;
 
 DbMigrationStep* DbSchema_getSteps(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

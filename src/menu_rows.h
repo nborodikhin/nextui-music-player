@@ -1,6 +1,10 @@
 #ifndef __MENU_ROWS_H__
 #define __MENU_ROWS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // The main menu's row map: which rows are on screen right now, and what each
@@ -58,5 +62,9 @@ int MenuRows_getPlayingItemRow(const MenuRows* rows);
 // when they differ - a row that appears, disappears or changes state moves every
 // row below it without moving the cursor.
 bool MenuRows_equal(const MenuRows* a, const MenuRows* b);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

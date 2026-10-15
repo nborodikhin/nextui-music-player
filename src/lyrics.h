@@ -1,6 +1,10 @@
 #ifndef __LYRICS_H__
 #define __LYRICS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // A single timestamped lyric line
@@ -47,5 +51,9 @@ bool Lyrics_isAvailable(void);
 // True where the loaded lyrics have real timestamps (LRC). False for plain text,
 // whose times are estimates, and where no lyrics are loaded.
 bool Lyrics_isSynced(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

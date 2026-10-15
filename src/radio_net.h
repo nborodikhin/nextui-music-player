@@ -1,6 +1,10 @@
 #ifndef __RADIO_NET_H__
 #define __RADIO_NET_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -19,5 +23,9 @@ int radio_net_fetch(const char* url, uint8_t* buffer, int buffer_size,
 // Uses radio_net's TLS infrastructure (supports TLS 1.3)
 // Returns 0 on success (resolved_url filled), -1 on error
 int radio_net_resolve_url(const char* url, char* resolved_url, int resolved_url_size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef __SPECTRUM_H__
 #define __SPECTRUM_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include "ui_layers.h"
@@ -67,5 +71,9 @@ void SpectrumCeiling_tick(SpectrumCeiling* ceiling, bool sound_is_playing, uint3
 
 // Current value of the ceiling, 0..1. At 0, spectrogram should not be drawn.
 float SpectrumCeiling_value(const SpectrumCeiling* ceiling);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

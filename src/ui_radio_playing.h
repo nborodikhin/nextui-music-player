@@ -1,6 +1,10 @@
 #ifndef __UI_RADIO_PLAYING_H__
 #define __UI_RADIO_PLAYING_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -37,5 +41,9 @@ void RadioPlaying_invalidate(void);
 // Clears the layers of the screen and forgets where their elements go. Call on
 // the way out of the screen, and before the screen goes dark.
 void RadioPlaying_leave(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

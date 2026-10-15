@@ -1,6 +1,10 @@
 #ifndef __HELP_SCREEN_H__
 #define __HELP_SCREEN_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Identifies which screen the controls-help dialog is being opened from.
 //
 // Every module passes one of these to ModuleCommon_handleGlobalInput(), which
@@ -51,5 +55,9 @@ typedef enum {
     HELP_SETTINGS,
     HELP_ABOUT,
 } HelpId;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

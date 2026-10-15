@@ -1,6 +1,10 @@
 #ifndef __UI_ICONS_H__
 #define __UI_ICONS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "player.h"  // For AudioFormat
@@ -29,5 +33,9 @@ SDL_Surface* Icons_getEmpty(ThemeRole role, bool selected);
 
 // Check if icons are loaded
 bool Icons_isLoaded(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __UI_ICONS_H__

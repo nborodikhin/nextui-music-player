@@ -1,6 +1,10 @@
 #ifndef __UI_RADIO_H__
 #define __UI_RADIO_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "radio.h"
@@ -36,5 +40,9 @@ void radio_list_animate_scroll(void);
 
 // Forget the title that moves. Call this on the way out of a list.
 void radio_list_clear_scroll(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

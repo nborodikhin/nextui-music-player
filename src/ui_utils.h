@@ -1,6 +1,10 @@
 #ifndef __UI_UTILS_H__
 #define __UI_UTILS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include "defines.h"  // Brings in SDL2 via platform.h -> sdl.h
@@ -367,5 +371,9 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h);
 // y_button_label: label for Y button (e.g., "NEW", "MANAGE"), or NULL for no Y button
 void render_empty_state(SDL_Surface* screen, const char* message,
                         const char* subtitle, const char* y_button_label);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef __UTF8_H__
 #define __UTF8_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -41,5 +45,9 @@ size_t UTF8_copy(char* dst, size_t dst_size, const char* src);
  * that many bytes removes one character, marks included.
  */
 size_t UTF8_lastCharBytes(const char* text);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef __FILE_UTILS_H__
 #define __FILE_UTILS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -132,5 +136,9 @@ int extract_zip(const char* zip_path, const char* dest_dir,
  * @return true if found, with the full path written to out
  */
 bool find_file(const char* root, const char* name, char* out, size_t out_size);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

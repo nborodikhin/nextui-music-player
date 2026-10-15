@@ -1,6 +1,10 @@
 #ifndef __SETTINGS_H__
 #define __SETTINGS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -55,5 +59,9 @@ void  Settings_setEnum(const EnumSetting* key, int value);
 
 void Settings_init(void);
 void Settings_quit(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

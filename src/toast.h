@@ -1,8 +1,13 @@
 #ifndef __TOAST_H__
 #define __TOAST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
+#include "defines.h"
 #include "api.h"
 
 #include "display_helper.h"
@@ -45,5 +50,9 @@ void Toast_tick(void);
 
 // Should be called when screen changes, used for managing screen-bound toasts.
 void Toast_screenChanged(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

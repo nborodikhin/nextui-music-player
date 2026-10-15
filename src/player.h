@@ -1,6 +1,10 @@
 #ifndef __PLAYER_H__
 #define __PLAYER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
@@ -238,5 +242,9 @@ USBHIDEvent Player_pollUSBHID(void);
 
 // Cleanup USB HID monitoring
 void Player_quitUSBHID(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

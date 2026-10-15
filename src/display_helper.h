@@ -1,6 +1,10 @@
 #ifndef __DISPLAY_HELPER_H__
 #define __DISPLAY_HELPER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 struct SDL_Surface;
@@ -40,5 +44,9 @@ bool DisplayHelper_outputChanged(void);
 // Move the display to the output that is connected now. The surface is then new
 // and empty, and can have a different size.
 void DisplayHelper_moveToOutput(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

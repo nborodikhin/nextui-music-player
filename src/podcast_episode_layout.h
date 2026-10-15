@@ -1,6 +1,10 @@
 #ifndef __PODCAST_EPISODE_LAYOUT_H__
 #define __PODCAST_EPISODE_LAYOUT_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // The geometry of the episode list: the feed summary and the episode rows are one
 // stream of content that scrolls by the pixel through a viewport. This holds no
 // font and no surface, thus it runs on the host. The renderer measures the
@@ -21,5 +25,9 @@ typedef struct {
 PodcastEpisodeLayout PodcastEpisodeLayout_compute(int summary_h, int gap, int viewport_h,
                                                   int row_h, int count, int selected,
                                                   int scroll);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

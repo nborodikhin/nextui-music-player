@@ -1,6 +1,10 @@
 #ifndef __TOAST_STATE_H__
 #define __TOAST_STATE_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -34,5 +38,9 @@ bool ToastState_dismiss(ToastState* state, ToastToken token, uint32_t now);
 
 bool ToastState_tick(ToastState* state, uint32_t now);
 bool ToastState_screenChanged(ToastState* state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

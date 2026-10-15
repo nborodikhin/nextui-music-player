@@ -1,6 +1,10 @@
 #ifndef __TEST_CONTROL_H__
 #define __TEST_CONTROL_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // External control channel. It reads button commands from a file, a FIFO, a
@@ -32,6 +36,10 @@ static inline bool TestControl_init(const char* value) { (void)value; return fal
 static inline void TestControl_tick(void) {}
 static inline void TestControl_quit(void) {}
 
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

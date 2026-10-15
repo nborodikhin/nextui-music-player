@@ -96,15 +96,44 @@ TESTS   += $(BIN)/test_version
 # TEST_TEMP_DIR, as the test of file_utils.c does.
 TESTS   += $(BIN)/test_selfupdate_install
 
-.PHONY: all build check run clean
+.PHONY: all build check headers run clean
 all: run
 
 # Compile every test binary and run none. An IDE indexes the tests through it.
 build: $(TESTS)
 
-check:
+check: headers
 	./check_color_calls.py
 	./check_present_calls.py
+
+# Each header of the app compiles alone, as C and as C++, and has the extern "C"
+# block that gives its functions C linkage in C++ code. The shim that the build
+# forces into NextUI's config.c is not an interface, thus it is not checked. A
+# check runs again only after a change of a file that the header includes.
+HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h))
+HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS))
+HEADER_INC    = $(INC) $(DESKTOP_INC) \
+                -I$(SRC)/audio -I$(SRC)/include -I$(SRC)/include/mbedtls_lib \
+                -I$(SRC)/include/yxml -I$(SRC)/include/libogg/include \
+                -I$(SRC)/include/libopus/include -I$(SRC)/include/opusfile/include \
+                -I../NextUI/workspace/all/minarch/libretro-common/include
+
+# The checks are independent and slow, thus they run in parallel.
+headers:
+	@$(MAKE) --no-print-directory -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu) header-stamps
+
+.PHONY: header-stamps
+header-stamps: $(HEADER_STAMPS)
+
+$(BIN)/headers/%.ok: $(SRC)/%.h
+	@mkdir -p $(@D)
+	@grep -q 'extern "C"' $< || { echo '$<: no extern "C" block'; exit 1; }
+	@echo '#include "$(abspath $<)"' | $(CC) -x c -std=gnu99 -fsyntax-only $(HEADER_INC) -
+	@echo '#include "$(abspath $<)"' | $(CXX) -x c++ -std=c++23 -fsyntax-only \
+	  -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) -
+	@touch $@
+
+-include $(HEADER_STAMPS:.ok=.d)
 
 $(BIN):
 	mkdir -p $(BIN)

@@ -1,6 +1,10 @@
 #ifndef __MODULE_PLAYER_H__
 #define __MODULE_PLAYER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -41,5 +45,9 @@ void PlayerModule_prevTrack(void);
 
 // Background tick: handle track advancement and resume saving while in menu
 void PlayerModule_backgroundTick(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

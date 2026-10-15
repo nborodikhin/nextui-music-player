@@ -1,6 +1,10 @@
 #ifndef __UI_MAIN_H__
 #define __UI_MAIN_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <SDL2/SDL.h>
@@ -23,5 +27,9 @@ void render_screen_off_hint(SDL_Surface* screen);
 
 // Check if Resume scroll needs continuous redraw (software scroll mode)
 bool menu_needs_scroll_redraw(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

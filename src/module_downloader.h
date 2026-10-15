@@ -1,6 +1,10 @@
 #ifndef __MODULE_DOWNLOADER_H__
 #define __MODULE_DOWNLOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 
 #include "display_helper.h"
@@ -19,5 +23,9 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display);
 // Download and install yt-dlp, or update an installed one, showing progress.
 // Blocks until the operation finishes or the user cancels with B.
 YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* show_setting);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

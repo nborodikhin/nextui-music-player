@@ -1,6 +1,10 @@
 #ifndef __KEYBOARD_MAP_H__
 #define __KEYBOARD_MAP_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 #include "utf8.h"
@@ -87,5 +91,9 @@ int KeyboardMap_charCount(const KeyboardLayout* layout, const Key* key);
 // Empty string if not found or not applicable.
 const char* KeyboardMap_char(const KeyboardLayout* layout, const Key* key,
                              bool shifted, int index);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

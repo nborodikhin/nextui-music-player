@@ -1,6 +1,10 @@
 #ifndef __UI_MUSIC_PLAYING_H__
 #define __UI_MUSIC_PLAYING_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "browser.h"
@@ -45,5 +49,9 @@ void MusicPlaying_drawLyricRow(SDL_Surface* screen, TTF_Font* font, const char* 
 // Returns the count of lyric rows that fit in `height` pixels with rows `row_h`
 // high and `gap` pixels between two rows.
 int MusicPlaying_lyricRows(int height, int row_h, int gap);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

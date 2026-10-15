@@ -156,6 +156,12 @@ The player compiles against the dependencies specified in `deps.json`.
 `fetch` is a step of `build`, so the first build on a fresh clone will pull
 all dependencies automatically.
 
+`deps.json` also pins Zig, which compiles the C++ code of a device build and
+links the binary. `fetch` downloads the Zig archive for the CPU of the host into
+`deps/zig/`. It checks the sha256 of the archive, and its minisign signature
+where `minisign` is installed. A desktop build compiles the C++ code with the
+`g++` beside its `gcc`.
+
 A dependency can name a directory of patches, which `fetch` applies to the
 checkout. `deps/patches/nextui/` holds them for the NextUI trees: each one is a
 pull request that is open upstream, and it goes away when the pull request is
@@ -436,7 +442,8 @@ nextui-music-player/         # This project
 │   ├── ffmpeg               # media convertor, required by yt-dlp (installed on demand)
 │   └── keyboard             # On-screen keyboard
 ├── deps/
-│   └── patches/             # Patches that ./dev deps fetch applies to a checkout
+│   ├── patches/             # Patches that ./dev deps fetch applies to a checkout
+│   └── zig/                 # Zig, which ./dev deps fetch downloads (not in git)
 ├── res/                     # Resources (fonts, images, CA bundle)
 ├── stations/                # Curated radio stations
 ├── state/                   # Runtime state files

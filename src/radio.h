@@ -1,6 +1,10 @@
 #ifndef __RADIO_H__
 #define __RADIO_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -121,5 +125,9 @@ struct SDL_Surface* Radio_getAlbumArt(void);
 
 // Check if user has custom stations (vs using defaults)
 bool Radio_hasUserStations(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
