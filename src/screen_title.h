@@ -1,6 +1,10 @@
 #ifndef __SCREEN_TITLE_H__
 #define __SCREEN_TITLE_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -78,5 +82,9 @@ int ScreenTitle_offset(ScreenTitle* title, uint32_t now);
 // leave the surface, and a title that stopped must go on it. The marquee itself
 // is on a GPU layer, thus it asks for no other frame.
 bool ScreenTitle_needsFrame(const ScreenTitle* title, uint32_t now, bool shown);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

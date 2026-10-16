@@ -1,6 +1,10 @@
 #ifndef HTTP_DOWNLOAD_H
 #define HTTP_DOWNLOAD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // Download timeout in seconds
@@ -29,5 +33,9 @@
  */
 int http_download_file(const char* url, const char* filepath,
                        volatile int* progress_pct, volatile bool* should_stop);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // HTTP_DOWNLOAD_H

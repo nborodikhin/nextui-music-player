@@ -1,6 +1,10 @@
 #ifndef __SELFUPDATE_H__
 #define __SELFUPDATE_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // GitHub repository (format: "owner/repo")
@@ -106,5 +110,9 @@ SelfUpdateState SelfUpdate_getState(void);
 // pak_dir does not carry that directory, and deletes the rest of its contents.
 // pak_dir is the unpacked pak of the update. install_dir is the installed app.
 void SelfUpdate_removeObsoleteFiles(const char* pak_dir, const char* install_dir);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

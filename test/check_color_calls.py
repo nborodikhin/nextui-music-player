@@ -239,7 +239,9 @@ def main(argv):
     if not check_fixtures():
         return 1
 
-    paths = sorted(SOURCE_DIR.glob("*.c")) + sorted(SOURCE_DIR.glob("*.h"))
+    paths = sorted(
+        path for pattern in ("*.c", "*.cpp", "*.h", "*.hpp") for path in SOURCE_DIR.glob(pattern)
+    )
     if not scan_paths(paths):
         print("Fixed colors need a lint suppression mark.", file=sys.stderr)
         return 1

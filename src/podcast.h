@@ -1,6 +1,10 @@
 #ifndef __PODCAST_H__
 #define __PODCAST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -359,5 +363,9 @@ int podcast_rss_parse(const char* xml_data, int xml_len, PodcastFeed* feed);
 int podcast_rss_parse_with_episodes(const char* xml_data, int xml_len, PodcastFeed* feed,
                                      PodcastEpisode* episodes_out, int max_episodes,
                                      int* episode_count_out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __PODCAST_H__

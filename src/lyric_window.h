@@ -1,6 +1,10 @@
 #ifndef __LYRIC_WINDOW_H__
 #define __LYRIC_WINDOW_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "lyrics.h"
 
 // The timing and the layout of the lyric window. Pure logic: the lyric model
@@ -23,5 +27,9 @@ typedef struct {
 // near the end. Pass -1 in `current` before the first timestamp: the window
 // starts at the first lyric and no row is current.
 LyricWindow LyricWindow_layout(int line_count, int current, int rows);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

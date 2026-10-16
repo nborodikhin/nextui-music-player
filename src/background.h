@@ -1,6 +1,10 @@
 #ifndef __BACKGROUND_H__
 #define __BACKGROUND_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // Background player types
@@ -25,5 +29,9 @@ bool Background_isPlaying(void);
 
 // Call from menu/non-player modules for track advancement and resume saving
 void Background_tick(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef __UI_MUSIC_H__
 #define __UI_MUSIC_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "browser.h"
@@ -21,5 +25,9 @@ bool browser_scroll_needs_render(void);
 
 // Animate browser scroll only (GPU mode, no screen redraw needed)
 void browser_animate_scroll(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,6 +1,10 @@
 #ifndef __FRAME_STATE_H__
 #define __FRAME_STATE_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // What one frame changed since the last presentation. The record is pure logic:
@@ -23,5 +27,9 @@ void FrameState_markLayerDrawn(FrameState* state);
 // Returns what changed since the last take, and clears the record. A frame
 // that does not present keeps its record for the frame that does.
 FrameChange FrameState_take(FrameState* state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

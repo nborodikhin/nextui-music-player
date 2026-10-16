@@ -1,18 +1,21 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <unistd.h>
-#include <stdbool.h>
-#include <signal.h>
-#include <time.h>
-#include <msettings.h>
 
-#include "psa/crypto.h"
+// The NextUI headers declare C functions and have no guard of their own
+extern "C" {
+#include <msettings.h>
 #include "defines.h"
 #include "api.h"
-#include "debug.h"
 #include "utils.h"
 #include "config.h"
+}
+
+#include "psa/crypto.h"
+#include "debug.h"
 #include "player.h"
 #include "selfupdate.h"
 
@@ -147,19 +150,21 @@ int main(int argc, char* argv[]) {
         SDL_Surface* title = TTF_RenderUTF8_Blended(
             Fonts_getTitle(), "Music Player", Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (title) {
-            SDL_BlitSurface(title, NULL, screen, &(SDL_Rect){
-                (screen->w - title->w) / 2,
-                screen->h / 2 - title->h
-            });
+            SDL_Rect at = {
+                .x = (screen->w - title->w) / 2,
+                .y = screen->h / 2 - title->h,
+            };
+            SDL_BlitSurface(title, nullptr, screen, &at);
             SDL_FreeSurface(title);
         }
         SDL_Surface* loading = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), "Loading...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (loading) {
-            SDL_BlitSurface(loading, NULL, screen, &(SDL_Rect){
-                (screen->w - loading->w) / 2,
-                screen->h / 2 + SCALE1(4)
-            });
+            SDL_Rect at = {
+                .x = (screen->w - loading->w) / 2,
+                .y = screen->h / 2 + SCALE1(4),
+            };
+            SDL_BlitSurface(loading, nullptr, screen, &at);
             SDL_FreeSurface(loading);
         }
         // The init that follows blocks, thus the splash presents its frame here
@@ -189,7 +194,7 @@ int main(int argc, char* argv[]) {
     Settings_init();
 
     // Seed random number generator for shuffle
-    srand((unsigned int)time(NULL));
+    srand((unsigned int)time(nullptr));
 
 	// Mute hardware before opening audio device to prevent amplifier pop on TG5050
 	SetRawVolume(0);

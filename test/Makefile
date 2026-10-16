@@ -52,6 +52,7 @@
 
 CC      ?= cc
 CFLAGS  ?= -std=gnu99 -O0 -g -Wall -Wextra
+CXXFLAGS ?= -std=c++23 -O0 -g -Wall -Wextra -fno-exceptions -fno-rtti
 INC      = -I../src $(shell pkg-config --cflags sdl2)
 
 SRC      = ../src
@@ -96,15 +97,69 @@ TESTS   += $(BIN)/test_version
 # TEST_TEMP_DIR, as the test of file_utils.c does.
 TESTS   += $(BIN)/test_selfupdate_install
 
-.PHONY: all build check run clean
+.PHONY: all build check headers run clean
 all: run
 
 # Compile every test binary and run none. An IDE indexes the tests through it.
 build: $(TESTS)
 
-check:
+check: headers
 	./check_color_calls.py
 	./check_present_calls.py
+
+# Each .h of the app compiles alone, as C and as C++, and has the extern "C"
+# block that gives its functions C linkage in C++ code. A .hpp holds C++ only:
+# it compiles alone as C++ and has no extern "C" block. The shim that the build
+# forces into NextUI's config.c is not an interface, thus it is not checked. A
+# check runs again only after a change of a file that the header includes.
+HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h))
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp)
+HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
+                $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
+HEADER_INC    = $(INC) $(DESKTOP_INC) \
+                -I$(SRC)/audio -I$(SRC)/include -I$(SRC)/include/mbedtls_lib \
+                -I$(SRC)/include/yxml -I$(SRC)/include/libogg/include \
+                -I$(SRC)/include/libopus/include -I$(SRC)/include/opusfile/include \
+                -I../NextUI/workspace/all/minarch/libretro-common/include
+
+# The checks are independent and slow, thus they run in parallel.
+headers:
+	@$(MAKE) --no-print-directory -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu) header-stamps
+
+.PHONY: header-stamps
+header-stamps: $(HEADER_STAMPS)
+
+$(BIN)/headers/%.ok: $(SRC)/%.h
+	@mkdir -p $(@D)
+	@grep -q 'extern "C"' $< || { echo '$<: no extern "C" block'; exit 1; }
+	@echo '#include "$(abspath $<)"' | $(CC) -x c -std=gnu99 -fsyntax-only $(HEADER_INC) -
+	@echo '#include "$(abspath $<)"' | $(CXX) -x c++ -std=c++23 -fsyntax-only \
+	  -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) -
+	@touch $@
+
+$(BIN)/headers/%.hpp.ok: $(SRC)/%.hpp
+	@mkdir -p $(@D)
+	@! grep -q 'extern "C"' $< || { echo '$<: extern "C" block in a C++ header'; exit 1; }
+	@echo '#include "$(abspath $<)"' | $(CXX) -x c++ $(CXXFLAGS) -fsyntax-only \
+	  -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) -
+	@touch $@
+
+-include $(HEADER_STAMPS:.ok=.d)
+
+# A C++ test links the C sources that it tests as objects compiled as C. Give it
+# a rule of its own that links with $(CXX), as each C test has a rule of its own:
+#
+#   $(BIN)/test_x: $(BIN)/obj/test_x.o $(BIN)/obj/x.o
+#   	$(CXX) $(CXXFLAGS) -o $@ $^
+$(BIN)/obj/%.o: $(SRC)/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INC) -MMD -MP -c -o $@ $<
+
+$(BIN)/obj/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INC) -MMD -MP -c -o $@ $<
+
+-include $(wildcard $(BIN)/obj/*.d)
 
 $(BIN):
 	mkdir -p $(BIN)

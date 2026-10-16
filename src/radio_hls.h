@@ -1,6 +1,10 @@
 #ifndef __RADIO_HLS_H__
 #define __RADIO_HLS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -57,5 +61,9 @@ int radio_hls_parse_id3_metadata(const uint8_t* data, int len,
 int radio_hls_demux_ts(const uint8_t* ts_data, int ts_len,
                        uint8_t* aac_out, int aac_out_size,
                        int* audio_pid, bool* pid_detected);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

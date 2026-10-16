@@ -1,6 +1,10 @@
 #ifndef WGET_FETCH_H
 #define WGET_FETCH_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -85,5 +89,9 @@ typedef bool (*WgetProgressFn)(long downloaded, int speed_bps, void* ctx);
  */
 int wget_download_file(const char* url, const char* filepath,
                        WgetProgressFn on_progress, void* ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // WGET_FETCH_H

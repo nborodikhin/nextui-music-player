@@ -1,6 +1,10 @@
 #ifndef __RADIO_CURATED_H__
 #define __RADIO_CURATED_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "radio.h"  // For CuratedCountry, CuratedStation types
 
 // Initialize curated stations (load from JSON files)
@@ -21,5 +25,9 @@ int radio_curated_get_station_count(const char* country_code);
 // Get stations for a specific country
 // Returns pointer to first station and sets count
 const CuratedStation* radio_curated_get_stations(const char* country_code, int* count);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

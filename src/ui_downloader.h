@@ -1,6 +1,10 @@
 #ifndef __UI_DOWNLOADER_H__
 #define __UI_DOWNLOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -49,5 +53,9 @@ void downloader_queue_clear_scroll(void);
 
 // Clear downloader results scroll state (call when leaving results screen)
 void downloader_results_clear_scroll(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

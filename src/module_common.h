@@ -1,6 +1,10 @@
 #ifndef __MODULE_COMMON_H__
 #define __MODULE_COMMON_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "help_screen.h"
@@ -120,5 +124,9 @@ void ModuleCommon_markLayerDrawn(void);
 // No change synchronizes to the frame rate and presents nothing. No painter
 // presents by itself.
 void ModuleCommon_frameEnd(SDL_Surface* screen);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

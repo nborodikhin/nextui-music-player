@@ -1,6 +1,10 @@
 #ifndef __UI_THEME_H__
 #define __UI_THEME_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -72,5 +76,9 @@ SDL_Color Theme_mix(SDL_Color from, SDL_Color to, int percent);
 // today does not change.
 SDL_Color Theme_findLegibleHue(int hue, double min_contrast,
                               SDL_Color background);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

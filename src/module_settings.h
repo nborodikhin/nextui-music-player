@@ -1,6 +1,10 @@
 #ifndef __MODULE_SETTINGS_H__
 #define __MODULE_SETTINGS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 
 #include "display_helper.h"
@@ -23,5 +27,9 @@ void SettingsModule_cycleSoftLimiterPrev(void);
 const char* SettingsModule_getSoftLimiterDisplayStr(void);
 
 const char* SettingsModule_getUpdateChannelDisplayStr(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

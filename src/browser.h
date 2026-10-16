@@ -1,6 +1,10 @@
 #ifndef __BROWSER_H__
 #define __BROWSER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdbool.h>
 #include "defines.h"
@@ -43,5 +47,9 @@ bool Browser_hasUpdate(const BrowserContext* ctx);
 // Builds the list of the current directory again, and keeps the cursor on the same row.
 // Returns false when the build failed; ctx then keeps the previous list.
 bool Browser_refresh(BrowserContext* ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

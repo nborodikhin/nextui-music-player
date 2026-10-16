@@ -1,6 +1,10 @@
 #ifndef __SEEK_SCAN_H__
 #define __SEEK_SCAN_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -59,5 +63,9 @@ void SeekScan_cancel(SeekScan* scan);
 
 // The one scan of the app. A playing screen feeds it, and the screen draws from it.
 SeekScan* SeekScan_shared(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

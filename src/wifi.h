@@ -1,6 +1,10 @@
 #ifndef __WIFI_H__
 #define __WIFI_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -12,5 +16,9 @@ bool Wifi_ensureConnected(SDL_Surface* scr, int show_setting);
 
 // Check if WiFi is currently connected
 bool Wifi_isConnected(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

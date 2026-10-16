@@ -1,6 +1,10 @@
 #ifndef __MODULE_PODCAST_H__
 #define __MODULE_PODCAST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -16,5 +20,9 @@ bool PodcastModule_isActive(void);
 
 // Background tick: detect episode end and save progress while in menu
 void PodcastModule_backgroundTick(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

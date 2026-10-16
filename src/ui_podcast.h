@@ -1,6 +1,10 @@
 #ifndef __UI_PODCAST_H__
 #define __UI_PODCAST_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -76,5 +80,9 @@ SDL_Surface* Podcast_surfaceToArgb8888(SDL_Surface* src);
 // Formats `seconds` as "MM:SS", or as "H:MM:SS" from one hour. A duration of
 // zero or less gives "--:--".
 void Podcast_formatDuration(char* buf, int seconds);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

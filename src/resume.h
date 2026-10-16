@@ -1,6 +1,10 @@
 #ifndef __RESUME_H__
 #define __RESUME_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // Resume source types
@@ -43,5 +47,9 @@ void Resume_updatePosition(int position_ms);
 
 // Clear resume state (when playlist ends naturally)
 void Resume_clear(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

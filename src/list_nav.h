@@ -1,6 +1,10 @@
 #ifndef __LIST_NAV_H__
 #define __LIST_NAV_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 // Cursor state for a scrollable list or menu: the shared half of the
@@ -73,5 +77,9 @@ void ListNav_adjustScroll(int selected, int* scroll, int items_per_page);
 // Non-positive items_per_page is treated as 1.
 bool ListNav_pageUp(int* selected, int* scroll, int total_count, int items_per_page);
 bool ListNav_pageDown(int* selected, int* scroll, int total_count, int items_per_page);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

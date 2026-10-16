@@ -1,6 +1,10 @@
 #ifndef __KEYBOARD_H__
 #define __KEYBOARD_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 
 // Longest text the keyboard takes, see Keyboard_open
@@ -20,5 +24,9 @@ void Keyboard_init(void);
 // Note: keyboard runs its own frame loop, so the caller's frame is over when it
 // returns. Callers must re-read the SDL_Surface from DisplayContext.
 char* Keyboard_open(const char* prompt, size_t max_bytes);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __KEYBOARD_H__

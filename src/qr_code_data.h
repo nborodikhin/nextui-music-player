@@ -1,6 +1,10 @@
 #ifndef QR_CODE_DATA_H
 #define QR_CODE_DATA_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Embedded QR code PNG for https://github.com/nborodikhin/nextui-music-player
 // Generated from qr-code.png (259x259 pixels)
 static const unsigned char qr_code_png[] = {
@@ -107,5 +111,9 @@ static const unsigned char qr_code_png[] = {
   0xae, 0x42, 0x60, 0x82
 };
 static const unsigned int qr_code_png_len = 1204;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // QR_CODE_DATA_H

@@ -1,6 +1,10 @@
 #ifndef __UI_PODCAST_PLAYING_H__
 #define __UI_PODCAST_PLAYING_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 
@@ -34,5 +38,9 @@ void PodcastPlaying_invalidate(void);
 // the artwork. Call on the way out of the screen, and before the screen goes
 // dark.
 void PodcastPlaying_leave(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

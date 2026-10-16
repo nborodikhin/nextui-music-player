@@ -1,6 +1,10 @@
 #ifndef __UI_KEYBOARD_H__
 #define __UI_KEYBOARD_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 #include <SDL2/SDL.h>
@@ -36,5 +40,9 @@ bool UIKeyboard_stateEquals(const KeyboardUiState* a, const KeyboardUiState* b);
 
 // Draw the keyboard screen.
 void UIKeyboard_render(SDL_Surface* screen, const KeyboardUiState* state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

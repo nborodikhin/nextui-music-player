@@ -1,6 +1,10 @@
 #ifndef __DOWNLOADER_H__
 #define __DOWNLOADER_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -190,5 +194,9 @@ void Downloader_loadQueue(void);
 
 // Get download directory path
 const char* Downloader_getDownloadPath(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -34,3 +34,6 @@ bin/*.new
 state/yt-dlp_version.txt
 state/youtube_queue.txt
 bin/wget
+# Zig, fetched by ./dev deps fetch
+/deps/zig/
+/deps/.zig-*/

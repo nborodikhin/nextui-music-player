@@ -18,6 +18,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.parse
@@ -262,17 +263,20 @@ def short(commit):
     return commit[:8]
 
 
-def load_dependencies():
-    """Read the build dependencies, each pinned to a tag, branch, or commit."""
+def read_deps_manifest():
     if not DEPS_MANIFEST.exists():
         raise DevError("Missing " + DEPS_MANIFEST.name)
 
     try:
         with DEPS_MANIFEST.open(encoding="utf-8") as source:
-            manifest = json.load(source)
+            return json.load(source)
     except (OSError, json.JSONDecodeError) as error:
         raise DevError("{}: {}".format(DEPS_MANIFEST.name, error))
 
+
+def load_dependencies():
+    """Read the build dependencies, each pinned to a tag, branch, or commit."""
+    manifest = read_deps_manifest()
     dependencies = []
     for index, entry in enumerate(manifest.get("dependencies", [])):
         missing = [
@@ -887,11 +891,165 @@ def check_dependencies(strict=False):
     return CHECKED_DEPENDENCIES
 
 
+ZIG_NAME = "zig"
+
+# The Zig archive for each CPU name that the host can report. The toolchain
+# images run on the CPU of the host, thus the Linux build for that CPU runs in
+# each image, on Linux and on macOS.
+ZIG_HOST_ARCHIVES = {
+    "x86_64": "x86_64-linux",
+    "amd64": "x86_64-linux",
+    "aarch64": "aarch64-linux",
+    "arm64": "aarch64-linux",
+}
+
+
+@dataclass(frozen=True)
+class Zig:
+    """The Zig release that compiles and links the C++ code of a device build.
+
+    The host fetches it once into `path`, and each toolchain image runs it from
+    the mount of the project. `marker` holds the sha256 of the archive that the
+    tree came from.
+    """
+
+    version: str
+    path: str
+    archive: str
+    url: str
+    sha256: str
+    minisign_key: str
+
+    @property
+    def root(self):
+        return ROOT / self.path
+
+    @property
+    def marker(self):
+        return self.root / ".music-player-zig"
+
+
+def load_zig():
+    """Read the Zig pin for the CPU of the host."""
+    entry = read_deps_manifest().get(ZIG_NAME)
+    if not entry:
+        raise DevError("{} pins no {}".format(DEPS_MANIFEST.name, ZIG_NAME))
+
+    machine = os.uname().machine
+    archive = ZIG_HOST_ARCHIVES.get(machine.lower())
+    if not archive:
+        raise DevError("No Zig build for a host CPU of " + machine)
+    pinned = entry.get("archives", {}).get(archive)
+    if not pinned:
+        raise DevError(
+            "{}: {} pins no {} archive".format(DEPS_MANIFEST.name, ZIG_NAME, archive)
+        )
+    return Zig(
+        version      = entry["version"],
+        path         = entry["path"],
+        archive      = archive,
+        url          = pinned["url"],
+        sha256       = pinned["sha256"],
+        minisign_key = entry["minisign_key"],
+    )
+
+
+def zig_installed(zig):
+    if not (zig.root / "zig").is_file() or not zig.marker.is_file():
+        return False
+    return zig.marker.read_text(encoding="utf-8").strip() == zig.sha256
+
+
+def describe_zig(zig):
+    state = "pinned" if zig_installed(zig) else "missing"
+    return "{} at {}/ - {}, {} ({})".format(
+        ZIG_NAME, zig.path, state, zig.version, zig.archive
+    )
+
+
+def download(url, target):
+    with urllib.request.urlopen(url, timeout=60) as response, target.open("wb") as out:
+        shutil.copyfileobj(response, out)
+
+
+def verify_zig_signature(zig, archive):
+    """Check the minisign signature of the archive, where minisign is installed.
+    The sha256 in the manifest is the check that always runs."""
+    if not shutil.which("minisign"):
+        print(
+            "minisign is not installed; the sha256 in {} is the only check".format(
+                DEPS_MANIFEST.name
+            ),
+            flush=True,
+        )
+        return
+    signature = archive.with_name(archive.name + ".minisig")
+    download(zig.url + ".minisig", signature)
+    result = run_command(
+        ["minisign", "-Vqm", str(archive), "-x", str(signature), "-P", zig.minisign_key],
+        capture=True,
+        check=False,
+    )
+    if result.returncode:
+        raise DevError(
+            "{}: the minisign signature does not match the key in {}".format(
+                archive.name, DEPS_MANIFEST.name
+            )
+        )
+
+
+def fetch_zig():
+    """Make the pinned Zig exist, without touching the network when it already
+    does. Returns True when it fetched an archive."""
+    zig = load_zig()
+    if zig_installed(zig):
+        return False
+
+    print("Fetching Zig {} ({}) into {}".format(zig.version, zig.archive, zig.path),
+          flush=True)
+    zig.root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=zig.root.parent, prefix=".zig-") as work:
+        work = Path(work)
+        archive = work / PurePosixPath(urllib.parse.urlparse(zig.url).path).name
+        download(zig.url, archive)
+        digest = sha256_of(archive)
+        if digest != zig.sha256:
+            raise DevError(
+                "{}: sha256 is {}, {} pins {}".format(
+                    archive.name, digest, DEPS_MANIFEST.name, zig.sha256
+                )
+            )
+        verify_zig_signature(zig, archive)
+
+        tree = work / "tree"
+        with tarfile.open(archive) as source:
+            if hasattr(tarfile, "data_filter"):
+                source.extractall(tree, filter="data")
+            else:
+                source.extractall(tree)
+        top = list(tree.iterdir())
+        if len(top) != 1 or not (top[0] / "zig").is_file():
+            raise DevError(archive.name + " does not hold one Zig tree")
+
+        if zig.root.exists():
+            shutil.rmtree(zig.root)
+        top[0].rename(zig.root)
+    zig.marker.write_text(zig.sha256 + "\n", encoding="utf-8")
+    return True
+
+
 def selected_dependencies(name):
+    """The git checkouts that a deps command names. Zig is not one of them."""
+    if name == ZIG_NAME:
+        return []
     dependencies = load_dependencies()
     if name in (None, "all"):
         return dependencies
     return [select_dependency(dependencies, name)]
+
+
+def zig_selected(name):
+    return name in (None, "all", ZIG_NAME)
 
 
 def command_deps_list(args):
@@ -902,10 +1060,14 @@ def command_deps_list(args):
                 dependency.name, dependency.path, status.state, status.detail
             )
         )
+    if zig_selected(args.dependency):
+        print(describe_zig(load_zig()))
     return 0
 
 
 def command_deps_fetch(args):
+    if zig_selected(args.dependency) and not fetch_zig():
+        print(describe_zig(load_zig()))
     unpinned = []
     for dependency in selected_dependencies(args.dependency):
         if args.force:
@@ -980,6 +1142,9 @@ def restore_dependency(dependency):
 
 
 def command_deps_update(args):
+    # A Zig pin names one archive, thus an update of Zig is a fetch.
+    if zig_selected(args.dependency):
+        fetch_zig()
     for dependency in selected_dependencies(args.dependency):
         update_dependency(dependency)
     return 0
@@ -1227,6 +1392,14 @@ def extract_pak_libraries(platform, runtime, build_dir):
         link.symlink_to(library.name)
 
 
+# Prints the glibc version of the sysroot of the toolchain image, for example
+# "2.28". The C++ code links against it.
+GLIBC_VERSION_QUERY = (
+    "printf '#include <features.h>\\n__GLIBC__.__GLIBC_MINOR__\\n'"
+    " | aarch64-nextui-linux-gnu-gcc -E -P -x c - | tail -n 1 | tr -d ' '"
+)
+
+
 def build_device(platform, runtime, kind):
     build_dir = ROOT / "src" / "build" / kind / platform
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -1248,9 +1421,7 @@ def build_device(platform, runtime, kind):
             "PREFIX_LOCAL=/opt/nextui",
         ],
     )
-    run_container(
-        runtime,
-        platform,
+    make = shlex.join(
         [
             "make",
             "-C",
@@ -1258,7 +1429,12 @@ def build_device(platform, runtime, kind):
             "PLATFORM={}".format(platform),
             "KIND=" + kind,
             "NEXTUI_ROOT=" + nextui.make_root,
-        ],
+        ]
+    )
+    run_container(
+        runtime,
+        platform,
+        ["sh", "-c", '{} GLIBC_VERSION="$({})"'.format(make, GLIBC_VERSION_QUERY)],
     )
 
 
@@ -1391,6 +1567,8 @@ def write_app_version(platform, kind, version):
 def build_platforms(platforms, runtime="docker", kind="debug", requested_version="auto"):
     version = app_version(requested_version)
     check_dependencies()
+    if any(platform != "desktop" for platform in platforms):
+        fetch_zig()
     for platform in platforms:
         print("== Building {} ({}) ==".format(platform, kind), flush=True)
         write_app_version(platform, kind, version)
@@ -2071,12 +2249,20 @@ def update_qr_code_header(repo_url):
         "#ifndef QR_CODE_DATA_H\n"
         "#define QR_CODE_DATA_H\n"
         "\n"
-        "// Embedded QR code PNG for {}\n".format(repo_url)
+        "#ifdef __cplusplus\n"
+        'extern "C" {\n'
+        "#endif\n"
+        "\n"
+        + "// Embedded QR code PNG for {}\n".format(repo_url)
         + "// Generated from qr-code.png ({}x{} pixels)\n".format(width, height)
         + "static const unsigned char qr_code_png[] = {\n"
         + ",\n".join(lines)
         + "\n};\n"
         + "static const unsigned int qr_code_png_len = {};\n".format(len(data))
+        + "\n"
+        + "#ifdef __cplusplus\n"
+        + "}\n"
+        + "#endif\n"
         + "\n"
         + "#endif // QR_CODE_DATA_H\n"
     )

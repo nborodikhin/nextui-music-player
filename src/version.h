@@ -1,6 +1,10 @@
 #ifndef VERSION_H
 #define VERSION_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 #include "include/parson/parson.h"
@@ -32,5 +36,9 @@ const JSON_Object* Version_getBestRelease(const JSON_Value* releases, const char
 
 // Returns the download URL of the asset named asset_name in the release, or NULL.
 const char* Version_getAssetUrl(const JSON_Object* release, const char* asset_name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

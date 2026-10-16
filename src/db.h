@@ -1,6 +1,10 @@
 #ifndef __DB_H__
 #define __DB_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -206,5 +210,9 @@ bool Db_clearLastPlayed(void);
 // Test support code
 /* Initializes the database at an explicit path for internal tests. */
 bool Db_initInternal(const char* path);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

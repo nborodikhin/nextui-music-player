@@ -1,6 +1,10 @@
 #ifndef __MP3_SEEK_H__
 #define __MP3_SEEK_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -93,5 +97,9 @@ void Mp3Seek_free(Mp3SeekInfo* info);
 // thus the position can be wrong by the precision of the TOC.
 bool Mp3Seek_pointFor(const Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int64_t file_size,
                       int64_t target_frame, Mp3SeekPoint* point);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
