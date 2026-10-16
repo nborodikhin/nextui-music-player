@@ -218,7 +218,9 @@ def main(argv):
     if not check_fixtures():
         return 1
 
-    paths = sorted(SOURCE_DIR.glob("*.c")) + sorted(SOURCE_DIR.glob("*.h"))
+    paths = sorted(
+        path for pattern in ("*.c", "*.cpp", "*.h") for path in SOURCE_DIR.glob(pattern)
+    )
     if not scan_paths(paths):
         print("Only ModuleCommon_frameEnd() presents, and only ui_layers.c writes a layer.", file=sys.stderr)
         return 1
