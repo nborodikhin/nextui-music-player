@@ -1392,6 +1392,14 @@ def extract_pak_libraries(platform, runtime, build_dir):
         link.symlink_to(library.name)
 
 
+# Prints the glibc version of the sysroot of the toolchain image, for example
+# "2.28". The C++ code links against it.
+GLIBC_VERSION_QUERY = (
+    "printf '#include <features.h>\\n__GLIBC__.__GLIBC_MINOR__\\n'"
+    " | aarch64-nextui-linux-gnu-gcc -E -P -x c - | tail -n 1 | tr -d ' '"
+)
+
+
 def build_device(platform, runtime, kind):
     build_dir = ROOT / "src" / "build" / kind / platform
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -1413,9 +1421,7 @@ def build_device(platform, runtime, kind):
             "PREFIX_LOCAL=/opt/nextui",
         ],
     )
-    run_container(
-        runtime,
-        platform,
+    make = shlex.join(
         [
             "make",
             "-C",
@@ -1423,7 +1429,12 @@ def build_device(platform, runtime, kind):
             "PLATFORM={}".format(platform),
             "KIND=" + kind,
             "NEXTUI_ROOT=" + nextui.make_root,
-        ],
+        ]
+    )
+    run_container(
+        runtime,
+        platform,
+        ["sh", "-c", '{} GLIBC_VERSION="$({})"'.format(make, GLIBC_VERSION_QUERY)],
     )
 
 

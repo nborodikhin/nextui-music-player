@@ -72,15 +72,11 @@ CC = $(CROSS_COMPILE)gcc
 
 # C++ code is C++23 with no exceptions and no RTTI. A device build compiles it
 # with Zig, and Zig also makes the final link: it links libc++ statically and
-# uses no glibc symbol newer than the glibc of the sysroot of the platform. The
-# libraries of the sysroot use the symbols of that version. A desktop build
-# uses the g++ beside its gcc.
+# uses no glibc symbol newer than GLIBC_VERSION. The caller sets GLIBC_VERSION
+# to the glibc of the sysroot, for example 2.28, because the libraries of the
+# sysroot use the symbols of that version. A desktop build uses the g++ beside
+# its gcc.
 ZIG ?= ../deps/zig/zig
-ifeq ($(PLATFORM), tg5050)
-GLIBC_VERSION = 2.33
-else
-GLIBC_VERSION = 2.28
-endif
 ifeq ($(PLATFORM), desktop)
 CXX = $(CROSS_COMPILE)g++
 else
@@ -122,6 +118,9 @@ endif
 ifneq ($(PLATFORM), desktop)
 ifeq (,$(wildcard $(ZIG)))
 $(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
+endif
+ifeq (,$(filter 2.%,$(GLIBC_VERSION)))
+$(error No GLIBC_VERSION - build through ./dev, or set it to the glibc of the sysroot)
 endif
 endif
 endif
