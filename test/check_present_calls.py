@@ -219,7 +219,7 @@ def main(argv):
         return 1
 
     paths = sorted(
-        path for pattern in ("*.c", "*.cpp", "*.h") for path in SOURCE_DIR.glob(pattern)
+        path for pattern in ("*.c", "*.cpp", "*.h", "*.hpp") for path in SOURCE_DIR.glob(pattern)
     )
     if not scan_paths(paths):
         print("Only ModuleCommon_frameEnd() presents, and only ui_layers.c writes a layer.", file=sys.stderr)
