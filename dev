@@ -2253,7 +2253,7 @@ def update_qr_code_header(repo_url):
         'extern "C" {\n'
         "#endif\n"
         "\n"
-        "// Embedded QR code PNG for {}\n".format(repo_url)
+        + "// Embedded QR code PNG for {}\n".format(repo_url)
         + "// Generated from qr-code.png ({}x{} pixels)\n".format(width, height)
         + "static const unsigned char qr_code_png[] = {\n"
         + ",\n".join(lines)
