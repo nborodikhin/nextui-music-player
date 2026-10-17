@@ -70,22 +70,30 @@ LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
 
-# C++ code is C++23 with no exceptions and no RTTI. A device build compiles it
-# with Zig, and Zig also makes the final link: it links libc++ statically and
-# uses no glibc symbol newer than GLIBC_VERSION. The caller sets GLIBC_VERSION
-# to the glibc of the sysroot, for example 2.28, because the libraries of the
-# sysroot use the symbols of that version. A desktop build uses the g++ beside
-# its gcc.
-ZIG ?= ../deps/zig/zig
+# C++ code is C++23 with no exceptions and no RTTI. Each build compiles it with
+# Zig, thus the desktop gets the same Clang, libc++ and warnings as a device.
+# Zig also makes the final link, and it links libc++ statically. A device
+# build uses no glibc symbol newer than GLIBC_VERSION. The caller sets
+# GLIBC_VERSION to the glibc of the sysroot, for example 2.28, because the
+# libraries of the sysroot use the symbols of that version. A desktop build
+# targets the host. A toolchain image runs the Linux Zig for the CPU of the
+# host, and a desktop build runs the Zig for the system of the host.
+ZIG_CPU := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
 ifeq ($(PLATFORM), desktop)
-CXX = $(CROSS_COMPILE)g++
+ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
+else
+ZIG_SYSTEM := linux
+endif
+ZIG ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+ifeq ($(PLATFORM), desktop)
+CXX = $(ZIG) c++
 else
 CXX = $(ZIG) c++ -target aarch64-linux-gnu.$(GLIBC_VERSION)
+endif
 # The container of a build is removed after it, thus the cache of Zig lives in
 # the project. It keeps the libc++ that Zig builds once for each target.
 export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/build/zig-cache
 export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/build/zig-cache
-endif
 
 # macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
 # the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
@@ -115,10 +123,10 @@ endif
 ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
 $(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
 endif
-ifneq ($(PLATFORM), desktop)
 ifeq (,$(wildcard $(ZIG)))
 $(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
 endif
+ifneq ($(PLATFORM), desktop)
 ifeq (,$(filter 2.%,$(GLIBC_VERSION)))
 $(error No GLIBC_VERSION - build through ./dev, or set it to the glibc of the sysroot)
 endif
