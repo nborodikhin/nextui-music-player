@@ -28,7 +28,11 @@ static void render_connecting_screen(SDL_Surface* scr, int show_setting) {
     SDL_Surface* text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (text) {
-        SDL_BlitSurface(text, NULL, scr, &(SDL_Rect){(hw - text->w) / 2, (hh - text->h) / 2});
+        SDL_Rect text_at = {
+            .x = (hw - text->w) / 2,
+            .y = (hh - text->h) / 2,
+        };
+        SDL_BlitSurface(text, NULL, scr, &text_at);
         SDL_FreeSurface(text);
     }
 

@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "album_art.h"
 #include "wget_fetch.h"
 #include <stdio.h>
@@ -244,7 +243,7 @@ static void* fetch_thread_func(void* arg) {
     char large_artwork_url[512];
     if (strncmp(artwork_url, "https://", 8) == 0) {
         const char* after_https = artwork_url + 8;
-        char* ssl_pos = strstr(after_https, "-ssl.");
+        char* ssl_pos = (char*)strstr(after_https, "-ssl.");
         if (ssl_pos) {
             int prefix_len = ssl_pos - after_https;
             snprintf(large_artwork_url, sizeof(large_artwork_url), "http://%.*s%s",

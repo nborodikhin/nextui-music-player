@@ -893,24 +893,28 @@ def check_dependencies(strict=False):
 
 ZIG_NAME = "zig"
 
-# The Zig archive for each CPU name that the host can report. The toolchain
-# images run on the CPU of the host, thus the Linux build for that CPU runs in
-# each image, on Linux and on macOS.
-ZIG_HOST_ARCHIVES = {
-    "x86_64": "x86_64-linux",
-    "amd64": "x86_64-linux",
-    "aarch64": "aarch64-linux",
-    "arm64": "aarch64-linux",
+# The CPU of a Zig archive for each CPU name that the host can report. The
+# toolchain images run on the CPU of the host, thus the Linux build for that
+# CPU runs in each image, on Linux and on macOS. A desktop build runs the
+# build for the system of the host.
+ZIG_HOST_CPUS = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "aarch64": "aarch64",
+    "arm64": "aarch64",
 }
+ZIG_DEVICE_SYSTEM = "linux"
+ZIG_HOST_SYSTEM = "macos" if os.uname().sysname == "Darwin" else "linux"
 
 
 @dataclass(frozen=True)
 class Zig:
-    """The Zig release that compiles and links the C++ code of a device build.
+    """The Zig release that compiles and links the C++ code.
 
-    The host fetches it once into `path`, and each toolchain image runs it from
-    the mount of the project. `marker` holds the sha256 of the archive that the
-    tree came from.
+    The host fetches each archive once into a directory of its own under `path`.
+    Each toolchain image runs the Linux one from the mount of the project, and a
+    desktop build runs the one for the host. `marker` holds the sha256 of the
+    archive that the tree came from.
     """
 
     version: str
@@ -922,23 +926,24 @@ class Zig:
 
     @property
     def root(self):
-        return ROOT / self.path
+        return ROOT / self.path / self.archive
 
     @property
     def marker(self):
         return self.root / ".music-player-zig"
 
 
-def load_zig():
-    """Read the Zig pin for the CPU of the host."""
+def load_zig(system):
+    """Read the Zig pin for the CPU of the host and `system`, linux or macos."""
     entry = read_deps_manifest().get(ZIG_NAME)
     if not entry:
         raise DevError("{} pins no {}".format(DEPS_MANIFEST.name, ZIG_NAME))
 
     machine = os.uname().machine
-    archive = ZIG_HOST_ARCHIVES.get(machine.lower())
-    if not archive:
+    cpu = ZIG_HOST_CPUS.get(machine.lower())
+    if not cpu:
         raise DevError("No Zig build for a host CPU of " + machine)
+    archive = "{}-{}".format(cpu, system)
     pinned = entry.get("archives", {}).get(archive)
     if not pinned:
         raise DevError(
@@ -962,8 +967,8 @@ def zig_installed(zig):
 
 def describe_zig(zig):
     state = "pinned" if zig_installed(zig) else "missing"
-    return "{} at {}/ - {}, {} ({})".format(
-        ZIG_NAME, zig.path, state, zig.version, zig.archive
+    return "{} at {}/ - {}, {}".format(
+        ZIG_NAME, zig.root.relative_to(ROOT), state, zig.version
     )
 
 
@@ -998,12 +1003,23 @@ def verify_zig_signature(zig, archive):
         )
 
 
-def fetch_zig():
-    """Make the pinned Zig exist, without touching the network when it already
-    does. Returns True when it fetched an archive."""
-    zig = load_zig()
+def zig_systems():
+    """The Zig archives that this host uses: Linux for the toolchain images, and
+    the system of the host for a desktop build."""
+    return sorted({ZIG_DEVICE_SYSTEM, ZIG_HOST_SYSTEM})
+
+
+def fetch_zig(system):
+    """Make the pinned Zig for `system` exist, without touching the network when
+    it already does. Returns True when it fetched an archive."""
+    zig = load_zig(system)
     if zig_installed(zig):
         return False
+
+    # A tree of the layout with one archive directly in `path` is removed.
+    old_marker = ROOT / zig.path / zig.marker.name
+    if old_marker.is_file():
+        shutil.rmtree(ROOT / zig.path)
 
     print("Fetching Zig {} ({}) into {}".format(zig.version, zig.archive, zig.path),
           flush=True)
@@ -1061,13 +1077,16 @@ def command_deps_list(args):
             )
         )
     if zig_selected(args.dependency):
-        print(describe_zig(load_zig()))
+        for system in zig_systems():
+            print(describe_zig(load_zig(system)))
     return 0
 
 
 def command_deps_fetch(args):
-    if zig_selected(args.dependency) and not fetch_zig():
-        print(describe_zig(load_zig()))
+    if zig_selected(args.dependency):
+        for system in zig_systems():
+            if not fetch_zig(system):
+                print(describe_zig(load_zig(system)))
     unpinned = []
     for dependency in selected_dependencies(args.dependency):
         if args.force:
@@ -1144,7 +1163,8 @@ def restore_dependency(dependency):
 def command_deps_update(args):
     # A Zig pin names one archive, thus an update of Zig is a fetch.
     if zig_selected(args.dependency):
-        fetch_zig()
+        for system in zig_systems():
+            fetch_zig(system)
     for dependency in selected_dependencies(args.dependency):
         update_dependency(dependency)
     return 0
@@ -1568,7 +1588,9 @@ def build_platforms(platforms, runtime="docker", kind="debug", requested_version
     version = app_version(requested_version)
     check_dependencies()
     if any(platform != "desktop" for platform in platforms):
-        fetch_zig()
+        fetch_zig(ZIG_DEVICE_SYSTEM)
+    if "desktop" in platforms:
+        fetch_zig(ZIG_HOST_SYSTEM)
     for platform in platforms:
         print("== Building {} ({}) ==".format(platform, kind), flush=True)
         write_app_version(platform, kind, version)
@@ -2405,6 +2427,7 @@ def command_test(_args):
     try:
         env = os.environ.copy()
         env["TEST_TEMP_DIR"] = str(test_tmp_dir)
+        fetch_zig(ZIG_HOST_SYSTEM)
         run_command(["make", "-C", str(ROOT / "test")], env=env)
         return 0
     finally:

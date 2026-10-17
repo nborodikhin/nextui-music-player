@@ -97,7 +97,7 @@ static bool filedb_is_stopping(void) {
 static bool id_queue_push(IdQueue* queue, int id) {
     if (queue->count == queue->capacity) {
         size_t capacity = queue->capacity ? queue->capacity * 2 : 16;
-        int* items = realloc(queue->items, capacity * sizeof(*items));
+        int* items = (int*)realloc(queue->items, capacity * sizeof(*items));
         if (!items) return false;
         queue->items = items;
         queue->capacity = capacity;
@@ -128,7 +128,7 @@ static bool id_set_add(IdSet* set, int id) {
     if (id_set_contains(set, id)) return true;
     if (set->count == set->capacity) {
         size_t capacity = set->capacity ? set->capacity * 2 : 16;
-        int* items = realloc(set->items, capacity * sizeof(*items));
+        int* items = (int*)realloc(set->items, capacity * sizeof(*items));
         if (!items) return false;
         set->items = items;
         set->capacity = capacity;
@@ -145,7 +145,7 @@ static void id_set_free(IdSet* set) {
 static bool request_queue_push(RequestQueue* queue, const FileDbRequest* request) {
     if (queue->count == queue->capacity) {
         size_t capacity = queue->capacity ? queue->capacity * 2 : 16;
-        FileDbRequest* items = realloc(queue->items, capacity * sizeof(*items));
+        FileDbRequest* items = (FileDbRequest*)realloc(queue->items, capacity * sizeof(*items));
         if (!items) return false;
         queue->items = items;
         queue->capacity = capacity;
@@ -201,8 +201,8 @@ static DbFileType file_type_of(const char* name) {
 }
 
 static int card_entry_compare(const void* left, const void* right) {
-    const CardEntry* a = left;
-    const CardEntry* b = right;
+    const CardEntry* a = (const CardEntry*)left;
+    const CardEntry* b = (const CardEntry*)right;
     int result = strcasecmp(a->name, b->name);
     if (result != 0) return result;
     result = strcmp(a->name, b->name);
@@ -211,8 +211,8 @@ static int card_entry_compare(const void* left, const void* right) {
 }
 
 static int playlist_compare(const void* left, const void* right) {
-    const CardPlaylist* a = left;
-    const CardPlaylist* b = right;
+    const CardPlaylist* a = (const CardPlaylist*)left;
+    const CardPlaylist* b = (const CardPlaylist*)right;
     return strcasecmp(a->path, b->path);
 }
 
@@ -338,7 +338,7 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
 
         if (entry_count == capacity) {
             int next_capacity = capacity ? capacity * 2 : 32;
-            CardEntry* next = realloc(entries, (size_t)next_capacity * sizeof(*next));
+            CardEntry* next = (CardEntry*)realloc(entries, (size_t)next_capacity * sizeof(*next));
             if (!next) {
                 free(entries);
                 closedir(directory);
@@ -631,7 +631,7 @@ static bool read_card_playlists(CardPlaylist** output, int* count) {
         }
         if (entry_count == capacity) {
             int next_capacity = capacity ? capacity * 2 : 16;
-            CardPlaylist* next = realloc(entries,
+            CardPlaylist* next = (CardPlaylist*)realloc(entries,
                                          (size_t)next_capacity * sizeof(*next));
             if (!next) {
                 free(entries);

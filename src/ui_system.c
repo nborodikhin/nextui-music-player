@@ -38,7 +38,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
     SDL_Surface* ver_text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (ver_text) {
-        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, ver_y});
+        SDL_Rect ver_at = {
+            .x = (hw - ver_text->w) / 2,
+            .y = ver_y,
+        };
+        SDL_BlitSurface(ver_text, NULL, screen, &ver_at);
         SDL_FreeSurface(ver_text);
     }
 
@@ -135,7 +139,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
                 SDL_Surface* line_text = TTF_RenderUTF8_Blended(
                     Fonts_getSmall(), wrapped_lines[i], Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (line_text) {
-                    SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){notes_x, notes_y + i * line_height});
+                    SDL_Rect line_at = {
+                        .x = notes_x,
+                        .y = notes_y + i * line_height,
+                    };
+                    SDL_BlitSurface(line_text, NULL, screen, &line_at);
                     SDL_FreeSurface(line_text);
                 }
             }
@@ -145,7 +153,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         SDL_Surface* check_text = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), "Checking for updates...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (check_text) {
-            SDL_BlitSurface(check_text, NULL, screen, &(SDL_Rect){(hw - check_text->w) / 2, notes_y});
+            SDL_Rect check_at = {
+                .x = (hw - check_text->w) / 2,
+                .y = notes_y,
+            };
+            SDL_BlitSurface(check_text, NULL, screen, &check_at);
             SDL_FreeSurface(check_text);
         }
     }
@@ -175,7 +187,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
         if (pct_text) {
             int pct_x = bar_x + (bar_w - pct_text->w) / 2;
             int pct_y = bar_y + (bar_h - pct_text->h) / 2;
-            SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){pct_x, pct_y});
+            SDL_Rect pct_at = {
+                .x = pct_x,
+                .y = pct_y,
+            };
+            SDL_BlitSurface(pct_text, NULL, screen, &pct_at);
             SDL_FreeSurface(pct_text);
         }
 
@@ -184,7 +200,11 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
             SDL_Surface* detail_text = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), status.status_detail, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (detail_text) {
-                SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
+                SDL_Rect detail_at = {
+                    .x = (hw - detail_text->w) / 2,
+                    .y = bar_y + bar_h + SCALE1(6),
+                };
+                SDL_BlitSurface(detail_text, NULL, screen, &detail_at);
                 SDL_FreeSurface(detail_text);
             }
         }
@@ -208,19 +228,27 @@ void render_app_updating(SDL_Surface* screen, int show_setting) {
 
         SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status_msg, status_color);
         if (status_text) {
-            SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, status_y});
+            SDL_Rect status_at = {
+                .x = (hw - status_text->w) / 2,
+                .y = status_y,
+            };
+            SDL_BlitSurface(status_text, NULL, screen, &status_at);
             SDL_FreeSurface(status_text);
         }
     }
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (state == SELFUPDATE_STATE_COMPLETED) {
-        GFX_blitButtonGroup((char*[]){"A", "RESTART", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"A", "RESTART", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else if (state == SELFUPDATE_STATE_DOWNLOADING) {
-        GFX_blitButtonGroup((char*[]){"B", "CANCEL", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "CANCEL", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     }
 }
 
@@ -240,7 +268,11 @@ void render_about(SDL_Surface* screen, int show_setting) {
     SDL_Surface* name_text = TTF_RenderUTF8_Blended(
         Fonts_getLarge(), app_name, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_text) {
-        SDL_BlitSurface(name_text, NULL, screen, &(SDL_Rect){(hw - name_text->w) / 2, SCALE1(PADDING + PILL_SIZE)});
+        SDL_Rect name_at = {
+            .x = (hw - name_text->w) / 2,
+            .y = SCALE1(PADDING + PILL_SIZE),
+        };
+        SDL_BlitSurface(name_text, NULL, screen, &name_at);
         SDL_FreeSurface(name_text);
     }
 
@@ -251,13 +283,21 @@ void render_about(SDL_Surface* screen, int show_setting) {
     SDL_Surface* tagline_text1 = TTF_RenderUTF8_Blended(
         Fonts_getSmall(), tagline1, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (tagline_text1) {
-        SDL_BlitSurface(tagline_text1, NULL, screen, &(SDL_Rect){(hw - tagline_text1->w) / 2, info_y});
+        SDL_Rect tagline_text1_at = {
+            .x = (hw - tagline_text1->w) / 2,
+            .y = info_y,
+        };
+        SDL_BlitSurface(tagline_text1, NULL, screen, &tagline_text1_at);
         SDL_FreeSurface(tagline_text1);
     }
     SDL_Surface* tagline_text2 = TTF_RenderUTF8_Blended(
         Fonts_getSmall(), tagline2, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (tagline_text2) {
-        SDL_BlitSurface(tagline_text2, NULL, screen, &(SDL_Rect){(hw - tagline_text2->w) / 2, info_y + SCALE1(18)});
+        SDL_Rect tagline_text2_at = {
+            .x = (hw - tagline_text2->w) / 2,
+            .y = info_y + SCALE1(18),
+        };
+        SDL_BlitSurface(tagline_text2, NULL, screen, &tagline_text2_at);
         SDL_FreeSurface(tagline_text2);
     }
 
@@ -301,7 +341,11 @@ void render_about(SDL_Surface* screen, int show_setting) {
     if (status_msg[0]) {
         SDL_Surface* status_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), status_msg, status_color);
         if (status_text) {
-            SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, status_y});
+            SDL_Rect status_at = {
+                .x = (hw - status_text->w) / 2,
+                .y = status_y,
+            };
+            SDL_BlitSurface(status_text, NULL, screen, &status_at);
             SDL_FreeSurface(status_text);
         }
     }
@@ -322,21 +366,25 @@ void render_about(SDL_Surface* screen, int show_setting) {
 
     // Button hints, from the same snapshot as the status text above. Nothing to
     // press when a check is running, or when it already said we are current.
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* action = NULL;
     switch (update_ui) {
         case UPDATE_UI_AVAILABLE:
-            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UPDATE", NULL}, 1, screen, 1);
+            action = "UPDATE";
             break;
         case UPDATE_UI_UNCHECKED:
         case UPDATE_UI_FAILED:
-            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CHECK UPDATE", NULL}, 1, screen, 1);
+            action = "CHECK UPDATE";
             break;
         case UPDATE_UI_RESTART:
-            GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "RESTART", NULL}, 1, screen, 1);
+            action = "RESTART";
             break;
         case UPDATE_UI_CHECKING:
         case UPDATE_UI_CURRENT:
-            GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
             break;
     }
+    // With no action, the NULL in place of "A" ends the list after BACK.
+    const char* right_hints[] = {"B", "BACK", action ? "A" : NULL, action, NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }

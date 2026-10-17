@@ -70,22 +70,30 @@ LIBMBEDTLS       = $(BUILD_DIR)/libmbedtls.a
 
 CC = $(CROSS_COMPILE)gcc
 
-# C++ code is C++23 with no exceptions and no RTTI. A device build compiles it
-# with Zig, and Zig also makes the final link: it links libc++ statically and
-# uses no glibc symbol newer than GLIBC_VERSION. The caller sets GLIBC_VERSION
-# to the glibc of the sysroot, for example 2.28, because the libraries of the
-# sysroot use the symbols of that version. A desktop build uses the g++ beside
-# its gcc.
-ZIG ?= ../deps/zig/zig
+# C++ code is C++23 with no exceptions and no RTTI. Each build compiles it with
+# Zig, thus the desktop gets the same Clang, libc++ and warnings as a device.
+# Zig also makes the final link, and it links libc++ statically. A device
+# build uses no glibc symbol newer than GLIBC_VERSION. The caller sets
+# GLIBC_VERSION to the glibc of the sysroot, for example 2.28, because the
+# libraries of the sysroot use the symbols of that version. A desktop build
+# targets the host. A toolchain image runs the Linux Zig for the CPU of the
+# host, and a desktop build runs the Zig for the system of the host.
+ZIG_CPU := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
 ifeq ($(PLATFORM), desktop)
-CXX = $(CROSS_COMPILE)g++
+ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
+else
+ZIG_SYSTEM := linux
+endif
+ZIG ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+ifeq ($(PLATFORM), desktop)
+CXX = $(ZIG) c++
 else
 CXX = $(ZIG) c++ -target aarch64-linux-gnu.$(GLIBC_VERSION)
+endif
 # The container of a build is removed after it, thus the cache of Zig lives in
 # the project. It keeps the libc++ that Zig builds once for each target.
 export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/build/zig-cache
 export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/build/zig-cache
-endif
 
 # macOS's plain `ar` is the Apple/LLVM one, which can't be relied on to match
 # the GCC toolchain we build with there; use gcc-ar instead. Device/Linux
@@ -115,10 +123,10 @@ endif
 ifeq (,$(wildcard $(NEXTUI_ROOT)/all/common/api.h))
 $(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_ROOT)
 endif
-ifneq ($(PLATFORM), desktop)
 ifeq (,$(wildcard $(ZIG)))
 $(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
 endif
+ifneq ($(PLATFORM), desktop)
 ifeq (,$(filter 2.%,$(GLIBC_VERSION)))
 $(error No GLIBC_VERSION - build through ./dev, or set it to the glibc of the sysroot)
 endif
@@ -255,6 +263,17 @@ CXX_OBJS   = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(LOCAL_SRC)))
 EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
 APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS) $(BUILD_DIR)/version_string.o
 
+# The C code of the app stays valid C++, thus a file can move to C++ with few
+# changes. GCC rejects most of what C++ does not allow: an implicit conversion
+# from void* or to an enum, an array compound literal, a string literal given
+# as char*, and a goto past an initialization. It does not reject the address
+# of a struct compound literal, or designators out of the order of the struct.
+# The vendored code in the subdirectories is not checked.
+OWN_C_SRC  = $(foreach src,$(filter %.c,$(LOCAL_SRC)),$(if $(findstring /,$(src)),,$(src)))
+OWN_C_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(OWN_C_SRC))
+$(OWN_C_OBJS): MY_CFLAGS += -Werror=c++-compat -Werror=write-strings \
+                            -Werror=discarded-qualifiers -Werror=jump-misses-init
+
 ###########################################################
 # Compiler / linker flags
 
@@ -326,11 +345,14 @@ else
 LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
 endif
 else
+# Only the library names: the paths of pkg-config in an image are the paths of
+# the toolchain, and a path that it gives also goes into the RUNPATH of the
+# binary. -L$(PREFIX)/lib finds the libraries.
 ifeq ($(PLATFORM), h700)
 # The SDK GLES metadata names libUMP, which h700 does not use.
-LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
 else
-LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
 endif
 LDLIBS += -lfdk-aac
 # The audio libraries a device pulls in are whatever its toolchain sysroot

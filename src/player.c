@@ -214,7 +214,7 @@ static inline int16_t speaker_hpf_process(int16_t sample, int channel) {
 }
 
 // Global player context
-static PlayerContext player = {0};
+static PlayerContext player;
 // The time that played, in frames of the output rate at speed 1x. A frame that
 // plays at speed 2x counts as two, thus a change of speed does not scale the past.
 static double audio_position_samples = 0;
@@ -299,7 +299,7 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata);
 
 // Circular buffer functions
 static int circular_buffer_init(CircularBuffer* cb, size_t capacity_frames) {
-    cb->buffer = malloc(capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS);
+    cb->buffer = (int16_t*)malloc(capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS);
     if (!cb->buffer) {
         LOG_error("Failed to allocate circular buffer (%zu KB)\n",
                   capacity_frames * sizeof(int16_t) * AUDIO_CHANNELS / 1024);
@@ -423,7 +423,7 @@ static int64_t mp3_seek_read(void* ctx, int64_t offset, uint8_t* buf, int64_t le
 // Read an embedded table, or scan headerless CBR synchronously to build an index.
 // Returns NULL where neither is usable. Duration scanning stays separate.
 static Mp3SeekState* mp3_seek_open(const char* filepath, const drmp3* mp3, int64_t total_frames) {
-    Mp3SeekState* state = calloc(1, sizeof(Mp3SeekState));
+    Mp3SeekState* state = (Mp3SeekState*)calloc(1, sizeof(Mp3SeekState));
     if (!state) return NULL;
     state->file = fopen(filepath, "rb");
     if (state->file) {
@@ -481,7 +481,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
 
     switch (sd->format) {
         case AUDIO_FORMAT_MP3: {
-            drmp3* mp3 = malloc(sizeof(drmp3));
+            drmp3* mp3 = (drmp3*)malloc(sizeof(drmp3));
             if (!mp3 || !drmp3_init_file(mp3, filepath, NULL)) {
                 free(mp3);
                 LOG_error("Stream: Failed to open MP3: %s\n", filepath);
@@ -495,7 +495,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_WAV: {
-            drwav* wav = malloc(sizeof(drwav));
+            drwav* wav = (drwav*)malloc(sizeof(drwav));
             if (!wav || !drwav_init_file(wav, filepath, NULL)) {
                 free(wav);
                 LOG_error("Stream: Failed to open WAV: %s\n", filepath);
@@ -547,7 +547,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_M4A: {
-            M4ADecoder* m4a = malloc(sizeof(M4ADecoder));
+            M4ADecoder* m4a = (M4ADecoder*)malloc(sizeof(M4ADecoder));
             if (!m4a) {
                 LOG_error("Stream: Failed to allocate M4A decoder\n");
                 return -1;
@@ -626,7 +626,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
 
             // Allocate frame buffer (AAC frames are typically < 2KB)
             m4a->frame_buffer_size = 8192;
-            m4a->frame_buffer = malloc(m4a->frame_buffer_size);
+            m4a->frame_buffer = (uint8_t*)malloc(m4a->frame_buffer_size);
             if (!m4a->frame_buffer) {
                 aacDecoder_Close(m4a->aac_decoder);
                 MP4D_close(&m4a->mp4);
@@ -652,7 +652,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             break;
         }
         case AUDIO_FORMAT_AAC: {
-            AACFileDecoder* aac = malloc(sizeof(AACFileDecoder));
+            AACFileDecoder* aac = (AACFileDecoder*)malloc(sizeof(AACFileDecoder));
             if (!aac) {
                 LOG_error("Stream: Failed to allocate AAC decoder\n");
                 return -1;
@@ -660,7 +660,7 @@ static int stream_decoder_open(StreamDecoder* sd, const char* filepath) {
             memset(aac, 0, sizeof(AACFileDecoder));
 
             // Allocate read buffer
-            aac->read_buf = malloc(AAC_FILE_READ_BUF_SIZE);
+            aac->read_buf = (uint8_t*)malloc(AAC_FILE_READ_BUF_SIZE);
             if (!aac->read_buf) {
                 free(aac);
                 LOG_error("Stream: Failed to allocate AAC read buffer\n");
@@ -767,7 +767,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
             drmp3* mp3 = (drmp3*)sd->decoder;
             if (sd->source_channels == 1) {
                 // Read mono, convert to stereo
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drmp3_read_pcm_frames_s16(mp3, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -784,7 +784,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
         case AUDIO_FORMAT_WAV: {
             drwav* wav = (drwav*)sd->decoder;
             if (sd->source_channels == 1) {
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drwav_read_pcm_frames_s16(wav, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -801,7 +801,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
         case AUDIO_FORMAT_FLAC: {
             drflac* flac = (drflac*)sd->decoder;
             if (sd->source_channels == 1) {
-                int16_t* mono = malloc(frames * sizeof(int16_t));
+                int16_t* mono = (int16_t*)malloc(frames * sizeof(int16_t));
                 if (mono) {
                     frames_read = drflac_read_pcm_frames_s16(flac, frames, mono);
                     for (size_t i = 0; i < frames_read; i++) {
@@ -868,7 +868,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                 // Read AAC frame data
                 if (frame_bytes > m4a->frame_buffer_size) {
                     // Resize buffer if needed
-                    uint8_t* new_buf = realloc(m4a->frame_buffer, frame_bytes);
+                    uint8_t* new_buf = (uint8_t*)realloc(m4a->frame_buffer, frame_bytes);
                     if (!new_buf) {
                         break;
                     }
@@ -926,7 +926,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                             // Ensure leftover buffer has enough capacity
                             if ((size_t)leftover_frames > m4a->leftover_capacity) {
                                 size_t new_cap = leftover_frames + 256;  // Add some headroom
-                                int16_t* new_buf = realloc(m4a->leftover_buffer,
+                                int16_t* new_buf = (int16_t*)realloc(m4a->leftover_buffer,
                                                            new_cap * sizeof(int16_t) * 2);
                                 if (new_buf) {
                                     m4a->leftover_buffer = new_buf;
@@ -1038,7 +1038,7 @@ static size_t stream_decoder_read(StreamDecoder* sd, int16_t* buffer, size_t fra
                             if (leftover_frames > 0) {
                                 if ((size_t)leftover_frames > aac->leftover_capacity) {
                                     size_t new_cap = leftover_frames + 256;
-                                    int16_t* new_buf = realloc(aac->leftover_buffer,
+                                    int16_t* new_buf = (int16_t*)realloc(aac->leftover_buffer,
                                                                new_cap * sizeof(int16_t) * 2);
                                     if (new_buf) {
                                         aac->leftover_buffer = new_buf;
@@ -1249,8 +1249,8 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
     size_t total_input_frames = leftover_count + input_frames;
 
     // Allocate buffers for combined input
-    float* float_in = malloc(total_input_frames * AUDIO_CHANNELS * sizeof(float));
-    float* float_out = malloc(max_output_frames * AUDIO_CHANNELS * sizeof(float));
+    float* float_in = (float*)malloc(total_input_frames * AUDIO_CHANNELS * sizeof(float));
+    float* float_out = (float*)malloc(max_output_frames * AUDIO_CHANNELS * sizeof(float));
     if (!float_in || !float_out) {
         free(float_in);
         free(float_out);
@@ -1303,7 +1303,7 @@ static size_t resample_chunk(int16_t* input, size_t input_frames,
     if (unconsumed > 0 && !is_last) {
         // Ensure leftover buffer has enough capacity
         if (unconsumed > player.resample_leftover_capacity) {
-            int16_t* new_buf = realloc(player.resample_leftover,
+            int16_t* new_buf = (int16_t*)realloc(player.resample_leftover,
                                        unconsumed * AUDIO_CHANNELS * sizeof(int16_t));
             if (new_buf) {
                 player.resample_leftover = new_buf;
@@ -1391,11 +1391,11 @@ static void* stream_thread_func(void* arg) {
     (void)arg;
 
     // Allocate decode buffer
-    int16_t* decode_buffer = malloc(DECODE_CHUNK_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* decode_buffer = (int16_t*)malloc(DECODE_CHUNK_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
     // Resample output buffer (allow for 2x expansion)
     size_t resample_buffer_size = DECODE_CHUNK_FRAMES * 3;
-    int16_t* resample_buffer = malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
-    int16_t* stretch_buffer = malloc(TIME_STRETCH_READ_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* resample_buffer = (int16_t*)malloc(resample_buffer_size * sizeof(int16_t) * AUDIO_CHANNELS);
+    int16_t* stretch_buffer = (int16_t*)malloc(TIME_STRETCH_READ_FRAMES * sizeof(int16_t) * AUDIO_CHANNELS);
 
     if (!decode_buffer || !resample_buffer || !stretch_buffer) {
         LOG_error("Stream thread: Failed to allocate buffers\n");
@@ -2091,7 +2091,7 @@ static void parse_id3v2(const char* filepath) {
 
 
     // Read entire tag
-    uint8_t* tag_data = malloc(tag_size);
+    uint8_t* tag_data = (uint8_t*)malloc(tag_size);
     if (!tag_data) {
         fclose(f);
         return;
@@ -2208,7 +2208,7 @@ static void parse_id3v2(const char* filepath) {
                         }
                     }
                     size_t max_len = text_len / 2 + 1;
-                    char* converted = malloc(max_len);
+                    char* converted = (char*)malloc(max_len);
                     if (converted) {
                         if (is_be) utf16be_to_ascii(converted, text, text_len, max_len);
                         else utf16le_to_ascii(converted, text, text_len, max_len);
@@ -2424,7 +2424,7 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) 
         // Parse Vorbis comments
         const drflac_vorbis_comment_iterator* comments = NULL;
         uint32_t commentCount = pMetadata->data.vorbis_comment.commentCount;
-        const char* pComments = pMetadata->data.vorbis_comment.pComments;
+        const char* pComments = (const char*)pMetadata->data.vorbis_comment.pComments;
 
         // Iterate through comments
         for (uint32_t i = 0; i < commentCount; i++) {
@@ -2435,7 +2435,7 @@ static void flac_metadata_callback(void* pUserData, drflac_metadata* pMetadata) 
                 pComments += 4;
 
                 // Create null-terminated copy
-                char* comment = malloc(commentLength + 1);
+                char* comment = (char*)malloc(commentLength + 1);
                 if (comment) {
                     memcpy(comment, pComments, commentLength);
                     comment[commentLength] = '\0';

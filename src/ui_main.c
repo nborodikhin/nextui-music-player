@@ -510,7 +510,11 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), page_title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
-        SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){db.content_x, db.box_y + SCALE1(10)});
+        SDL_Rect title_at = {
+            .x = db.content_x,
+            .y = db.box_y + SCALE1(10),
+        };
+        SDL_BlitSurface(title_surf, NULL, screen, &title_at);
         SDL_FreeSurface(title_surf);
     }
 
@@ -522,7 +526,11 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         SDL_Surface* btn_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), controls[i].button, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (btn_surf) {
-            SDL_BlitSurface(btn_surf, NULL, screen, &(SDL_Rect){db.content_x, y_offset});
+            SDL_Rect btn_at = {
+                .x = db.content_x,
+                .y = y_offset,
+            };
+            SDL_BlitSurface(btn_surf, NULL, screen, &btn_at);
             SDL_FreeSurface(btn_surf);
         }
 
@@ -530,7 +538,11 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         SDL_Surface* action_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), controls[i].action, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (action_surf) {
-            SDL_BlitSurface(action_surf, NULL, screen, &(SDL_Rect){right_col, y_offset});
+            SDL_Rect action_at = {
+                .x = right_col,
+                .y = y_offset,
+            };
+            SDL_BlitSurface(action_surf, NULL, screen, &action_at);
             SDL_FreeSurface(action_surf);
         }
 
@@ -543,7 +555,11 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
         int hint_y = db.box_y + db.box_h - SCALE1(10) - hint_surf->h;
-        SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){db.content_x, hint_y});
+        SDL_Rect hint_at = {
+            .x = db.content_x,
+            .y = hint_y,
+        };
+        SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
 }
@@ -561,7 +577,11 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
-        SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){(hw - title_surf->w) / 2, title_y});
+        SDL_Rect title_at = {
+            .x = (hw - title_surf->w) / 2,
+            .y = title_y,
+        };
+        SDL_BlitSurface(title_surf, NULL, screen, &title_at);
         SDL_FreeSurface(title_surf);
     }
 
@@ -572,7 +592,11 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
         SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (name_surf) {
-            SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){(hw - name_surf->w) / 2, db.box_y + SCALE1(45)});
+            SDL_Rect name_at = {
+                .x = (hw - name_surf->w) / 2,
+                .y = db.box_y + SCALE1(45),
+            };
+            SDL_BlitSurface(name_surf, NULL, screen, &name_at);
             SDL_FreeSurface(name_surf);
         }
     }
@@ -583,7 +607,11 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
     SDL_Surface* hint_surf = TTF_RenderUTF8_Blended(
         Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
-        SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(hw - hint_surf->w) / 2, hint_y});
+        SDL_Rect hint_at = {
+            .x = (hw - hint_surf->w) / 2,
+            .y = hint_y,
+        };
+        SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
 }
@@ -608,7 +636,11 @@ void render_screen_off_hint(SDL_Surface* screen) {
     //noinspection HardcodedColor
     SDL_Surface* msg_surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
     if (msg_surf) {
-        SDL_BlitSurface(msg_surf, NULL, screen, &(SDL_Rect){(hw - msg_surf->w) / 2, (hh - msg_surf->h) / 2});
+        SDL_Rect msg_at = {
+            .x = (hw - msg_surf->w) / 2,
+            .y = (hh - msg_surf->h) / 2,
+        };
+        SDL_BlitSurface(msg_surf, NULL, screen, &msg_at);
         SDL_FreeSurface(msg_surf);
     }
 }

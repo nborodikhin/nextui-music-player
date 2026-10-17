@@ -191,7 +191,13 @@ static uint32_t special_key_bg(SDL_Surface* screen) {
 static void fill_circle(SDL_Surface* screen, int cx, int cy, int radius, uint32_t color) {
     for (int dy = -radius; dy <= radius; dy++) {
         int dx = (int)(sqrt((double)(radius * radius - dy * dy)) + 0.5);
-        SDL_FillRect(screen, &(SDL_Rect){cx - dx, cy + dy, dx * 2, 1}, color);
+        SDL_Rect fill_rect = {
+            .x = cx - dx,
+            .y = cy + dy,
+            .w = dx * 2,
+            .h = 1,
+        };
+        SDL_FillRect(screen, &fill_rect, color);
     }
 }
 
@@ -223,9 +229,12 @@ static void draw_label(SDL_Surface* screen, TTF_Font* font, const char* label,
     SDL_Surface* surface = TTF_RenderUTF8_Blended(font, label, color);
     if (!surface) return;
 
+    SDL_Rect surface_at = {
+        .x = rect.x + (rect.w - surface->w) / 2,
+        .y = rect.y + (rect.h - surface->h) / 2,
+    };
     SDL_BlitSurface(surface, NULL, screen,
-                    &(SDL_Rect){rect.x + (rect.w - surface->w) / 2,
-                                rect.y + (rect.h - surface->h) / 2});
+                    &surface_at);
     SDL_FreeSurface(surface);
 }
 
@@ -250,8 +259,12 @@ static void render_input(SDL_Surface* screen, const KeyboardMetrics* m,
         clip.x = text_w - inner_w;
         clip.w = inner_w;
     }
+    SDL_Rect surface_at = {
+        .x = inner_x,
+        .y = field->y + (field->h - surface->h) / 2,
+    };
     SDL_BlitSurface(surface, &clip, screen,
-                    &(SDL_Rect){inner_x, field->y + (field->h - surface->h) / 2});
+                    &surface_at);
     SDL_FreeSurface(surface);
 }
 
@@ -404,8 +417,10 @@ void UIKeyboard_render(SDL_Surface* screen, const KeyboardUiState* state) {
     }
 
     // B rubs out what has been typed, and leaves once there is nothing left
-    char* b_label = (text && text[0] != '\0') ? "DELETE" : "CANCEL";
+    char* b_label = (char*)((text && text[0] != '\0') ? "DELETE" : "CANCEL");
 
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", b_label, "A", "TYPE", "SELECT", "DONE", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", b_label, "A", "TYPE", "SELECT", "DONE", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }

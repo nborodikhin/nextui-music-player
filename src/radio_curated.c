@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "radio_curated.h"
 #include <stdio.h>
 #include <stdlib.h>

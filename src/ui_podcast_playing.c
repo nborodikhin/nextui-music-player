@@ -128,7 +128,8 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
 
     if (!feed || !ep) {
         render_screen_header(screen, "Now Playing", show_setting);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -161,13 +162,41 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
             int speed_chip_w = speed_surf->w + SCALE1(10);
             int speed_chip_h = speed_surf->h + SCALE1(4);
             uint32_t outline = Theme_getPackedColor(THEME_ROLE_SECONDARY, false);
-            SDL_FillRect(screen, &(SDL_Rect){sx, top_y, speed_chip_w, 1}, outline);
+            SDL_Rect fill_rect = {
+                .x = sx,
+                .y = top_y,
+                .w = speed_chip_w,
+                .h = 1,
+            };
+            SDL_FillRect(screen, &fill_rect, outline);
+            SDL_Rect fill_rect2 = {
+                .x = sx,
+                .y = top_y + speed_chip_h - 1,
+                .w = speed_chip_w,
+                .h = 1,
+            };
             SDL_FillRect(screen,
-                         &(SDL_Rect){sx, top_y + speed_chip_h - 1, speed_chip_w, 1}, outline);
-            SDL_FillRect(screen, &(SDL_Rect){sx, top_y, 1, speed_chip_h}, outline);
+                         &fill_rect2, outline);
+            SDL_Rect fill_rect3 = {
+                .x = sx,
+                .y = top_y,
+                .w = 1,
+                .h = speed_chip_h,
+            };
+            SDL_FillRect(screen, &fill_rect3, outline);
+            SDL_Rect fill_rect4 = {
+                .x = sx + speed_chip_w - 1,
+                .y = top_y,
+                .w = 1,
+                .h = speed_chip_h,
+            };
             SDL_FillRect(screen,
-                         &(SDL_Rect){sx + speed_chip_w - 1, top_y, 1, speed_chip_h}, outline);
-            SDL_BlitSurface(speed_surf, NULL, screen, &(SDL_Rect){sx + SCALE1(5), top_y + SCALE1(2)});
+                         &fill_rect4, outline);
+            SDL_Rect speed_at = {
+                .x = sx + SCALE1(5),
+                .y = top_y + SCALE1(2),
+            };
+            SDL_BlitSurface(speed_surf, NULL, screen, &speed_at);
             next_chip_x = sx + speed_chip_w;
             SDL_FreeSurface(speed_surf);
         }
@@ -189,7 +218,11 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     if (counter_surf) {
         int counter_x = next_chip_x + SCALE1(8);
         int counter_y = top_y + (chip.h - counter_surf->h) / 2;
-        SDL_BlitSurface(counter_surf, NULL, screen, &(SDL_Rect){counter_x, counter_y});
+        SDL_Rect counter_at = {
+            .x = counter_x,
+            .y = counter_y,
+        };
+        SDL_BlitSurface(counter_surf, NULL, screen, &counter_at);
         SDL_FreeSurface(counter_surf);
     }
 
@@ -205,7 +238,11 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     SDL_Surface* podcast_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (podcast_surf) {
-        SDL_BlitSurface(podcast_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+        SDL_Rect podcast_at = {
+            .x = SCALE1(PADDING),
+            .y = info_y,
+        };
+        SDL_BlitSurface(podcast_surf, NULL, screen, &podcast_at);
         info_y += podcast_surf->h + SCALE1(2);
         SDL_FreeSurface(podcast_surf);
     } else {
@@ -236,7 +273,13 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
         SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
             Fonts_getTitle(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (title_surf) {
-            SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
+            SDL_Rect title_at = {
+                .x = SCALE1(PADDING),
+                .y = title_y,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(title_surf, NULL, screen, &title_at);
             SDL_FreeSurface(title_surf);
         }
     }
@@ -296,7 +339,11 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
                 SDL_Surface* d = TTF_RenderUTF8_Blended(
                     desc_font, truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
                 if (d) {
-                    SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+                    SDL_Rect d_at = {
+                        .x = SCALE1(PADDING),
+                        .y = info_y,
+                    };
+                    SDL_BlitSurface(d, NULL, screen, &d_at);
                     info_y += d->h;
                     SDL_FreeSurface(d);
                 }
@@ -329,7 +376,11 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
             SDL_Surface* d = TTF_RenderUTF8_Blended(
                 desc_font, line_buf, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (d) {
-                SDL_BlitSurface(d, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+                SDL_Rect d_at2 = {
+                    .x = SCALE1(PADDING),
+                    .y = info_y,
+                };
+                SDL_BlitSurface(d, NULL, screen, &d_at2);
                 info_y += d->h;
                 SDL_FreeSurface(d);
             }

@@ -53,6 +53,13 @@
 CC      ?= cc
 CFLAGS  ?= -std=gnu99 -O0 -g -Wall -Wextra
 CXXFLAGS ?= -std=c++23 -O0 -g -Wall -Wextra -fno-exceptions -fno-rtti
+# C++ compiles with the Zig of the host, the compiler of the app.
+ZIG_CPU    := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
+ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
+ZIG        ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+CXX         = $(ZIG) c++
+export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/bin/zig-cache
+export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/bin/zig-cache
 INC      = -I../src $(shell pkg-config --cflags sdl2)
 
 SRC      = ../src
@@ -122,7 +129,9 @@ HEADER_INC    = $(INC) $(DESKTOP_INC) \
                 -I$(SRC)/include/libopus/include -I$(SRC)/include/opusfile/include \
                 -I../NextUI/workspace/all/minarch/libretro-common/include
 
-# The checks are independent and slow, thus they run in parallel.
+# The checks are independent and slow, thus they run in parallel. Zig does not
+# compile stdin, and it fails on -fsyntax-only, thus the C++ check compiles a
+# file that includes the header into an object.
 headers:
 	@$(MAKE) --no-print-directory -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu) header-stamps
 
@@ -133,15 +142,15 @@ $(BIN)/headers/%.ok: $(SRC)/%.h
 	@mkdir -p $(@D)
 	@grep -q 'extern "C"' $< || { echo '$<: no extern "C" block'; exit 1; }
 	@echo '#include "$(abspath $<)"' | $(CC) -x c -std=gnu99 -fsyntax-only $(HEADER_INC) -
-	@echo '#include "$(abspath $<)"' | $(CXX) -x c++ -std=c++23 -fsyntax-only \
-	  -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) -
+	@echo '#include "$(abspath $<)"' > $(@:.ok=.cpp)
+	@$(CXX) -std=c++23 -c -o $(@:.ok=.o) -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) $(@:.ok=.cpp)
 	@touch $@
 
 $(BIN)/headers/%.hpp.ok: $(SRC)/%.hpp
 	@mkdir -p $(@D)
 	@! grep -q 'extern "C"' $< || { echo '$<: extern "C" block in a C++ header'; exit 1; }
-	@echo '#include "$(abspath $<)"' | $(CXX) -x c++ $(CXXFLAGS) -fsyntax-only \
-	  -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) -
+	@echo '#include "$(abspath $<)"' > $(@:.ok=.cpp)
+	@$(CXX) $(CXXFLAGS) -c -o $(@:.ok=.o) -MMD -MT $@ -MF $(@:.ok=.d) $(HEADER_INC) $(@:.ok=.cpp)
 	@touch $@
 
 -include $(HEADER_STAMPS:.ok=.d)

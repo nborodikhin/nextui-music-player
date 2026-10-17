@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "podcast.h"
 #include "file_utils.h"
 #include "wget_fetch.h"
@@ -153,7 +152,7 @@ static pthread_mutex_t download_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t download_thread;
 static volatile bool download_running = false;
 static volatile bool download_should_stop = false;
-static PodcastDownloadProgress download_progress = {0};
+static PodcastDownloadProgress download_progress;
 
 // Current playback state
 static int current_episode_duration_sec = 0;

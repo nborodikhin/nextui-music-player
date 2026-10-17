@@ -98,6 +98,11 @@ int top_of_the_footer_chip_box(SDL_Surface* screen, int box_h);
 // True where the screen is wide enough for the platform to draw the status group.
 bool screen_has_status_group(SDL_Surface* screen);
 
+// Draws a group of button hints: pairs of a button and its label, then NULL. Pass true
+// in `primary` for the group of the main actions, and true in `align_right` to put the
+// group at the right edge. Returns the width of the group.
+int blit_button_group(const char* const* hints, bool primary, SDL_Surface* dst, bool align_right);
+
 // The area of the screen title on a screen whose status group is `status_w` wide.
 // Pass 0 in `status_w` where the platform draws no status group. The area ends one
 // inset before the status group, thus a title never runs under it.

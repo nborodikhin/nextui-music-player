@@ -92,7 +92,7 @@ PlaylistInfo* M3U_getInfo(int playlist_id) {
     if (playlist_id <= 0) return NULL;
 
     DbPlaylistResult* playlist = Db_getPlaylist(playlist_id);
-    PlaylistInfo* info = playlist ? malloc(sizeof(*info)) : NULL;
+    PlaylistInfo* info = (PlaylistInfo*)(playlist ? malloc(sizeof(*info)) : NULL);
     if (info && !fill_info(&playlist->playlist, info)) {
         free(info);
         info = NULL;
@@ -216,7 +216,7 @@ static int rewrite_playlist(const char* m3u_path, int remove_file_id, int extra_
     int length = snprintf(temp_path, sizeof(temp_path), "%s.tmp", m3u_path);
     if (length < 0 || (size_t)length >= sizeof(temp_path)) return -1;
 
-    int* ids = calloc((size_t)(entry_lines + extra_ids + 1), sizeof(*ids));
+    int* ids = (int*)calloc((size_t)(entry_lines + extra_ids + 1), sizeof(*ids));
     FILE* in = ids ? fopen(m3u_path, "r") : NULL;
     FILE* out = in ? fopen(temp_path, "w") : NULL;
     if (!out) {

@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE  // For strcasestr
+#endif
 #include "radio.h"
 #include "radio_net.h"
 #include "album_art.h"
@@ -186,7 +188,7 @@ typedef struct {
     bool has_user_stations;
 } RadioContext;
 
-static RadioContext radio = {0};
+static RadioContext radio;
 
 static void write_pcm_stereo(const int16_t* samples, int frames, int channels) {
     if (!samples || frames <= 0 || channels <= 0) return;
@@ -449,7 +451,7 @@ static void ssl_cleanup(void) {
 // Send wrapper (works with both HTTP and HTTPS)
 static int radio_send(const void* buf, size_t len) {
     if (radio.use_ssl) {
-        return mbedtls_ssl_write(&radio.ssl, buf, len);
+        return mbedtls_ssl_write(&radio.ssl, (const unsigned char*)buf, len);
     } else {
         return send(radio.socket_fd, buf, len, 0);
     }
@@ -458,7 +460,7 @@ static int radio_send(const void* buf, size_t len) {
 // Receive wrapper (works with both HTTP and HTTPS)
 static int radio_recv(void* buf, size_t len) {
     if (radio.use_ssl) {
-        return mbedtls_ssl_read(&radio.ssl, buf, len);
+        return mbedtls_ssl_read(&radio.ssl, (unsigned char*)buf, len);
     } else {
         return recv(radio.socket_fd, buf, len, 0);
     }
@@ -902,7 +904,7 @@ static void* hls_stream_thread_func(void* arg) {
         // Check if we need to refresh the playlist (for live streams)
         if (radio.hls.is_live && radio.hls.current_segment >= radio.hls.segment_count) {
             // Fetch updated playlist
-            uint8_t* playlist_buf = malloc(64 * 1024);
+            uint8_t* playlist_buf = (uint8_t*)malloc(64 * 1024);
             if (playlist_buf) {
                 int len = radio_net_fetch(radio.current_url, playlist_buf, 64 * 1024, NULL, 0);
                 if (len > 0) {
@@ -1456,13 +1458,13 @@ int Radio_init(void) {
 
     // Allocate buffers
     radio.stream_buffer_size = RADIO_BUFFER_SIZE;
-    radio.stream_buffer = malloc(radio.stream_buffer_size);
-    radio.audio_ring = malloc(AUDIO_RING_SIZE * sizeof(int16_t));
+    radio.stream_buffer = (uint8_t*)malloc(radio.stream_buffer_size);
+    radio.audio_ring = (int16_t*)malloc(AUDIO_RING_SIZE * sizeof(int16_t));
 
     // Pre-allocate HLS buffers to reduce memory fragmentation
-    radio.hls_segment_buf = malloc(HLS_SEGMENT_BUF_SIZE);
-    radio.hls_aac_buf = malloc(HLS_AAC_BUF_SIZE);
-    radio.hls_prefetch_buf = malloc(HLS_SEGMENT_BUF_SIZE);
+    radio.hls_segment_buf = (uint8_t*)malloc(HLS_SEGMENT_BUF_SIZE);
+    radio.hls_aac_buf = (uint8_t*)malloc(HLS_AAC_BUF_SIZE);
+    radio.hls_prefetch_buf = (uint8_t*)malloc(HLS_SEGMENT_BUF_SIZE);
     radio.hls_prefetch_segment = -1;
     radio.hls_prefetch_ready = false;
 
@@ -1642,7 +1644,7 @@ int Radio_play(const char* url) {
         radio.stream_type = STREAM_TYPE_HLS;
 
         // Fetch and parse the M3U8 playlist
-        uint8_t* playlist_buf = malloc(64 * 1024);
+        uint8_t* playlist_buf = (uint8_t*)malloc(64 * 1024);
         if (!playlist_buf) {
             radio.state = RADIO_STATE_ERROR;
             snprintf(radio.error_msg, sizeof(radio.error_msg), "Memory allocation failed");

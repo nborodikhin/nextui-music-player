@@ -32,10 +32,11 @@ const IntSetting SETTING_SOFT_LIMITER = {
     .fallback = 2,
 };
 
+// In the order of UpdateChannel.
 static const char* const update_channel_db_values[] = {
-    [UPDATE_CHANNEL_OFF]    = "off",
-    [UPDATE_CHANNEL_STABLE] = "stable",
-    [UPDATE_CHANNEL_BETA]   = "beta",
+    "off",
+    "stable",
+    "beta",
     NULL,
 };
 

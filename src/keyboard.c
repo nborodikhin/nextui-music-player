@@ -432,7 +432,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
 
     if (!confirmed || state.text[0] == '\0') return NULL;
 
-    char *result = malloc(strlen(state.text) + 1);
+    char *result = (char*)malloc(strlen(state.text) + 1);
     if (!result) return NULL;
     strcpy(result, state.text);
     return result;

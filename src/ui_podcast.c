@@ -431,7 +431,11 @@ static void render_section_header(SDL_Surface* screen, const char* text, int y) 
     SDL_Surface* surf = TTF_RenderUTF8_Blended(
         Fonts_getSmall(), text, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (surf) {
-        SDL_BlitSurface(surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING + BUTTON_PADDING), y});
+        SDL_Rect surf_at = {
+            .x = SCALE1(PADDING + BUTTON_PADDING),
+            .y = y,
+        };
+        SDL_BlitSurface(surf, NULL, screen, &surf_at);
         SDL_FreeSurface(surf);
     }
 }
@@ -470,7 +474,11 @@ static ListItemRichPos render_rich_list_item(SDL_Surface* screen, ListLayout* la
             Theme_getColor(THEME_ROLE_SECONDARY, selected));
         if (s) {
             SDL_Rect src = {0, 0, s->w > pos.text_max_width ? pos.text_max_width : s->w, s->h};
-            SDL_BlitSurface(s, &src, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+            SDL_Rect s_at = {
+                .x = pos.subtitle_x,
+                .y = pos.subtitle_y,
+            };
+            SDL_BlitSurface(s, &src, screen, &s_at);
             SDL_FreeSurface(s);
         }
     }
@@ -653,8 +661,12 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
                     if (new_surf) {
                         int badge_x = rpos.subtitle_x + sub_tw + SCALE1(4);
                         int badge_y = rpos.subtitle_y + (small_h - new_surf->h) / 2;
+                        SDL_Rect new_at = {
+                            .x = badge_x,
+                            .y = badge_y,
+                        };
                         SDL_BlitSurface(new_surf, NULL, screen,
-                                        &(SDL_Rect){badge_x, badge_y});
+                                        &new_at);
                         SDL_FreeSurface(new_surf);
                     }
                 }
@@ -687,7 +699,11 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
             if (sub_surf) {
                 int avail_w = pos.text_max_width;
                 SDL_Rect src = {0, 0, sub_surf->w > avail_w ? avail_w : sub_surf->w, sub_surf->h};
-                SDL_BlitSurface(sub_surf, &src, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect sub_at = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(sub_surf, &src, screen, &sub_at);
                 SDL_FreeSurface(sub_surf);
             }
         }
@@ -698,16 +714,20 @@ void render_podcast_main_page(SDL_Surface* screen, int show_setting,
     render_stream_scroll_indicators(screen, &layout, *scroll, total_content_h);
 
     // Button hints — context dependent
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (has_downloads_item && selected == cl_count + sub_count) {
         // Downloads item selected
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "OPEN", "Y", "MANAGE", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", "A", "OPEN", "Y", "MANAGE", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else if (selected < cl_count) {
         // Continue listening item selected
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "PLAY", "Y", "MANAGE", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", "A", "PLAY", "Y", "MANAGE", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
         // Subscription item selected
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", "Y", "MANAGE", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", "A", "SELECT", "Y", "MANAGE", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 
     // Toast
@@ -746,8 +766,10 @@ void render_podcast_manage(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, menu_scroll, PODCAST_MANAGE_COUNT);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", "A", "SELECT", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 // Render Top Shows list
@@ -768,7 +790,11 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = center_y,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
         return;
@@ -784,10 +810,15 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
+            SDL_Rect text_at2 = {
+                .x = (hw - text->w) / 2,
+                .y = center_y,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at2);
             SDL_FreeSurface(text);
         }
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -824,11 +855,14 @@ void render_podcast_top_shows(SDL_Surface* screen, int show_setting,
     }
 
     // Show subscribe button only if not already subscribed, always show refresh
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (selected_is_subscribed) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UNSUBSCRIBE", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", "A", "UNSUBSCRIBE", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SUBSCRIBE", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", "A", "SUBSCRIBE", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 
     // Toast notification
@@ -852,7 +886,11 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = center_y,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
         return;
@@ -868,10 +906,15 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
+            SDL_Rect text_at2 = {
+                .x = (hw - text->w) / 2,
+                .y = center_y,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at2);
             SDL_FreeSurface(text);
         }
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -908,11 +951,14 @@ void render_podcast_search_results(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, *scroll, count);
 
     // Show subscribe/unsubscribe button based on subscription status
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (selected_is_subscribed) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "UNSUBSCRIBE", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", "A", "UNSUBSCRIBE", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SUBSCRIBE", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", "A", "SUBSCRIBE", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 
     // Toast notification
@@ -1105,7 +1151,11 @@ static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_
     SDL_Surface* t = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (t) {
-        SDL_BlitSurface(t, NULL, screen, &(SDL_Rect){s->text_x, ty});
+        SDL_Rect t_at = {
+            .x = s->text_x,
+            .y = ty,
+        };
+        SDL_BlitSurface(t, NULL, screen, &t_at);
         SDL_FreeSurface(t);
     }
     ty += s->title_h + SCALE1(SUMMARY_TITLE_GAP);
@@ -1116,7 +1166,11 @@ static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_
         SDL_Surface* a = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (a) {
-            SDL_BlitSurface(a, NULL, screen, &(SDL_Rect){s->text_x, ty});
+            SDL_Rect a_at = {
+                .x = s->text_x,
+                .y = ty,
+            };
+            SDL_BlitSurface(a, NULL, screen, &a_at);
             SDL_FreeSurface(a);
         }
         ty += s->author_h + SCALE1(SUMMARY_AUTHOR_GAP);
@@ -1133,7 +1187,11 @@ static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_
             // One word wider than the line is a line of its own: it stops at the
             // right margin
             SDL_Rect src = {0, 0, d->w > s->text_max_w ? s->text_max_w : d->w, d->h};
-            SDL_BlitSurface(d, &src, screen, &(SDL_Rect){s->text_x, ty});
+            SDL_Rect d_at = {
+                .x = s->text_x,
+                .y = ty,
+            };
+            SDL_BlitSurface(d, &src, screen, &d_at);
             SDL_FreeSurface(d);
         }
         ty += s->desc_line_h;
@@ -1150,7 +1208,8 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
     PodcastFeed* feed = Podcast_getSubscription(feed_index);
     if (!feed) {
         render_screen_header(screen, "Episodes", show_setting);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -1192,12 +1251,17 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = center_y,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
         SDL_SetClipRect(screen, NULL);
         render_stream_scroll_indicators(screen, &list, *scroll, geometry.content_h);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
         return;
     }
 
@@ -1292,8 +1356,12 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
                 Fonts_getTiny(), "New", Theme_getColor(THEME_ROLE_PRIMARY, is_selected));
             if (new_surf) {
                 int badge_y = pos.subtitle_y + (small_h - new_surf->h) / 2;
+                SDL_Rect new_at = {
+                    .x = pos.subtitle_x,
+                    .y = badge_y,
+                };
                 SDL_BlitSurface(new_surf, NULL, screen,
-                                &(SDL_Rect){pos.subtitle_x, badge_y});
+                                &new_at);
                 subtitle_x_offset = new_surf->w + SCALE1(4);
                 SDL_FreeSurface(new_surf);
             }
@@ -1320,8 +1388,12 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             if (queued_surf) {
                 int avail_w = pos.text_max_width - subtitle_x_offset;
                 SDL_Rect src = {0, 0, queued_surf->w > avail_w ? avail_w : queued_surf->w, queued_surf->h};
+                SDL_Rect queued_at = {
+                    .x = pos.subtitle_x + subtitle_x_offset,
+                    .y = pos.subtitle_y,
+                };
                 SDL_BlitSurface(queued_surf, &src, screen,
-                                &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
+                                &queued_at);
                 SDL_FreeSurface(queued_surf);
             }
         } else if (has_progress && ep->duration_sec > 0) {
@@ -1340,8 +1412,12 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             if (s) {
                 int avail_w = pos.text_max_width - subtitle_x_offset;
                 SDL_Rect src = {0, 0, s->w > avail_w ? avail_w : s->w, s->h};
+                SDL_Rect s_at = {
+                    .x = pos.subtitle_x + subtitle_x_offset,
+                    .y = pos.subtitle_y,
+                };
                 SDL_BlitSurface(s, &src, screen,
-                                &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
+                                &s_at);
                 SDL_FreeSurface(s);
             }
         } else {
@@ -1367,8 +1443,12 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
                 if (sub_surf) {
                     int avail_w = pos.text_max_width - subtitle_x_offset;
                     SDL_Rect src = {0, 0, sub_surf->w > avail_w ? avail_w : sub_surf->w, sub_surf->h};
+                    SDL_Rect sub_at = {
+                        .x = pos.subtitle_x + subtitle_x_offset,
+                        .y = pos.subtitle_y,
+                    };
                     SDL_BlitSurface(sub_surf, &src, screen,
-                                    &(SDL_Rect){pos.subtitle_x + subtitle_x_offset, pos.subtitle_y});
+                                    &sub_at);
                     SDL_FreeSurface(sub_surf);
                 }
             }
@@ -1379,15 +1459,19 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
     render_stream_scroll_indicators(screen, &list, *scroll, geometry.content_h);
 
     // Dynamic button hints based on selected episode's state
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (selected_download_status == PODCAST_DOWNLOAD_DOWNLOADING ||
         selected_download_status == PODCAST_DOWNLOAD_PENDING) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "CANCEL", "Y", "REFRESH", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", "A", "CANCEL", "Y", "REFRESH", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     } else if (selected_is_downloaded) {
         const char* play_label = selected_is_resumable ? "RESUME" : "PLAY";
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)play_label, "Y", "REFRESH", NULL}, 1, screen, 1);
+        const char* right_hints4[] = {"B", "BACK", "A", play_label, "Y", "REFRESH", NULL};
+        blit_button_group(right_hints4, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "DOWNLOAD", "Y", "REFRESH", NULL}, 1, screen, 1);
+        const char* right_hints5[] = {"B", "BACK", "A", "DOWNLOAD", "Y", "REFRESH", NULL};
+        blit_button_group(right_hints5, 1, screen, 1);
     }
 
     // Toast notification
@@ -1448,10 +1532,15 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, center_y - text->h / 2});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = center_y - text->h / 2,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -1523,8 +1612,12 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
                 int info_x = bar_x + bar_w + SCALE1(6);
                 int avail_w = pos.text_max_width - bar_w - SCALE1(6);
                 SDL_Rect src = {0, 0, info_surf->w > avail_w ? avail_w : info_surf->w, info_surf->h};
+                SDL_Rect info_at = {
+                    .x = info_x,
+                    .y = pos.subtitle_y,
+                };
                 SDL_BlitSurface(info_surf, &src, screen,
-                                &(SDL_Rect){info_x, pos.subtitle_y});
+                                &info_at);
                 SDL_FreeSurface(info_surf);
             }
         } else if (item->status == PODCAST_DOWNLOAD_PENDING) {
@@ -1533,7 +1626,11 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
                 Fonts_getSmall(), label,
                 Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at);
                 SDL_FreeSurface(s);
             }
         } else if (item->status == PODCAST_DOWNLOAD_FAILED) {
@@ -1546,14 +1643,22 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
                 if (s) {
                     int avail_w = pos.text_max_width;
                     SDL_Rect src = {0, 0, s->w > avail_w ? avail_w : s->w, s->h};
-                    SDL_BlitSurface(s, &src, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                    SDL_Rect s_at2 = {
+                        .x = pos.subtitle_x,
+                        .y = pos.subtitle_y,
+                    };
+                    SDL_BlitSurface(s, &src, screen, &s_at2);
                     SDL_FreeSurface(s);
                 }
             } else {
                 SDL_Surface* s = TTF_RenderUTF8_Blended(
                     Fonts_getSmall(), label, Theme_getColor(THEME_ROLE_STATUS_ERROR, is_selected));
                 if (s) {
-                    SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                    SDL_Rect s_at3 = {
+                        .x = pos.subtitle_x,
+                        .y = pos.subtitle_y,
+                    };
+                    SDL_BlitSurface(s, NULL, screen, &s_at3);
                     SDL_FreeSurface(s);
                 }
             }
@@ -1562,7 +1667,11 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
             SDL_Surface* s = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), label, Theme_getColor(THEME_ROLE_STATUS_SUCCESS, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at4 = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at4);
                 SDL_FreeSurface(s);
             }
         }
@@ -1578,11 +1687,14 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, *scroll, queue_count);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (queue_count > 0) {
-        GFX_blitButtonGroup((char*[]){"X", "REMOVE", "B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"X", "REMOVE", "B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 
     // Toast notification
@@ -1600,7 +1712,11 @@ void render_podcast_loading(SDL_Surface* screen, const char* message) {
     SDL_Surface* text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (text) {
-        SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2});
+        SDL_Rect text_at = {
+            .x = (hw - text->w) / 2,
+            .y = hh / 2,
+        };
+        SDL_BlitSurface(text, NULL, screen, &text_at);
         SDL_FreeSurface(text);
     }
 }

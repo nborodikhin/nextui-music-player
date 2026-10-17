@@ -156,11 +156,12 @@ The player compiles against the dependencies specified in `deps.json`.
 `fetch` is a step of `build`, so the first build on a fresh clone will pull
 all dependencies automatically.
 
-`deps.json` also pins Zig, which compiles the C++ code of a device build and
-links the binary. `fetch` downloads the Zig archive for the CPU of the host into
-`deps/zig/`. It checks the sha256 of the archive, and its minisign signature
-where `minisign` is installed. A desktop build compiles the C++ code with the
-`g++` beside its `gcc`.
+`deps.json` also pins Zig, which compiles the C++ code and links the binary of
+each build, the desktop and the unit tests too. `fetch` downloads the Linux Zig
+for the CPU of the host into `deps/zig/`, which the toolchain images run. On
+macOS it also downloads the macOS Zig for the desktop build. It checks the
+sha256 of each archive, and its minisign signature where `minisign` is
+installed.
 
 A dependency can name a directory of patches, which `fetch` applies to the
 checkout. `deps/patches/nextui/` holds them for the NextUI trees: each one is a

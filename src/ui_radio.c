@@ -62,7 +62,11 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
             SDL_Color genre_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
             SDL_Surface* genre_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), station->genre, genre_color);
             if (genre_text) {
-                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
+                SDL_Rect genre_at = {
+                    .x = hw - genre_text->w - SCALE1(PADDING * 2),
+                    .y = y + (layout.item_h - genre_text->h) / 2,
+                };
+                SDL_BlitSurface(genre_text, NULL, screen, &genre_at);
                 SDL_FreeSurface(genre_text);
             }
         }
@@ -90,7 +94,11 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
         SDL_Surface* note1_surf = TTF_RenderUTF8_Blended(
             Fonts_getTiny(), note1, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (note1_surf) {
-            SDL_BlitSurface(note1_surf, NULL, screen, &(SDL_Rect){(hw - note1_surf->w) / 2, note_y});
+            SDL_Rect note1_at = {
+                .x = (hw - note1_surf->w) / 2,
+                .y = note_y,
+            };
+            SDL_BlitSurface(note1_surf, NULL, screen, &note1_at);
             SDL_FreeSurface(note1_surf);
         }
 
@@ -98,14 +106,20 @@ void render_radio_list(SDL_Surface* screen, int show_setting,
         SDL_Surface* note2_surf = TTF_RenderUTF8_Blended(
             Fonts_getTiny(), note2, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (note2_surf) {
-            SDL_BlitSurface(note2_surf, NULL, screen, &(SDL_Rect){(hw - note2_surf->w) / 2, note_y + SCALE1(14)});
+            SDL_Rect note2_at = {
+                .x = (hw - note2_surf->w) / 2,
+                .y = note_y + SCALE1(14),
+            };
+            SDL_BlitSurface(note2_surf, NULL, screen, &note2_at);
             SDL_FreeSurface(note2_surf);
         }
     }
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "PLAY", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", "A", "PLAY", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 // Helper to get current station by index
@@ -149,7 +163,11 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
         SDL_Color count_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
         SDL_Surface* count_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), count_str, count_color);
         if (count_text) {
-            SDL_BlitSurface(count_text, NULL, screen, &(SDL_Rect){hw - count_text->w - SCALE1(PADDING * 2), y + (layout.item_h - count_text->h) / 2});
+            SDL_Rect count_at = {
+                .x = hw - count_text->w - SCALE1(PADDING * 2),
+                .y = y + (layout.item_h - count_text->h) / 2,
+            };
+            SDL_BlitSurface(count_text, NULL, screen, &count_at);
             SDL_FreeSurface(count_text);
         }
 
@@ -168,8 +186,10 @@ void render_radio_add(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, *add_country_scroll, country_count);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", "A", "SELECT", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 // Render add stations - station selection screen
@@ -256,7 +276,11 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
             SDL_Color genre_color = Theme_getColor(THEME_ROLE_PRIMARY, false);
             SDL_Surface* genre_text = TTF_RenderUTF8_Blended(Fonts_getTiny(), station->genre, genre_color);
             if (genre_text) {
-                SDL_BlitSurface(genre_text, NULL, screen, &(SDL_Rect){hw - genre_text->w - SCALE1(PADDING * 2), y + (layout.item_h - genre_text->h) / 2});
+                SDL_Rect genre_at = {
+                    .x = hw - genre_text->w - SCALE1(PADDING * 2),
+                    .y = y + (layout.item_h - genre_text->h) / 2,
+                };
+                SDL_BlitSurface(genre_text, NULL, screen, &genre_at);
                 SDL_FreeSurface(genre_text);
             }
         }
@@ -274,7 +298,11 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
                 THEME_ROLE_PRIMARY, selected);
             SDL_Surface* prefix_text = TTF_RenderUTF8_Blended(Fonts_getSmall(), "[+]", prefix_color);
             if (prefix_text) {
-                SDL_BlitSurface(prefix_text, NULL, screen, &(SDL_Rect){text_x, y + (layout.item_h - prefix_text->h) / 2});
+                SDL_Rect prefix_at = {
+                    .x = text_x,
+                    .y = y + (layout.item_h - prefix_text->h) / 2,
+                };
+                SDL_BlitSurface(prefix_text, NULL, screen, &prefix_at);
                 SDL_FreeSurface(prefix_text);
             }
         }
@@ -293,11 +321,14 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, *add_station_scroll, sorted_count);
 
     // Button hints - dynamic based on whether selected station is already added
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (selected_exists) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "REMOVE", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", "A", "REMOVE", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", "ADD", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", "A", "ADD", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     }
 }
 
@@ -394,7 +425,11 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
 
         SDL_Surface* line_text = TTF_RenderUTF8_Blended(use_font, lines[i], color);
         if (line_text) {
-            SDL_BlitSurface(line_text, NULL, screen, &(SDL_Rect){left_padding, text_y});
+            SDL_Rect line_at = {
+                .x = left_padding,
+                .y = text_y,
+            };
+            SDL_BlitSurface(line_text, NULL, screen, &line_at);
             SDL_FreeSurface(line_text);
         }
         text_y += line_h;
@@ -413,8 +448,10 @@ void render_radio_help(SDL_Surface* screen, int show_setting, int* help_scroll) 
     }
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 // True while a title of a list of this module moves.

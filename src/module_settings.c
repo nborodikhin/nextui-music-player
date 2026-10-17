@@ -122,7 +122,7 @@ const char* SettingsModule_getSoftLimiterDisplayStr(void) {
 }
 
 static int update_channel_index(void) {
-    UpdateChannel current = Settings_getEnum(&SETTING_UPDATE_CHANNEL);
+    UpdateChannel current = (UpdateChannel)Settings_getEnum(&SETTING_UPDATE_CHANNEL);
     for (int index = 0; index < UPDATE_CHANNEL_VALUE_COUNT; index++) {
         if (update_channel_values[index] == current) return index;
     }

@@ -36,7 +36,7 @@ void AddToPlaylist_open(int file_id) {
     if (file_id <= 0) return;
     free_file_list();
 
-    file_tracks = calloc(1, sizeof(*file_tracks));
+    file_tracks = (PlaylistTrack*)calloc(1, sizeof(*file_tracks));
     if (!file_tracks) return;
     file_tracks[0].file_id = file_id;
     file_count = 1;
@@ -72,7 +72,7 @@ bool AddToPlaylist_isActive(void) {
 
 // Appends the files of the dialog to a playlist. Returns the number of files added.
 static int add_files_to_playlist(int playlist_id) {
-    int* ids = calloc((size_t)file_count, sizeof(*ids));
+    int* ids = (int*)calloc((size_t)file_count, sizeof(*ids));
     if (!ids) return 0;
     for (int i = 0; i < file_count; i++) ids[i] = file_tracks[i].file_id;
     int added = M3U_addTracks(playlist_id, ids, file_count);
@@ -152,7 +152,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
     SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), title, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (title_surf) {
-        SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){db.content_x, db.box_y + SCALE1(10)});
+        SDL_Rect title_at = {
+            .x = db.content_x,
+            .y = db.box_y + SCALE1(10),
+        };
+        SDL_BlitSurface(title_surf, NULL, screen, &title_at);
         SDL_FreeSurface(title_surf);
     }
 
@@ -188,7 +192,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
 
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font, truncated, color);
         if (text_surf) {
-            SDL_BlitSurface(text_surf, NULL, screen, &(SDL_Rect){db.content_x, y_offset + SCALE1(2)});
+            SDL_Rect text_at = {
+                .x = db.content_x,
+                .y = y_offset + SCALE1(2),
+            };
+            SDL_BlitSurface(text_surf, NULL, screen, &text_at);
             SDL_FreeSurface(text_surf);
         }
 
@@ -200,7 +208,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
         SDL_Surface* up = TTF_RenderUTF8_Blended(
             Fonts_getTiny(), "...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (up) {
-            SDL_BlitSurface(up, NULL, screen, &(SDL_Rect){db.box_x + db.box_w - SCALE1(25), db.box_y + SCALE1(32)});
+            SDL_Rect up_at = {
+                .x = db.box_x + db.box_w - SCALE1(25),
+                .y = db.box_y + SCALE1(32),
+            };
+            SDL_BlitSurface(up, NULL, screen, &up_at);
             SDL_FreeSurface(up);
         }
     }
@@ -208,7 +220,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
         SDL_Surface* dn = TTF_RenderUTF8_Blended(
             Fonts_getTiny(), "...", Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (dn) {
-            SDL_BlitSurface(dn, NULL, screen, &(SDL_Rect){db.box_x + db.box_w - SCALE1(25), db.box_y + db.box_h - SCALE1(18)});
+            SDL_Rect dn_at = {
+                .x = db.box_x + db.box_w - SCALE1(25),
+                .y = db.box_y + db.box_h - SCALE1(18),
+            };
+            SDL_BlitSurface(dn, NULL, screen, &dn_at);
             SDL_FreeSurface(dn);
         }
     }
@@ -218,7 +234,11 @@ void AddToPlaylist_render(SDL_Surface* screen) {
         Fonts_getSmall(), hint, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (hint_surf) {
         int hint_y = db.box_y + db.box_h - SCALE1(10) - hint_surf->h;
-        SDL_BlitSurface(hint_surf, NULL, screen, &(SDL_Rect){(screen->w - hint_surf->w) / 2, hint_y});
+        SDL_Rect hint_at = {
+            .x = (screen->w - hint_surf->w) / 2,
+            .y = hint_y,
+        };
+        SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
 }

@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "radio_hls.h"
 #include "radio_net.h"
 #include <stdio.h>
@@ -160,7 +159,7 @@ int radio_hls_parse_playlist(HLSContext* ctx, const char* content, const char* b
 
     // If master playlist, fetch the variant playlist
     if (is_master_playlist && variant_url[0]) {
-        uint8_t* playlist_buf = malloc(64 * 1024);
+        uint8_t* playlist_buf = (uint8_t*)malloc(64 * 1024);
         if (playlist_buf) {
             int len = radio_net_fetch(variant_url, playlist_buf, 64 * 1024, NULL, 0);
             if (len > 0) {
@@ -178,7 +177,7 @@ int radio_hls_parse_playlist(HLSContext* ctx, const char* content, const char* b
 
 // Fetch and parse M3U8 playlist from URL
 int radio_hls_fetch_playlist(HLSContext* ctx, const char* url) {
-    uint8_t* playlist_buf = malloc(64 * 1024);
+    uint8_t* playlist_buf = (uint8_t*)malloc(64 * 1024);
     if (!playlist_buf) {
         return -1;
     }

@@ -48,8 +48,10 @@ void render_playlist_list(SDL_Surface* screen, int show_setting,
 
     render_scroll_indicators(screen, &layout, scroll, count);
 
-    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", "A", "SELECT", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 void render_playlist_detail(SDL_Surface* screen, int show_setting,
@@ -109,8 +111,10 @@ void render_playlist_detail(SDL_Surface* screen, int show_setting,
 
     render_scroll_indicators(screen, &layout, scroll, count);
 
-    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "SELECT", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", "BACK", "A", "SELECT", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 bool playlist_list_needs_scroll_refresh(void) {
