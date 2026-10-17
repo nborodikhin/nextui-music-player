@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "radio_hls.h"
 #include "radio_net.h"
 #include <stdio.h>

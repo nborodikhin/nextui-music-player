@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "lyrics.h"
 #include "lyric_window.h"
 #include "radio_net.h"

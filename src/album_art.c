@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "album_art.h"
 #include "wget_fetch.h"
 #include <stdio.h>

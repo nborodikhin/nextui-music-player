@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "downloader.h"
 #include <stdio.h>
 #include <stdlib.h>

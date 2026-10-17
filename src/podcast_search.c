@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "podcast.h"
 #include "wget_fetch.h"
 #include <stdio.h>
