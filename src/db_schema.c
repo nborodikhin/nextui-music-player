@@ -303,7 +303,7 @@ DbMigrationStep *DbSchema_getSteps(void) {
     migrations();
 
     size_t step_count = migration_count;
-    migration_plan = calloc(step_count + 1, sizeof(*migration_plan));
+    migration_plan = (DbMigrationStep*)calloc(step_count + 1, sizeof(*migration_plan));
     if (!migration_plan) {
         return NULL;
     }

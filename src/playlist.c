@@ -12,7 +12,7 @@
 
 void Playlist_init(PlaylistContext* ctx) {
     if (!ctx) return;
-    ctx->tracks = malloc(sizeof(PlaylistTrack) * PLAYLIST_MAX_TRACKS);
+    ctx->tracks = (PlaylistTrack*)malloc(sizeof(PlaylistTrack) * PLAYLIST_MAX_TRACKS);
     ctx->track_count = 0;
     ctx->current_index = 0;
 }
@@ -64,7 +64,7 @@ static int collect_tracks(int dir_id, int start_file_id, PlaylistTrack* tracks,
                           int max_tracks) {
     PlaylistTrack* before = NULL;
     if (start_file_id > 0) {
-        before = malloc((size_t)max_tracks * sizeof(*before));
+        before = (PlaylistTrack*)malloc((size_t)max_tracks * sizeof(*before));
         if (!before) return -1;
     }
 
@@ -143,7 +143,7 @@ int Playlist_collectDirectory(int dir_id, int max_tracks, PlaylistTrack** tracks
     int request = FileDb_scanDir(dir_id, true);
     if (!FileDb_waitBlocking(request)) return -1;
 
-    PlaylistTrack* items = malloc((size_t)max_tracks * sizeof(*items));
+    PlaylistTrack* items = (PlaylistTrack*)malloc((size_t)max_tracks * sizeof(*items));
     if (!items) return -1;
     int count = collect_tracks(dir_id, 0, items, max_tracks);
     if (count <= 0) {

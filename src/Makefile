@@ -255,6 +255,17 @@ CXX_OBJS   = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(filter %.cpp,$(LOCAL_SRC)))
 EXT_OBJS   = $(patsubst $(NEXTUI_ROOT)/%.c,$(OBJ_DIR)/ext/%.o,$(EXT_SRC))
 APP_OBJS = $(LOCAL_OBJS) $(EXT_OBJS) $(BUILD_DIR)/version_string.o
 
+# The C code of the app stays valid C++, thus a file can move to C++ with few
+# changes. GCC rejects most of what C++ does not allow: an implicit conversion
+# from void* or to an enum, an array compound literal, a string literal given
+# as char*, and a goto past an initialization. It does not reject the address
+# of a struct compound literal, or designators out of the order of the struct.
+# The vendored code in the subdirectories is not checked.
+OWN_C_SRC  = $(foreach src,$(filter %.c,$(LOCAL_SRC)),$(if $(findstring /,$(src)),,$(src)))
+OWN_C_OBJS = $(patsubst %.c,$(OBJ_DIR)/%.o,$(OWN_C_SRC))
+$(OWN_C_OBJS): MY_CFLAGS += -Werror=c++-compat -Werror=write-strings \
+                            -Werror=discarded-qualifiers -Werror=jump-misses-init
+
 ###########################################################
 # Compiler / linker flags
 
@@ -326,11 +337,14 @@ else
 LDLIBS += $(shell pkg-config --libs sdl2 gl 2>/dev/null || echo "-lSDL2 -lGL")
 endif
 else
+# Only the library names: the paths of pkg-config in an image are the paths of
+# the toolchain, and a path that it gives also goes into the RUNPATH of the
+# binary. -L$(PREFIX)/lib finds the libraries.
 ifeq ($(PLATFORM), h700)
 # The SDK GLES metadata names libUMP, which h700 does not use.
-LDLIBS += $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 2>/dev/null || echo "-lSDL2") -lGLESv2
 else
-LDLIBS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
+LDLIBS += $(shell pkg-config --libs-only-l sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
 endif
 LDLIBS += -lfdk-aac
 # The audio libraries a device pulls in are whatever its toolchain sysroot

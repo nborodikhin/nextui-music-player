@@ -35,10 +35,10 @@ double Theme_contrast(SDL_Color a, SDL_Color b) {
 
 SDL_Color Theme_mix(SDL_Color from, SDL_Color to, int percent) {
     SDL_Color color = {
-        .r = from.r + (to.r - from.r) * percent / 100,
-        .g = from.g + (to.g - from.g) * percent / 100,
-        .b = from.b + (to.b - from.b) * percent / 100,
-        .a = from.a + (to.a - from.a) * percent / 100,
+        .r = (Uint8)(from.r + (to.r - from.r) * percent / 100),
+        .g = (Uint8)(from.g + (to.g - from.g) * percent / 100),
+        .b = (Uint8)(from.b + (to.b - from.b) * percent / 100),
+        .a = (Uint8)(from.a + (to.a - from.a) * percent / 100),
     };
     return color;
 }

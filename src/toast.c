@@ -55,7 +55,11 @@ static void draw(void) {
         SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);
         int text_x = border + (toast_w - text->w) / 2;
         int text_y = border + (toast_h - text->h) / 2;
-        SDL_BlitSurface(text, NULL, surface, &(SDL_Rect){text_x, text_y});
+        SDL_Rect text_at = {
+            .x = text_x,
+            .y = text_y,
+        };
+        SDL_BlitSurface(text, NULL, surface, &text_at);
 
         UiLayer_clear(UI_LAYER_TOAST);
         UiLayer_blit(surface, toast_x - border, toast_y - border, UI_LAYER_TOAST);

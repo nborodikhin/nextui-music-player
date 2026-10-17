@@ -27,16 +27,16 @@
 
 // A character key with on explicitly defined width
 #define KW(slot, key_width) {   \
-    .action = KEY_TEXT,         \
     .ansi   = slot,             \
+    .action = KEY_TEXT,         \
     .label  = NULL,             \
     .width  = key_width,        \
 }
 
 // A "special" key that acts and displays a label instead of a character.
 #define KEY(what, slot, name, key_width) { \
-    .action = what,                        \
     .ansi   = slot,                        \
+    .action = what,                        \
     .label  = name,                        \
     .width  = key_width,                   \
 }
@@ -267,19 +267,19 @@ static Keyboard keyboard;
 // Above/below is not symmetrical: (G, H) -> B, ([, ]) -> ".
 
 static const signed char below_col[KEYBOARD_ROWS][KEYBOARD_MAX_COLS] = {
-    [0] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // digits -> tab row
-    [1] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12},          // tab row -> home row
-    [2] = {0, 1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11},               // home row -> shift row
-    [3] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},                    // shift row -> space row
-    [4] = {0, 0, 6, 13, 13},                                        // space row -> digits
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // digits -> tab row
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11, 12},          // tab row -> home row
+    {0, 1, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11},               // home row -> shift row
+    {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},                    // shift row -> space row
+    {0, 0, 6, 13, 13},                                        // space row -> digits
 };
 
 static const signed char above_col[KEYBOARD_ROWS][KEYBOARD_MAX_COLS] = {
-    [0] = {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},              // digits -> space row
-    [1] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // tab row -> digits
-    [2] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13},              // home row -> tab row
-    [3] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12},                 // shift row -> home row
-    [4] = {0, 0, 5, 11, 11},                                        // space row -> shift row
+    {0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 4},              // digits -> space row
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},          // tab row -> digits
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13},              // home row -> tab row
+    {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12},                 // shift row -> home row
+    {0, 0, 5, 11, 11},                                        // space row -> shift row
 };
 
 // Split one slot's pairs into the pools, dropping the alternates this font has
@@ -436,8 +436,8 @@ bool KeyboardMap_prepare(GlyphSupportedFn supported, void* context) {
     int pairs = count_pairs();
 
     // The running map stays usable until both pools are in hand
-    char (*pool)[UTF8_CHAR_SIZE] = calloc((size_t)pairs * 2, UTF8_CHAR_SIZE);
-    KeyChar* pool_pairs = calloc((size_t)pairs, sizeof(*char_pairs));
+    char (*pool)[UTF8_CHAR_SIZE] = (char (*)[UTF8_CHAR_SIZE])calloc((size_t)pairs * 2, UTF8_CHAR_SIZE);
+    KeyChar* pool_pairs = (KeyChar*)calloc((size_t)pairs, sizeof(*char_pairs));
     if (!pool || !pool_pairs) {
         free(pool);
         free(pool_pairs);

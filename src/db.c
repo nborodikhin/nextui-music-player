@@ -45,7 +45,7 @@ static void increment_data_version(void) {
 }
 
 static void connection_destroy(void* value) {
-    sqlite3* database = value;
+    sqlite3* database = (sqlite3*)value;
     if (!database) return;
 
     int result = sqlite3_close(database);
@@ -86,7 +86,7 @@ static sqlite3* connection(void) {
     if (!atomic_load(&database_available)) return NULL;
     if (!ensure_connection_key()) return NULL;
 
-    sqlite3* database = pthread_getspecific(connection_key);
+    sqlite3* database = (sqlite3*)pthread_getspecific(connection_key);
     if (database) return database;
 
     int result = sqlite3_open(database_path, &database);
@@ -148,7 +148,7 @@ static sqlite3* connection(void) {
 static void close_current_connection(void) {
     if (!connection_key_ready) return;
 
-    sqlite3* database = pthread_getspecific(connection_key);
+    sqlite3* database = (sqlite3*)pthread_getspecific(connection_key);
     if (!database) return;
 
     pthread_setspecific(connection_key, NULL);
@@ -315,7 +315,7 @@ bool Db_initInternal(const char* path) {
         return false;
     }
 
-    sqlite3* database = pthread_getspecific(connection_key);
+    sqlite3* database = (sqlite3*)pthread_getspecific(connection_key);
     if (!migrate(database)) {
         disable_database();
         free(database_path);
@@ -378,7 +378,7 @@ bool Db_resultIsCurrent(const DbResult* result) {
 void Db_freeResult(void* value) {
     if (!value) return;
 
-    DbResult* result = value;
+    DbResult* result = (DbResult*)value;
     if (!result->free) {
         LOG_error("[Db] result has no free function\n");
         return;
@@ -415,7 +415,7 @@ static void free_settings_result(DbSettingsResult* result) {
 }
 
 static DbSettingsResult* allocate_settings_result(void) {
-    DbSettingsResult* result = calloc(1, sizeof(*result));
+    DbSettingsResult* result = (DbSettingsResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_settings_result;
@@ -447,7 +447,7 @@ DbSettingsResult* Db_readSettings(void) {
 
     if (statement.ok && count > 0) {
         DbStatement_begin(&statement, connection(), "SELECT name, type, value FROM settings");
-        result->items = DbStatement_calloc(&statement, (size_t)count * sizeof(*result->items));
+        result->items = (DbSetting*)DbStatement_calloc(&statement, (size_t)count * sizeof(*result->items));
         for (int row = 0; row < count && DbStatement_step(&statement); row++) {
             const char* type_name = DbStatement_get_text(&statement, 1);
             DbSettingType type = setting_type_from_name(type_name);
@@ -543,7 +543,7 @@ static void free_dir_result(DbDirResult* result) {
 }
 
 static DbDirResult* allocate_dir_result(void) {
-    DbDirResult* result = calloc(1, sizeof(*result));
+    DbDirResult* result = (DbDirResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_dir_result;
@@ -656,7 +656,7 @@ static void free_file_result(DbFileResult* result) {
 }
 
 static DbFileResult* allocate_file_result(void) {
-    DbFileResult* result = calloc(1, sizeof(*result));
+    DbFileResult* result = (DbFileResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_file_result;
@@ -773,7 +773,7 @@ static void free_read_dir_result(DbReadDirResult* result) {
 }
 
 static DbReadDirResult* allocate_read_dir_result(void) {
-    DbReadDirResult* result = calloc(1, sizeof(*result));
+    DbReadDirResult* result = (DbReadDirResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_read_dir_result;
@@ -811,7 +811,7 @@ DbReadDirResult* Db_readDir(int dir_id) {
                           "SELECT id, parent_id, path, filename FROM dirs "
                           "WHERE parent_id = ? ORDER BY filename COLLATE NOCASE, id");
         DbStatement_bind(&statement, 1, INT_ARG(dir_id));
-        result->dirs = DbStatement_calloc(&statement, (size_t)dir_count * sizeof(*result->dirs));
+        result->dirs = (DbDir*)DbStatement_calloc(&statement, (size_t)dir_count * sizeof(*result->dirs));
         while (result->dir_count < dir_count && DbStatement_step(&statement)) {
             copy_dir_row(&statement, &result->dirs[result->dir_count++]);
         }
@@ -824,9 +824,9 @@ DbReadDirResult* Db_readDir(int dir_id) {
                           "FROM files f JOIN dirs d ON d.id = f.parent_id "
                           "WHERE f.parent_id = ? ORDER BY f.filename COLLATE NOCASE, f.id");
         DbStatement_bind(&statement, 1, INT_ARG(dir_id));
-        result->files = file_count > 0
+        result->files = (DbFile*)(file_count > 0
             ? DbStatement_calloc(&statement, (size_t)file_count * sizeof(*result->files))
-            : NULL;
+            : NULL);
         while (result->file_count < file_count && DbStatement_step(&statement)) {
             copy_file_row(&statement, &result->files[result->file_count++]);
         }
@@ -853,7 +853,7 @@ static void free_files_result(DbFilesResult* result) {
 }
 
 static DbFilesResult* allocate_files_result(void) {
-    DbFilesResult* result = calloc(1, sizeof(*result));
+    DbFilesResult* result = (DbFilesResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_files_result;
@@ -943,8 +943,8 @@ typedef struct {
 // Orders directories by parent, then by name without regard to case, then by id. The children
 // of one directory are then next to each other, in the order of the walk.
 static int compare_subtree_dirs(const void* left, const void* right) {
-    const SubtreeDir* a = left;
-    const SubtreeDir* b = right;
+    const SubtreeDir* a = (const SubtreeDir*)left;
+    const SubtreeDir* b = (const SubtreeDir*)right;
     if (a->parent_id != b->parent_id) return a->parent_id < b->parent_id ? -1 : 1;
     int names = strcasecmp(a->filename, b->filename);
     if (names != 0) return names;
@@ -978,7 +978,7 @@ static int read_subtree_order(DbStatement* statement, int dir_id, int** ids) {
     int count = DbStatement_query_int(statement, connection(),
                                       "SELECT COUNT(*) FROM dirs d WHERE " SUBTREE_DIRS_CONDITION,
                                       INT_ARG(dir_id), TEXT_ARG(path));
-    SubtreeDir* dirs = DbStatement_calloc(statement, (size_t)count * sizeof(*dirs));
+    SubtreeDir* dirs = (SubtreeDir*)DbStatement_calloc(statement, (size_t)count * sizeof(*dirs));
     int dir_count = 0;
     DbStatement_begin(statement, connection(),
                       "SELECT d.id, d.parent_id, d.filename FROM dirs d "
@@ -995,8 +995,8 @@ static int read_subtree_order(DbStatement* statement, int dir_id, int** ids) {
     free(path);
 
     // The subtree holds its own directory, thus count is at least 1.
-    int* order = DbStatement_calloc(statement, (size_t)count * sizeof(*order));
-    int* stack = DbStatement_calloc(statement, (size_t)count * sizeof(*stack));
+    int* order = (int*)DbStatement_calloc(statement, (size_t)count * sizeof(*order));
+    int* stack = (int*)DbStatement_calloc(statement, (size_t)count * sizeof(*stack));
     int order_count = 0;
     if (statement->ok) {
         qsort(dirs, (size_t)dir_count, sizeof(*dirs), compare_subtree_dirs);
@@ -1090,7 +1090,7 @@ DbFilesResult* Db_getFiles(int dir_id, DbFileType type, bool recursive, int max_
     ok = ok && statement.ok;
     int limit = max_count > 0 && max_count < total ? max_count : total;
     if (ok && limit > 0) {
-        result->items = DbStatement_calloc(&statement, (size_t)limit * sizeof(*result->items));
+        result->items = (DbFile*)DbStatement_calloc(&statement, (size_t)limit * sizeof(*result->items));
         ok = statement.ok;
     }
 
@@ -1135,7 +1135,7 @@ static void free_playlists_result(DbPlaylistsResult* result) {
 }
 
 static DbPlaylistResult* allocate_playlist_result(void) {
-    DbPlaylistResult* result = calloc(1, sizeof(*result));
+    DbPlaylistResult* result = (DbPlaylistResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_playlist_result;
@@ -1144,7 +1144,7 @@ static DbPlaylistResult* allocate_playlist_result(void) {
 }
 
 static DbPlaylistsResult* allocate_playlists_result(void) {
-    DbPlaylistsResult* result = calloc(1, sizeof(*result));
+    DbPlaylistsResult* result = (DbPlaylistsResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_playlists_result;
@@ -1196,7 +1196,7 @@ DbPlaylistsResult* Db_readPlaylists(void) {
         DbStatement_begin(&statement, connection(),
                           "SELECT id, path, num_entries FROM playlists "
                           "ORDER BY path COLLATE NOCASE, id");
-        result->items = DbStatement_calloc(&statement, (size_t)count * sizeof(*result->items));
+        result->items = (DbPlaylist*)DbStatement_calloc(&statement, (size_t)count * sizeof(*result->items));
         while (result->count < count && DbStatement_step(&statement)) {
             copy_playlist_row(&statement, &result->items[result->count++]);
         }
@@ -1220,7 +1220,7 @@ static void free_last_played_result(DbLastPlayedResult* result) {
 }
 
 static DbLastPlayedResult* allocate_last_played_result(void) {
-    DbLastPlayedResult* result = calloc(1, sizeof(*result));
+    DbLastPlayedResult* result = (DbLastPlayedResult*)calloc(1, sizeof(*result));
     if (result) {
         result->base.data_version = Db_dataVersion();
         result->base.free = (DbResultDestructor) free_last_played_result;

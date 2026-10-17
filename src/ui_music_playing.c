@@ -54,7 +54,11 @@ static int draw_mode_indicator(SDL_Surface *screen, const char *label, bool on,
 
     int x = right_x - surf->w;
     int w = surf->w;
-    SDL_BlitSurface(surf, NULL, screen, &(SDL_Rect){x, y});
+    SDL_Rect surf_at = {
+        .x = x,
+        .y = y,
+    };
+    SDL_BlitSurface(surf, NULL, screen, &surf_at);
     // The rule takes the color of its label, thus the two cannot drift
     if (on) {
         SDL_Rect rule = {x, y + surf->h, w, SCALE1(1)};
@@ -75,7 +79,13 @@ void MusicPlaying_drawLyricRow(SDL_Surface* screen, TTF_Font* font, const char* 
     SDL_Surface* surf = TTF_RenderUTF8_Blended(font, text, color);
     if (!surf) return;
     SDL_Rect src = {0, 0, surf->w > max_w ? max_w : surf->w, surf->h};
-    SDL_BlitSurface(surf, &src, screen, &(SDL_Rect){x, y, 0, 0});
+    SDL_Rect surf_at = {
+        .x = x,
+        .y = y,
+        .w = 0,
+        .h = 0,
+    };
+    SDL_BlitSurface(surf, &src, screen, &surf_at);
     SDL_FreeSurface(surf);
 }
 
@@ -148,7 +158,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     if (track_surf) {
         int track_x = chip.x + chip.w + SCALE1(8);
         int track_y = top_y + (chip.h - track_surf->h) / 2;
-        SDL_BlitSurface(track_surf, NULL, screen, &(SDL_Rect){track_x, track_y});
+        SDL_Rect track_at = {
+            .x = track_x,
+            .y = track_y,
+        };
+        SDL_BlitSurface(track_surf, NULL, screen, &track_at);
         SDL_FreeSurface(track_surf);
     }
 
@@ -169,7 +183,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
     SDL_Surface *artist_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (artist_surf) {
-        SDL_BlitSurface(artist_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+        SDL_Rect artist_at = {
+            .x = SCALE1(PADDING),
+            .y = info_y,
+        };
+        SDL_BlitSurface(artist_surf, NULL, screen, &artist_at);
         info_y += artist_surf->h + SCALE1(2);
         SDL_FreeSurface(artist_surf);
     } else {
@@ -204,7 +222,13 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         if (title_surf) {
             SDL_Rect src = {0, 0, title_surf->w > max_w_text ? max_w_text : title_surf->w,
                             title_surf->h};
-            SDL_BlitSurface(title_surf, &src, screen, &(SDL_Rect){SCALE1(PADDING), title_y, 0, 0});
+            SDL_Rect title_at = {
+                .x = SCALE1(PADDING),
+                .y = title_y,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(title_surf, &src, screen, &title_at);
             SDL_FreeSurface(title_surf);
         }
     }
@@ -235,7 +259,11 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
             SDL_Surface *album_surf = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (album_surf) {
-                SDL_BlitSurface(album_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+                SDL_Rect album_at = {
+                    .x = SCALE1(PADDING),
+                    .y = info_y,
+                };
+                SDL_BlitSurface(album_surf, NULL, screen, &album_at);
                 SDL_FreeSurface(album_surf);
             }
         }
@@ -315,9 +343,21 @@ static void paint_status_layer(void) {
     SDL_Surface *combined = SDL_CreateRGBSurfaceWithFormat(0, total_w, total_h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (combined) {
         SDL_FillRect(combined, NULL, 0); // Transparent background
-        SDL_BlitSurface(pos_surf, NULL, combined, &(SDL_Rect){0, 0, 0, 0});
+        SDL_Rect pos_at = {
+            .x = 0,
+            .y = 0,
+            .w = 0,
+            .h = 0,
+        };
+        SDL_BlitSurface(pos_surf, NULL, combined, &pos_at);
         if (dur_surf) {
-            SDL_BlitSurface(dur_surf, NULL, combined, &(SDL_Rect){pos_surf->w, 0, 0, 0});
+            SDL_Rect dur_at = {
+                .x = pos_surf->w,
+                .y = 0,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(dur_surf, NULL, combined, &dur_at);
         }
         UiLayer_blit(combined, time_x, time_y, UI_LAYER_STATUS);
         SDL_FreeSurface(combined);

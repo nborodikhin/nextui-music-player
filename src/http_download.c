@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "http_download.h"
 #include "radio_net.h"
 
@@ -221,8 +223,10 @@ static int http_download_file_internal(const char* url, const char* filepath,
     header_buf = (char*)malloc(HEADER_BUF_SIZE);
     if (!header_buf) goto cleanup;
 
-    int header_pos = 0;
-    bool headers_done = false;
+    int header_pos;
+    header_pos = 0;
+    bool headers_done;
+    headers_done = false;
 
     while (header_pos < HEADER_BUF_SIZE - 1) {
         if (should_stop && *should_stop) goto cleanup;
@@ -256,8 +260,10 @@ static int http_download_file_internal(const char* url, const char* filepath,
     }
 
     // Check for redirect
-    char* first_line_end = strstr(header_buf, "\r\n");
-    bool is_redirect = false;
+    char* first_line_end;
+    first_line_end = strstr(header_buf, "\r\n");
+    bool is_redirect;
+    is_redirect = false;
     if (first_line_end) {
         char* status_start = strstr(header_buf, "HTTP/");
         if (status_start && status_start < first_line_end) {
@@ -306,8 +312,10 @@ static int http_download_file_internal(const char* url, const char* filepath,
     }
 
     // Parse Content-Length
-    long content_length = -1;
-    char* cl = strcasestr(header_buf, "\nContent-Length:");
+    long content_length;
+    content_length = -1;
+    char* cl;
+    cl = strcasestr(header_buf, "\nContent-Length:");
     if (cl) {
         cl += 16;
         while (*cl == ' ') cl++;
@@ -315,7 +323,8 @@ static int http_download_file_internal(const char* url, const char* filepath,
     }
 
     // Check for chunked transfer encoding
-    bool is_chunked = (strcasestr(header_buf, "Transfer-Encoding: chunked") != NULL);
+    bool is_chunked;
+    is_chunked = (strcasestr(header_buf, "Transfer-Encoding: chunked") != NULL);
 
     // Open output file
     outfile = fopen(filepath, "wb");
@@ -325,16 +334,19 @@ static int http_download_file_internal(const char* url, const char* filepath,
     }
 
     // Download body in chunks
-    uint8_t* chunk_buf = (uint8_t*)malloc(HTTP_DOWNLOAD_CHUNK_SIZE);
+    uint8_t* chunk_buf;
+    chunk_buf = (uint8_t*)malloc(HTTP_DOWNLOAD_CHUNK_SIZE);
     if (!chunk_buf) {
         fclose(outfile);
         outfile = NULL;
         goto cleanup;
     }
 
-    long total_read = 0;
-    int read_retries = 0;
-    const int max_read_retries = 50;
+    long total_read;
+    total_read = 0;
+    int read_retries;
+    read_retries = 0;
+    static const int max_read_retries = 50;
 
     if (is_chunked) {
         // Handle chunked transfer encoding

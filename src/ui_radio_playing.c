@@ -106,7 +106,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     if (station_surf) {
         int station_x = chip.x + chip.w + SCALE1(8);
         int station_y = top_y + (chip.h - station_surf->h) / 2;
-        SDL_BlitSurface(station_surf, NULL, screen, &(SDL_Rect){station_x, station_y});
+        SDL_Rect station_at = {
+            .x = station_x,
+            .y = station_y,
+        };
+        SDL_BlitSurface(station_surf, NULL, screen, &station_at);
         SDL_FreeSurface(station_surf);
     }
 
@@ -126,7 +130,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     SDL_Surface* genre_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (genre_surf) {
-        SDL_BlitSurface(genre_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+        SDL_Rect genre_at = {
+            .x = SCALE1(PADDING),
+            .y = info_y,
+        };
+        SDL_BlitSurface(genre_surf, NULL, screen, &genre_at);
         info_y += genre_surf->h + SCALE1(2);
         SDL_FreeSurface(genre_surf);
     } else {
@@ -141,7 +149,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
         Fonts_getTitle(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_surf) {
-        SDL_BlitSurface(name_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+        SDL_Rect name_at = {
+            .x = SCALE1(PADDING),
+            .y = info_y,
+        };
+        SDL_BlitSurface(name_surf, NULL, screen, &name_at);
         info_y += name_surf->h + SCALE1(2);
         SDL_FreeSurface(name_surf);
     } else {
@@ -203,7 +215,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
                 SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
                     title_font, line_buf, Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (title_surf) {
-                    SDL_BlitSurface(title_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+                    SDL_Rect title_at = {
+                        .x = SCALE1(PADDING),
+                        .y = info_y,
+                    };
+                    SDL_BlitSurface(title_surf, NULL, screen, &title_at);
                     info_y += title_surf->h + SCALE1(2);
                     SDL_FreeSurface(title_surf);
                 }
@@ -221,7 +237,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (artist_surf) {
-            SDL_BlitSurface(artist_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+            SDL_Rect artist_at = {
+                .x = SCALE1(PADDING),
+                .y = info_y,
+            };
+            SDL_BlitSurface(artist_surf, NULL, screen, &artist_at);
             info_y += artist_surf->h + SCALE1(2);
             SDL_FreeSurface(artist_surf);
         }
@@ -233,7 +253,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         SDL_Surface* slogan_surf = TTF_RenderUTF8_Blended(
             Fonts_getAlbum(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (slogan_surf) {
-            SDL_BlitSurface(slogan_surf, NULL, screen, &(SDL_Rect){SCALE1(PADDING), info_y});
+            SDL_Rect slogan_at = {
+                .x = SCALE1(PADDING),
+                .y = info_y,
+            };
+            SDL_BlitSurface(slogan_surf, NULL, screen, &slogan_at);
             info_y += slogan_surf->h + SCALE1(2);
             SDL_FreeSurface(slogan_surf);
         }
@@ -276,7 +300,11 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
         SDL_Surface* err_text = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), Radio_getError(), Theme_getColor(THEME_ROLE_STATUS_ERROR, false));
         if (err_text) {
-            SDL_BlitSurface(err_text, NULL, screen, &(SDL_Rect){SCALE1(PADDING), vis_y - SCALE1(20)});
+            SDL_Rect err_at = {
+                .x = SCALE1(PADDING),
+                .y = vis_y - SCALE1(20),
+            };
+            SDL_BlitSurface(err_text, NULL, screen, &err_at);
             SDL_FreeSurface(err_text);
         }
     }
@@ -370,7 +398,13 @@ static bool build_status_surface(void) {
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(
             font, bitrate_str, Theme_getColor(THEME_ROLE_PRIMARY, false));
         if (text_surf) {
-            SDL_BlitSurface(text_surf, NULL, surface, &(SDL_Rect){x_offset, (line_h - bitrate_h) / 2, 0, 0});
+            SDL_Rect text_at = {
+                .x = x_offset,
+                .y = (line_h - bitrate_h) / 2,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(text_surf, NULL, surface, &text_at);
             SDL_FreeSurface(text_surf);
         }
         x_offset += bitrate_w + gap;
@@ -379,7 +413,13 @@ static bool build_status_surface(void) {
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(
             font, status_text, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text_surf) {
-            SDL_BlitSurface(text_surf, NULL, surface, &(SDL_Rect){x_offset, (line_h - status_h) / 2, 0, 0});
+            SDL_Rect text_at2 = {
+                .x = x_offset,
+                .y = (line_h - status_h) / 2,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(text_surf, NULL, surface, &text_at2);
             SDL_FreeSurface(text_surf);
         }
     }

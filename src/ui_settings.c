@@ -121,7 +121,13 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
             SDL_Surface* val_surf = TTF_RenderUTF8_Blended(font, value_to_print, value_color);
             if (val_surf) {
                 int value_x = hw - SCALE1(PADDING) - SCALE1(BUTTON_PADDING) - val_surf->w;
-                SDL_BlitSurface(val_surf, NULL, screen, &(SDL_Rect){value_x, text_y, 0, 0});
+                SDL_Rect val_at = {
+                    .x = value_x,
+                    .y = text_y,
+                    .w = 0,
+                    .h = 0,
+                };
+                SDL_BlitSurface(val_surf, NULL, screen, &val_at);
                 SDL_FreeSurface(val_surf);
             }
         }
@@ -134,7 +140,13 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
         SDL_Color label_color = Theme_getColor(THEME_ROLE_PRIMARY, selected);
         SDL_Surface* label_surf = TTF_RenderUTF8_Blended(font, label, label_color);
         if (label_surf) {
-            SDL_BlitSurface(label_surf, NULL, screen, &(SDL_Rect){text_x, text_y, 0, 0});
+            SDL_Rect label_at = {
+                .x = text_x,
+                .y = text_y,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(label_surf, NULL, screen, &label_at);
             SDL_FreeSurface(label_surf);
         }
     }
@@ -143,15 +155,18 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, menu_scroll, SETTINGS_ITEM_COUNT);
 
     // Button hints
-    GFX_blitButtonGroup((char *[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
 
     // Different hints based on selected item
     if (menu_selected == SETTINGS_ITEM_SCREEN_OFF ||
         menu_selected == SETTINGS_ITEM_BASS_FILTER ||
         menu_selected == SETTINGS_ITEM_SOFT_LIMITER ||
         menu_selected == SETTINGS_ITEM_UPDATE_CHANNEL) {
-        GFX_blitButtonGroup((char *[]){"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", "LEFT/RIGHT", "CHANGE", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char *[]){"B", "BACK", "A", "OPEN", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", "A", "OPEN", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     }
 }

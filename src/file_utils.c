@@ -112,7 +112,7 @@ char* userdata_path(const char* rel) {
     if (!rel) return NULL;
 
     size_t size = strlen(USERDATA_DIR) + (rel[0] ? strlen(rel) + 2 : 1);
-    char* path = malloc(size);
+    char* path = (char*)malloc(size);
     if (!path) return NULL;
 
     if (userdata_snpath(rel, path, size) < 0) {

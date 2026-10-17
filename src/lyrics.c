@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "lyrics.h"
 #include "lyric_window.h"
 #include "radio_net.h"
@@ -474,7 +476,7 @@ void Lyrics_init(void) {
 }
 
 void Lyrics_cleanup(void) {
-    fetch_generation++;  // invalidate any running thread
+    fetch_generation = fetch_generation + 1;  // invalidate any running thread
     lyrics_line_count = 0;
     lyrics_available = false;
     last_artist[0] = '\0';
@@ -483,7 +485,7 @@ void Lyrics_cleanup(void) {
 }
 
 void Lyrics_clear(void) {
-    fetch_generation++;  // invalidate any running thread
+    fetch_generation = fetch_generation + 1;  // invalidate any running thread
     lyrics_line_count = 0;
     lyrics_available = false;
     last_artist[0] = '\0';
@@ -511,7 +513,7 @@ void Lyrics_fetch(const char* artist, const char* title, int duration_sec,
     }
 
     // Invalidate any previous fetch — old thread will discard its results
-    fetch_generation++;
+    fetch_generation = fetch_generation + 1;
 
     // Reset state
     strncpy(last_artist, artist, sizeof(last_artist) - 1);

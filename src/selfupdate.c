@@ -38,7 +38,7 @@ static char current_version[32] = "";
 
 // Update status. A worker writes the progress fields directly, and publishes
 // its result under status_mutex.
-static SelfUpdateStatus update_status = {0};
+static SelfUpdateStatus update_status;
 static pthread_mutex_t status_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t update_thread;
 static volatile bool update_running = false;
@@ -75,7 +75,7 @@ static void* update_thread_func(void* arg);
 // @param max_size  Largest body to accept, terminator included
 // @return          the body, or NULL if it could not be fetched
 static char* fetch_to_memory(const char* url, size_t max_size) {
-    char* buf = malloc(max_size);
+    char* buf = (char*)malloc(max_size);
     if (!buf) return NULL;
 
     if (wget_fetch_string(url, buf, (int)max_size) < 0) {
@@ -246,7 +246,7 @@ static bool start_worker(void* (*worker)(void*), UpdateChannel channel) {
 }
 
 int SelfUpdate_checkForUpdate(void) {
-    UpdateChannel channel = Settings_getEnum(&SETTING_UPDATE_CHANNEL);
+    UpdateChannel channel = (UpdateChannel)Settings_getEnum(&SETTING_UPDATE_CHANNEL);
     if (channel == UPDATE_CHANNEL_OFF) channel = UPDATE_CHANNEL_STABLE;
 
     pthread_mutex_lock(&status_mutex);

@@ -96,8 +96,20 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
                 // the GPU layer which expects premultiplied pixels.
                 // BLEND mode converts those into "transparent black"
                 SDL_SetSurfaceBlendMode(text_surf, SDL_BLENDMODE_BLEND);
-                SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &(SDL_Rect){0, 0, 0, 0});
-                SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &(SDL_Rect){state->text_width + padding, 0, 0, 0});
+                SDL_Rect text_at = {
+                    .x = 0,
+                    .y = 0,
+                    .w = 0,
+                    .h = 0,
+                };
+                SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &text_at);
+                SDL_Rect text_at2 = {
+                    .x = state->text_width + padding,
+                    .y = 0,
+                    .w = 0,
+                    .h = 0,
+                };
+                SDL_BlitSurface(text_surf, NULL, state->cached_scroll_surface, &text_at2);
                 SDL_FreeSurface(text_surf);
             }
         }
@@ -215,7 +227,13 @@ void ScrollText_render(ScrollTextState* state, TTF_Font* font, SDL_Color color,
         SDL_Surface* surf = TTF_RenderUTF8_Blended(font, state->text, color);
         if (surf) {
             SDL_Rect src = {0, 0, surf->w > state->max_width ? state->max_width : surf->w, surf->h};
-            SDL_BlitSurface(surf, &src, screen, &(SDL_Rect){x, y, 0, 0});
+            SDL_Rect surf_at = {
+                .x = x,
+                .y = y,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(surf, &src, screen, &surf_at);
             SDL_FreeSurface(surf);
         }
         return;
@@ -254,6 +272,11 @@ void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
 // The platform draws the status group only where the screen has the room for it.
 bool screen_has_status_group(SDL_Surface* screen) {
     return screen->w >= SCALE1(320);
+}
+
+int blit_button_group(const char* const* hints, bool primary, SDL_Surface* dst, bool align_right) {
+    // NextUI reads the hints and does not change them.
+    return GFX_blitButtonGroup((char**)hints, primary, dst, align_right);
 }
 
 // The y of the top of a box `box_h` high, centered on the top pill row, which is the
@@ -333,7 +356,7 @@ static SDL_Surface* segment_surface(int slot, const ScreenTitleSegment* seg, TTF
         SDL_Surface* surf = c->surf;
         int fade_x = seg->len - fade_w;
         // The text surface of SDL_ttf is ARGB8888, thus the alpha is the top byte
-        uint32_t* px = surf->pixels;
+        uint32_t* px = (uint32_t*)surf->pixels;
         int pitch = surf->pitch / 4;
         for (int col = fade_x; col < seg->len && col < surf->w; col++) {
             uint32_t keep = (uint32_t)(255 * (seg->len - col) / fade_w);
@@ -352,7 +375,11 @@ static void blit_segment(SDL_Surface* dst, int x, int y, int slot, const ScreenT
     SDL_Surface* surf = segment_surface(slot, seg, font, color, fade_w);
     if (!surf) return;
     SDL_Rect src = {0, 0, seg->cut ? seg->len : surf->w, surf->h};
-    SDL_BlitSurface(surf, &src, dst, &(SDL_Rect){x, y});
+    SDL_Rect surf_at = {
+        .x = x,
+        .y = y,
+    };
+    SDL_BlitSurface(surf, &src, dst, &surf_at);
 }
 
 // Blits the slice of the tape that the area shows onto `dst`, with the area at
@@ -367,7 +394,13 @@ static void blit_title_slice(SDL_Surface* dst, int x, int y, ScreenTitle* title,
 
     SDL_Rect clip;
     SDL_GetClipRect(dst, &clip);
-    SDL_SetClipRect(dst, &(SDL_Rect){x, y, area_w, em});
+    SDL_Rect clip_rect = {
+        .x = x,
+        .y = y,
+        .w = area_w,
+        .h = em,
+    };
+    SDL_SetClipRect(dst, &clip_rect);
 
     int pos = x - offset;
     for (int i = 0; i < title->count && pos < x + area_w; i++) {
@@ -515,16 +548,24 @@ void draw_scroll_indicator(SDL_Surface* screen, int asset, int x, int y) {
     SDL_Surface* shape = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!shape) return;
     SDL_FillRect(shape, NULL, 0);
-    GFX_blitAsset(asset, NULL, shape, &(SDL_Rect){0, 0});
+    SDL_Rect rect = {
+        .x = 0,
+        .y = 0,
+    };
+    GFX_blitAsset(asset, NULL, shape, &rect);
 
     uint32_t rgb = Theme_getPackedColor(THEME_ROLE_SECONDARY, false) & 0x00ffffffu;
-    uint32_t* px = shape->pixels;
+    uint32_t* px = (uint32_t*)shape->pixels;
     for (int i = 0; i < w * h; i++) {
         px[i] = (px[i] & 0xff000000u) | rgb;
     }
 
     SDL_SetSurfaceBlendMode(shape, SDL_BLENDMODE_BLEND);
-    SDL_BlitSurface(shape, NULL, screen, &(SDL_Rect){x, y});
+    SDL_Rect shape_at = {
+        .x = x,
+        .y = y,
+    };
+    SDL_BlitSurface(shape, NULL, screen, &shape_at);
     SDL_FreeSurface(shape);
 }
 
@@ -623,7 +664,13 @@ void render_list_item_text(SDL_Surface* screen, ScrollTextState* scroll_state,
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font_param, text, text_color);
         if (text_surf) {
             SDL_Rect src = {0, 0, text_surf->w > max_text_width ? max_text_width : text_surf->w, text_surf->h};
-            SDL_BlitSurface(text_surf, &src, screen, &(SDL_Rect){text_x, text_y, 0, 0});
+            SDL_Rect text_at = {
+                .x = text_x,
+                .y = text_y,
+                .w = 0,
+                .h = 0,
+            };
+            SDL_BlitSurface(text_surf, &src, screen, &text_at);
             SDL_FreeSurface(text_surf);
         }
     }
@@ -651,12 +698,40 @@ SDL_Rect draw_chip(SDL_Surface* screen, const char* text, int x, int y) {
 
     box.w = label->w + SCALE1(CHIP_PADDING_X * 2);
     uint32_t outline = Theme_getPackedColor(THEME_ROLE_SECONDARY, false);
-    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y, box.w, 1}, outline);
-    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y + box.h - 1, box.w, 1}, outline);
-    SDL_FillRect(screen, &(SDL_Rect){box.x, box.y, 1, box.h}, outline);
-    SDL_FillRect(screen, &(SDL_Rect){box.x + box.w - 1, box.y, 1, box.h}, outline);
+    SDL_Rect fill_rect = {
+        .x = box.x,
+        .y = box.y,
+        .w = box.w,
+        .h = 1,
+    };
+    SDL_FillRect(screen, &fill_rect, outline);
+    SDL_Rect fill_rect2 = {
+        .x = box.x,
+        .y = box.y + box.h - 1,
+        .w = box.w,
+        .h = 1,
+    };
+    SDL_FillRect(screen, &fill_rect2, outline);
+    SDL_Rect fill_rect3 = {
+        .x = box.x,
+        .y = box.y,
+        .w = 1,
+        .h = box.h,
+    };
+    SDL_FillRect(screen, &fill_rect3, outline);
+    SDL_Rect fill_rect4 = {
+        .x = box.x + box.w - 1,
+        .y = box.y,
+        .w = 1,
+        .h = box.h,
+    };
+    SDL_FillRect(screen, &fill_rect4, outline);
+    SDL_Rect label_at = {
+        .x = box.x + SCALE1(CHIP_PADDING_X),
+        .y = box.y + SCALE1(CHIP_PADDING_Y),
+    };
     SDL_BlitSurface(label, NULL, screen,
-                    &(SDL_Rect){box.x + SCALE1(CHIP_PADDING_X), box.y + SCALE1(CHIP_PADDING_Y)});
+                    &label_at);
     SDL_FreeSurface(label);
     return box;
 }
@@ -782,15 +857,33 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
             int r = item_h / 3;
             if (r > total_w / 2) r = total_w / 2;
             if (item_h - 2 * r > 0) {
-                SDL_FillRect(screen, &(SDL_Rect){px, y + r, total_w, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
+                SDL_Rect fill_rect = {
+                    .x = px,
+                    .y = y + r,
+                    .w = total_w,
+                    .h = item_h - 2 * r,
+                };
+                SDL_FillRect(screen, &fill_rect, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
             }
             for (int dy = 0; dy < r; dy++) {
                 int yd = r - dy;
                 int inset = r - (int)sqrtf((float)(r * r - yd * yd));
                 int row_w = total_w - 2 * inset;
                 if (row_w <= 0) continue;
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
+                SDL_Rect fill_rect2 = {
+                    .x = px + inset,
+                    .y = y + dy,
+                    .w = row_w,
+                    .h = 1,
+                };
+                SDL_FillRect(screen, &fill_rect2, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
+                SDL_Rect fill_rect3 = {
+                    .x = px + inset,
+                    .y = y + item_h - 1 - dy,
+                    .w = row_w,
+                    .h = 1,
+                };
+                SDL_FillRect(screen, &fill_rect3, Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false));
             }
         }
 
@@ -800,15 +893,33 @@ ListItemBadgedPos render_list_item_pill_badged(SDL_Surface* screen, ListLayout* 
             int r = item_h / 3;
             if (r > pw / 2) r = pw / 2;
             if (item_h - 2 * r > 0) {
-                SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+                SDL_Rect fill_rect4 = {
+                    .x = px,
+                    .y = y + r,
+                    .w = pw,
+                    .h = item_h - 2 * r,
+                };
+                SDL_FillRect(screen, &fill_rect4, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
             }
             for (int dy = 0; dy < r; dy++) {
                 int yd = r - dy;
                 int inset = r - (int)sqrtf((float)(r * r - yd * yd));
                 int row_w = pw - 2 * inset;
                 if (row_w <= 0) continue;
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
-                SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+                SDL_Rect fill_rect5 = {
+                    .x = px + inset,
+                    .y = y + dy,
+                    .w = row_w,
+                    .h = 1,
+                };
+                SDL_FillRect(screen, &fill_rect5, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+                SDL_Rect fill_rect6 = {
+                    .x = px + inset,
+                    .y = y + item_h - 1 - dy,
+                    .w = row_w,
+                    .h = 1,
+                };
+                SDL_FillRect(screen, &fill_rect6, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
             }
         }
     }
@@ -884,7 +995,13 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
 
         // Main body between corner rows
         if (item_h - 2 * r > 0) {
-            SDL_FillRect(screen, &(SDL_Rect){px, y + r, pw, item_h - 2 * r}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+            SDL_Rect fill_rect = {
+                .x = px,
+                .y = y + r,
+                .w = pw,
+                .h = item_h - 2 * r,
+            };
+            SDL_FillRect(screen, &fill_rect, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
         }
         // Top and bottom corner rows with circular inset
         for (int dy = 0; dy < r; dy++) {
@@ -892,8 +1009,20 @@ ListItemRichPos render_list_item_pill_rich(SDL_Surface* screen, ListLayout* layo
             int inset = r - (int)sqrtf((float)(r * r - yd * yd));
             int row_w = pw - 2 * inset;
             if (row_w <= 0) continue;
-            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
-            SDL_FillRect(screen, &(SDL_Rect){px + inset, y + item_h - 1 - dy, row_w, 1}, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+            SDL_Rect fill_rect2 = {
+                .x = px + inset,
+                .y = y + dy,
+                .w = row_w,
+                .h = 1,
+            };
+            SDL_FillRect(screen, &fill_rect2, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
+            SDL_Rect fill_rect3 = {
+                .x = px + inset,
+                .y = y + item_h - 1 - dy,
+                .w = row_w,
+                .h = 1,
+            };
+            SDL_FillRect(screen, &fill_rect3, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, true));
         }
     }
 
@@ -955,7 +1084,13 @@ void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uin
 
     // Main body between corner rows (full width)
     if (h - 2 * r > 0) {
-        SDL_FillRect(screen, &(SDL_Rect){x, y + r, w, h - 2 * r}, color);
+        SDL_Rect fill_rect = {
+            .x = x,
+            .y = y + r,
+            .w = w,
+            .h = h - 2 * r,
+        };
+        SDL_FillRect(screen, &fill_rect, color);
     }
 
     // Top and bottom corner rows with circular inset
@@ -965,9 +1100,21 @@ void render_rounded_rect_bg(SDL_Surface* screen, int x, int y, int w, int h, uin
         int row_w = w - 2 * inset;
         if (row_w <= 0) continue;
         // Top row
-        SDL_FillRect(screen, &(SDL_Rect){x + inset, y + dy, row_w, 1}, color);
+        SDL_Rect fill_rect2 = {
+            .x = x + inset,
+            .y = y + dy,
+            .w = row_w,
+            .h = 1,
+        };
+        SDL_FillRect(screen, &fill_rect2, color);
         // Bottom row (mirrored)
-        SDL_FillRect(screen, &(SDL_Rect){x + inset, y + h - 1 - dy, row_w, 1}, color);
+        SDL_Rect bottom_rect = {
+            .x = x + inset,
+            .y = y + h - 1 - dy,
+            .w = row_w,
+            .h = 1,
+        };
+        SDL_FillRect(screen, &bottom_rect, color);
     }
 }
 
@@ -1047,8 +1194,10 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
     render_scroll_indicators(screen, &layout, menu_scroll, config->item_count);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
-    GFX_blitButtonGroup((char*[]){"B", (char*)config->btn_b_label, "A", "OPEN", NULL}, 1, screen, 1);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
+    const char* right_hints[] = {"B", config->btn_b_label, "A", "OPEN", NULL};
+    blit_button_group(right_hints, 1, screen, 1);
 }
 
 
@@ -1085,17 +1234,47 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
     SDL_FillRect(screen, &right_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
 
     // Box background
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, box_h},
+    SDL_Rect fill_rect = {
+        .x = db.box_x,
+        .y = db.box_y,
+        .w = box_w,
+        .h = box_h,
+    };
+    SDL_FillRect(screen, &fill_rect,
                  Theme_getPackedColor(THEME_ROLE_SURFACE_BACKGROUND, false));
 
     // Box border
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, box_w, SCALE1(2)},
+    SDL_Rect fill_rect2 = {
+        .x = db.box_x,
+        .y = db.box_y,
+        .w = box_w,
+        .h = SCALE1(2),
+    };
+    SDL_FillRect(screen, &fill_rect2,
                  Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y + box_h - SCALE1(2), box_w, SCALE1(2)},
+    SDL_Rect fill_rect3 = {
+        .x = db.box_x,
+        .y = db.box_y + box_h - SCALE1(2),
+        .w = box_w,
+        .h = SCALE1(2),
+    };
+    SDL_FillRect(screen, &fill_rect3,
                  Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x, db.box_y, SCALE1(2), box_h},
+    SDL_Rect fill_rect4 = {
+        .x = db.box_x,
+        .y = db.box_y,
+        .w = SCALE1(2),
+        .h = box_h,
+    };
+    SDL_FillRect(screen, &fill_rect4,
                  Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
-    SDL_FillRect(screen, &(SDL_Rect){db.box_x + box_w - SCALE1(2), db.box_y, SCALE1(2), box_h},
+    SDL_Rect fill_rect5 = {
+        .x = db.box_x + box_w - SCALE1(2),
+        .y = db.box_y,
+        .w = SCALE1(2),
+        .h = box_h,
+    };
+    SDL_FillRect(screen, &fill_rect5,
                  Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
 
     return db;
@@ -1119,7 +1298,11 @@ void render_empty_state(SDL_Surface* screen, const char* message,
     SDL_Surface* text1 = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), message, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (text1) {
-        SDL_BlitSurface(text1, NULL, screen, &(SDL_Rect){(hw - text1->w) / 2, center_y - SCALE1(10)});
+        SDL_Rect text1_at = {
+            .x = (hw - text1->w) / 2,
+            .y = center_y - SCALE1(10),
+        };
+        SDL_BlitSurface(text1, NULL, screen, &text1_at);
         SDL_FreeSurface(text1);
     }
 
@@ -1127,15 +1310,22 @@ void render_empty_state(SDL_Surface* screen, const char* message,
         SDL_Surface* text2 = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), subtitle, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text2) {
-            SDL_BlitSurface(text2, NULL, screen, &(SDL_Rect){(hw - text2->w) / 2, center_y + SCALE1(10)});
+            SDL_Rect text2_at = {
+                .x = (hw - text2->w) / 2,
+                .y = center_y + SCALE1(10),
+            };
+            SDL_BlitSurface(text2, NULL, screen, &text2_at);
             SDL_FreeSurface(text2);
         }
     }
 
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (y_button_label) {
-        GFX_blitButtonGroup((char*[]){"Y", (char*)y_button_label, "B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"Y", y_button_label, "B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     }
 }

@@ -46,7 +46,7 @@ static bool build_directory(BrowserContext* ctx, int dir_id, bool preserve_selec
 
     // At most the parent, the directories, the files and Play All.
     int capacity = 1 + readDirResult->dir_count + readDirResult->file_count + 1;
-    FileEntry* entries = calloc((size_t)capacity, sizeof(*entries));
+    FileEntry* entries = (FileEntry*)calloc((size_t)capacity, sizeof(*entries));
     int count = 0;
     bool success = entries != NULL;
 

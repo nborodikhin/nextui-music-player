@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "radio_curated.h"
 #include <stdio.h>
 #include <stdlib.h>

@@ -175,10 +175,10 @@ static bool build_cbr_index(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
     if (file_size >= 128 && read(ctx, file_size - 128, tag, 3) == 3 &&
         memcmp(tag, "TAG", 3) == 0) file_size -= 128;
 
-    HeaderBuffer buf = {.data = malloc(SCAN_BUFFER_BYTES), .start = -1};
+    HeaderBuffer buf = {.data = (uint8_t*)malloc(SCAN_BUFFER_BYTES), .start = -1};
     if (!buf.data) return false;
     size_t capacity = 256;
-    info->cbr_offsets = malloc(capacity * sizeof(*info->cbr_offsets));
+    info->cbr_offsets = (int64_t*)malloc(capacity * sizeof(*info->cbr_offsets));
     bool ok = info->cbr_offsets != NULL;
     int64_t pos = info->first_frame;
     int reservoir = 0;
@@ -196,7 +196,7 @@ static bool build_cbr_index(Mp3SeekInfo* info, Mp3SeekRead read, void* ctx,
                     ok = false;
                     break;
                 }
-                int64_t* next = realloc(info->cbr_offsets, 2 * capacity * sizeof(*next));
+                int64_t* next = (int64_t*)realloc(info->cbr_offsets, 2 * capacity * sizeof(*next));
                 if (!next) {
                     ok = false;
                     break;
@@ -352,7 +352,7 @@ bool Mp3Seek_pointFor(const Mp3SeekInfo* info, Mp3SeekRead read, void* ctx, int6
         int64_t entry = start_frame / MP3_SEEK_INDEX_STRIDE;
         frame = entry * MP3_SEEK_INDEX_STRIDE;
         pos = info->cbr_offsets[entry];
-        HeaderBuffer buf = {.data = malloc(SCAN_BUFFER_BYTES), .start = -1};
+        HeaderBuffer buf = {.data = (uint8_t*)malloc(SCAN_BUFFER_BYTES), .start = -1};
         if (!buf.data) return false;
         bool ok = true;
         for (;;) {

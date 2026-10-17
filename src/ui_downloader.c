@@ -92,7 +92,11 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
     if (query_text) {
         int qx = (hw - query_text->w) / 2;
         if (qx < SCALE1(PADDING)) qx = SCALE1(PADDING);
-        SDL_BlitSurface(query_text, NULL, screen, &(SDL_Rect){qx, hh / 2 - SCALE1(30)});
+        SDL_Rect query_at = {
+            .x = qx,
+            .y = hh / 2 - SCALE1(30),
+        };
+        SDL_BlitSurface(query_text, NULL, screen, &query_at);
         SDL_FreeSurface(query_text);
     }
 
@@ -101,7 +105,11 @@ void render_downloader_searching(SDL_Surface* screen, int show_setting, const ch
     SDL_Surface* load_text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), loading, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (load_text) {
-        SDL_BlitSurface(load_text, NULL, screen, &(SDL_Rect){(hw - load_text->w) / 2, hh / 2 + SCALE1(10)});
+        SDL_Rect load_at = {
+            .x = (hw - load_text->w) / 2,
+            .y = hh / 2 + SCALE1(10),
+        };
+        SDL_BlitSurface(load_text, NULL, screen, &load_at);
         SDL_FreeSurface(load_text);
     }
 }
@@ -167,7 +175,11 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
             SDL_Surface* dur_text = TTF_RenderUTF8_Blended(
                 Fonts_getTiny(), dur, Theme_getColor(THEME_ROLE_PRIMARY, false));
             if (dur_text) {
-                SDL_BlitSurface(dur_text, NULL, screen, &(SDL_Rect){hw - dur_text->w - SCALE1(PADDING * 2), y + (layout.item_h - dur_text->h) / 2});
+                SDL_Rect dur_at = {
+                    .x = hw - dur_text->w - SCALE1(PADDING * 2),
+                    .y = y + (layout.item_h - dur_text->h) / 2,
+                };
+                SDL_BlitSurface(dur_text, NULL, screen, &dur_at);
                 SDL_FreeSurface(dur_text);
             }
         }
@@ -184,7 +196,11 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
             SDL_Surface* indicator = TTF_RenderUTF8_Blended(
                 Fonts_getTiny(), "[+]", Theme_getColor(THEME_ROLE_PRIMARY, is_selected));
             if (indicator) {
-                SDL_BlitSurface(indicator, NULL, screen, &(SDL_Rect){title_x, y + (layout.item_h - indicator->h) / 2});
+                SDL_Rect indicator_at = {
+                    .x = title_x,
+                    .y = y + (layout.item_h - indicator->h) / 2,
+                };
+                SDL_BlitSurface(indicator, NULL, screen, &indicator_at);
                 title_x += indicator->w + SCALE1(4);
                 SDL_FreeSurface(indicator);
             }
@@ -206,13 +222,18 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
         SDL_Surface* text = TTF_RenderUTF8_Blended(
             Fonts_getLarge(), msg, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (text) {
-            SDL_BlitSurface(text, NULL, screen, &(SDL_Rect){(hw - text->w) / 2, hh / 2 - text->h / 2});
+            SDL_Rect text_at = {
+                .x = (hw - text->w) / 2,
+                .y = hh / 2 - text->h / 2,
+            };
+            SDL_BlitSurface(text, NULL, screen, &text_at);
             SDL_FreeSurface(text);
         }
     }
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
 
     // Dynamic hint based on queue status (only show A action if item is selected)
     if (selected >= 0 && result_count > 0) {
@@ -221,9 +242,11 @@ void render_downloader_results(SDL_Surface* screen, int show_setting,
         if (Downloader_isInQueue(selected_result->video_id)) {
             action_hint = "QUEUED";
         }
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", (char*)action_hint, NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", "A", action_hint, NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     }
 }
 
@@ -253,7 +276,8 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
     if (qcount == 0) {
         downloader_queue_clear_scroll();
         render_empty_state(screen, "Queue is empty", "Search and add songs to download", NULL);
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
         return;
     }
 
@@ -346,7 +370,11 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
                 int info_x = bar_x + bar_w + SCALE1(6);
                 int avail_w = pos.text_max_width - bar_w - SCALE1(6);
                 SDL_Rect src = {0, 0, info_surf->w > avail_w ? avail_w : info_surf->w, info_surf->h};
-                SDL_BlitSurface(info_surf, &src, screen, &(SDL_Rect){info_x, pos.subtitle_y});
+                SDL_Rect info_at = {
+                    .x = info_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(info_surf, &src, screen, &info_at);
                 SDL_FreeSurface(info_surf);
             }
         } else if (item->status == DOWNLOADER_STATUS_PENDING) {
@@ -354,21 +382,33 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
                 Fonts_getSmall(), "Queued",
                 Theme_getColor(THEME_ROLE_SECONDARY, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at);
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_FAILED) {
             SDL_Surface* s = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), "Failed", Theme_getColor(THEME_ROLE_STATUS_ERROR, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at2 = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at2);
                 SDL_FreeSurface(s);
             }
         } else if (item->status == DOWNLOADER_STATUS_COMPLETE) {
             SDL_Surface* s = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), "Complete", Theme_getColor(THEME_ROLE_STATUS_SUCCESS, is_selected));
             if (s) {
-                SDL_BlitSurface(s, NULL, screen, &(SDL_Rect){pos.subtitle_x, pos.subtitle_y});
+                SDL_Rect s_at3 = {
+                    .x = pos.subtitle_x,
+                    .y = pos.subtitle_y,
+                };
+                SDL_BlitSurface(s, NULL, screen, &s_at3);
                 SDL_FreeSurface(s);
             }
         }
@@ -378,11 +418,14 @@ void render_downloader_queue(SDL_Surface* screen, int show_setting,
     render_scroll_indicators(screen, &layout, *queue_scroll, qcount);
 
     // Button hints
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (qcount > 0) {
-        GFX_blitButtonGroup((char*[]){"X", "REMOVE", "B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints2[] = {"X", "REMOVE", "B", "BACK", NULL};
+        blit_button_group(right_hints2, 1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 }
 
@@ -452,7 +495,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     SDL_Surface* ver_text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (ver_text) {
-        SDL_BlitSurface(ver_text, NULL, screen, &(SDL_Rect){(hw - ver_text->w) / 2, hh / 2 - SCALE1(50)});
+        SDL_Rect ver_at = {
+            .x = (hw - ver_text->w) / 2,
+            .y = hh / 2 - SCALE1(50),
+        };
+        SDL_BlitSurface(ver_text, NULL, screen, &ver_at);
         SDL_FreeSurface(ver_text);
     }
 
@@ -502,7 +549,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     SDL_Surface* status_text = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), status_msg, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (status_text) {
-        SDL_BlitSurface(status_text, NULL, screen, &(SDL_Rect){(hw - status_text->w) / 2, hh / 2});
+        SDL_Rect status_at = {
+            .x = (hw - status_text->w) / 2,
+            .y = hh / 2,
+        };
+        SDL_BlitSurface(status_text, NULL, screen, &status_at);
         SDL_FreeSurface(status_text);
     }
 
@@ -512,7 +563,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
         SDL_Surface* latest_text = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), ver_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (latest_text) {
-            SDL_BlitSurface(latest_text, NULL, screen, &(SDL_Rect){(hw - latest_text->w) / 2, hh / 2 + SCALE1(30)});
+            SDL_Rect latest_at = {
+                .x = (hw - latest_text->w) / 2,
+                .y = hh / 2 + SCALE1(30),
+            };
+            SDL_BlitSurface(latest_text, NULL, screen, &latest_at);
             SDL_FreeSurface(latest_text);
         }
     }
@@ -539,7 +594,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
             SDL_Surface* detail_text = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), status.status_detail, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (detail_text) {
-                SDL_BlitSurface(detail_text, NULL, screen, &(SDL_Rect){(hw - detail_text->w) / 2, bar_y + bar_h + SCALE1(6)});
+                SDL_Rect detail_at = {
+                    .x = (hw - detail_text->w) / 2,
+                    .y = bar_y + bar_h + SCALE1(6),
+                };
+                SDL_BlitSurface(detail_text, NULL, screen, &detail_at);
                 SDL_FreeSurface(detail_text);
             }
         }
@@ -552,7 +611,11 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
         if (pct_text) {
             int pct_x = bar_x + (bar_w - pct_text->w) / 2;
             int pct_y = bar_y + (bar_h - pct_text->h) / 2;
-            SDL_BlitSurface(pct_text, NULL, screen, &(SDL_Rect){pct_x, pct_y});
+            SDL_Rect pct_at = {
+                .x = pct_x,
+                .y = pct_y,
+            };
+            SDL_BlitSurface(pct_text, NULL, screen, &pct_at);
             SDL_FreeSurface(pct_text);
         }
     }
@@ -560,13 +623,17 @@ void render_ytdlp_updating(SDL_Surface* screen, int show_setting) {
     // Button hints, from the same snapshot as everything above. This screen is
     // also where the user agrees to the download, so A appears on it rather than
     // in a dialog over it.
-    GFX_blitButtonGroup((char*[]){"START", "CONTROLS", NULL}, 0, screen, 0);
+    const char* left_hints[] = {"START", "CONTROLS", NULL};
+    blit_button_group(left_hints, 0, screen, 0);
     if (ui == YTDLP_UI_INSTALLING) {
-        GFX_blitButtonGroup((char*[]){"B", "CANCEL", NULL}, 1, screen, 1);
+        const char* right_hints[] = {"B", "CANCEL", NULL};
+        blit_button_group(right_hints, 1, screen, 1);
     } else if (ui == YTDLP_UI_AVAILABLE) {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", "A", installing ? "INSTALL" : "UPDATE", NULL},
+        const char* right_hints2[] = {"B", "BACK", "A", (installing ? "INSTALL" : "UPDATE"), NULL};
+        blit_button_group(right_hints2,
                             1, screen, 1);
     } else {
-        GFX_blitButtonGroup((char*[]){"B", "BACK", NULL}, 1, screen, 1);
+        const char* right_hints3[] = {"B", "BACK", NULL};
+        blit_button_group(right_hints3, 1, screen, 1);
     }
 }
