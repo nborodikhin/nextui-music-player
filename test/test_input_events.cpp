@@ -499,6 +499,7 @@ int main(void) {
     RUN(pad_resets_when_a_button_leaves_with_no_release);
     RUN(pad_state_gives_the_held_buttons);
     RUN(pad_gives_only_the_up_of_a_held_button);
+    RUN(pad_state_gives_a_button_held_before_the_first_update);
     RUN(pad_gives_no_up_of_a_button_that_was_not_down);
     RUN(immediate_short_press_at_the_down);
     RUN(deferred_short_press_at_the_up);
