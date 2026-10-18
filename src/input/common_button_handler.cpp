@@ -1,0 +1,20 @@
+#include "common_button_handler.hpp"
+
+#include "module_common.h"
+
+namespace input {
+
+bool CommonButtonHandler::onButtonEvent(const ButtonEvent&) {
+    return false;
+}
+
+bool CommonButtonHandler::onTick(uint32_t) {
+    InputState& state = InputState::getInstance();
+    int dirty         = 0;
+    int showSetting   = static_cast<int>(state.getHardwareBar());
+    ModuleCommon_PWR_updateWithWake(&dirty, &showSetting, &woke);
+    state.setHardwareBar(static_cast<HardwareBar>(showSetting));
+    return dirty != 0;
+}
+
+}  // namespace input

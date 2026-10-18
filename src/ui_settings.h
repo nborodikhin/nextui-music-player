@@ -15,7 +15,14 @@ extern "C" {
 #define SETTINGS_ITEM_CLEAR_CACHE    4
 #define SETTINGS_ITEM_UPDATE_YTDLP   5
 #define SETTINGS_ITEM_ABOUT          6
+// A row of the debug kind follows the last row of the release kind. The release kind does
+// not count it, thus it shows no such row.
+#define SETTINGS_ITEM_INPUT_TEST     7
+#ifdef DEBUG
+#define SETTINGS_ITEM_COUNT          8
+#else
 #define SETTINGS_ITEM_COUNT          7
+#endif
 
 // Render the settings menu.
 // menu_selected: currently selected menu item

@@ -18,6 +18,7 @@
 #include "wifi.h"
 #include "album_art.h"
 #include "list_nav.h"
+#include "module_input_test.h"
 
 static const int screen_off_values[] = {60, 90, 120, 0};
 #define SCREEN_OFF_VALUE_COUNT 4
@@ -275,6 +276,17 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                             state = SETTINGS_STATE_ABOUT;
                             dirty = 1;
                             break;
+#ifdef DEBUG
+                        case SETTINGS_ITEM_INPUT_TEST:
+                            if (InputTestModule_run(display) == MODULE_EXIT_QUIT) {
+                                return MODULE_EXIT_QUIT;
+                            }
+                            // Start a fresh frame: the test screen can recreate the display,
+                            // which frees the surface of this frame
+                            ScreenTitle_start(false);
+                            dirty = 1;
+                            continue;
+#endif
                     }
                 }
                 // B button - back to main menu

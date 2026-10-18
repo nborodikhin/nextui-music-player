@@ -233,6 +233,8 @@ LOCAL_SRC = \
     ui_theme_utils.c keyboard_map.c utf8.c \
     spectrum.c \
     spectrum_ceiling.c \
+    input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
+    input/common_button_handler.cpp ui_page.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c
@@ -248,6 +250,11 @@ endif
 # call site gets a stub that does nothing.
 ifeq ($(KIND), debug)
 LOCAL_SRC += test_control.c
+endif
+
+# The input test screen is a diagnostic screen of the debug kind.
+ifeq ($(KIND), debug)
+LOCAL_SRC += module_input_test.cpp
 endif
 
 # Sources that live outside src/ (shared NextUI code + per-platform code).

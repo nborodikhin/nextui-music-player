@@ -422,7 +422,13 @@ void ModuleCommon_quit(void) {
     UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
-void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
+static bool woke_from_sleep = false;
+
+static void mark_woke_from_sleep(void) {
+    woke_from_sleep = true;
+}
+
+static void update_power(int* dirty, int* show_setting, PWR_callback_t after_sleep) {
     // Track overlay-triggering buttons for auto-hide (check BEFORE PWR_update)
     // MENU = brightness, SELECT = color temp, PLUS/MINUS = volume
     bool overlay_buttons_active = PAD_isPressed(BTN_PLUS) || PAD_isPressed(BTN_MINUS)
@@ -439,7 +445,7 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     }
 
     // Call platform PWR_update
-    PWR_update(dirty, show_setting, NULL, NULL);
+    PWR_update(dirty, show_setting, NULL, after_sleep);
     if (audio_sink_status_changed()) *dirty = 1;
 
     // After visible period, force hide overlay
@@ -457,6 +463,16 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     }
 
     overlay_buttons_were_active = overlay_buttons_active;
+}
+
+void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
+    update_power(dirty, show_setting, NULL);
+}
+
+void ModuleCommon_PWR_updateWithWake(int* dirty, int* show_setting, bool* woke) {
+    woke_from_sleep = false;
+    update_power(dirty, show_setting, mark_woke_from_sleep);
+    *woke = woke_from_sleep;
 }
 
 void ModuleCommon_requestQuit(void) {
@@ -486,6 +502,12 @@ void ModuleCommon_frameBegin(void) {
     TestControl_tick();
     if (key_locked) update_key_lock();
     Toast_tick();
+}
+
+bool ModuleCommon_takeOutputSwitched(void) {
+    bool switched   = output_switched;
+    output_switched = false;
+    return switched;
 }
 
 void ModuleCommon_markSurfaceDrawn(void) {

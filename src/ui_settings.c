@@ -87,6 +87,11 @@ void render_settings_menu(SDL_Surface* screen, int show_setting,
                 }
                 break;
             }
+#ifdef DEBUG
+            case SETTINGS_ITEM_INPUT_TEST:
+                label = "Input test";
+                break;
+#endif
         }
 
         // Use medium font for settings menu
