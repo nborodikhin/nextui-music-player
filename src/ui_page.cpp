@@ -111,7 +111,7 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
     while (true) {
         ModuleCommon_frameBegin();
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
-        if (ModuleCommon_stopSignalled()) {
+        if (ModuleCommon_isQuitRequested()) {
             page.onExit();
             return MODULE_EXIT_QUIT;
         }

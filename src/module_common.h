@@ -53,6 +53,10 @@ void ModuleCommon_signalStop(void);
 // modules reads it, because no module is in operation there to see the quit.
 bool ModuleCommon_stopSignalled(void);
 
+// Returns true when the app must quit: a signal, a confirmed Quit dialog, or the control
+// channel asked for it. A loop that does not call ModuleCommon_handleGlobalInput() reads it.
+bool ModuleCommon_isQuitRequested(void);
+
 // Disable/enable autosleep (for modules with active playback)
 void ModuleCommon_setAutosleepDisabled(bool disabled);
 

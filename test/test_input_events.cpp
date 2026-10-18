@@ -151,7 +151,7 @@ TEST(pad_resets_when_a_button_leaves_with_no_release) {
     CHECK(log.records[2].kind == Kind::Reset && log.records[2].time == 16);
 }
 
-// The pressed mask of the state is the set of held buttons after the frame
+// The pressed mask of the state is the set of buttons that the pad holds
 TEST(pad_state_gives_the_held_buttons) {
     InputDriver pad;
     RawLog log;
@@ -178,6 +178,18 @@ TEST(pad_gives_only_the_up_of_a_held_button) {
     InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 16, log);
     CHECK_EQ_SZ(log.records.size(), 1);
     CHECK(isRecord(log.records[0], Kind::Up, Button::A, 16));
+}
+
+// A button that was held before the first update gives no event, but the state shows it
+TEST(pad_state_gives_a_button_held_before_the_first_update) {
+    InputDriver pad;
+    RawLog log;
+    const InputState& state = InputState::getInstance();
+    InputDriverTest::update(pad, {bit(Button::A), 0, 0}, 0, log);
+    CHECK(state.isPressed(Button::A));
+    InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 16, log);
+    CHECK(!state.isPressed(Button::A) && !state.isJustReleased(Button::A));
+    CHECK_EQ_SZ(log.records.size(), 0);
 }
 
 // The dpad releases each direction that it does not hold: LEFT goes down, and UP, DOWN and

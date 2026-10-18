@@ -35,8 +35,10 @@ void InputDriver::update(const PadState& padState, uint32_t now, RawEventListene
     const uint32_t justReleased = padState.justReleased & (pressedPads | padState.justPressed);
     pressedPads = (pressedPads | padState.justPressed) & ~justReleased;
 
+    // The pressed mask comes from the pad, thus a button that was held before the first frame
+    // reads as pressed. Only its events are not sent.
     const PadState validatedState = {
-        .pressed      = pressedPads,
+        .pressed      = padState.pressed,
         .justPressed  = padState.justPressed,
         .justReleased = justReleased,
     };

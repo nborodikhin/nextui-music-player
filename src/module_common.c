@@ -487,6 +487,10 @@ bool ModuleCommon_stopSignalled(void) {
     return stop_signalled != 0;
 }
 
+bool ModuleCommon_isQuitRequested(void) {
+    return quit_requested || stop_signalled != 0;
+}
+
 void ModuleCommon_frameBegin(void) {
     if (DisplayHelper_outputChanged()) {
         DisplayHelper_moveToOutput();
