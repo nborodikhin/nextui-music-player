@@ -99,6 +99,14 @@ static bool audio_sink_status_changed(void) {
     return changed;
 }
 
+static bool woke_from_sleep = false;
+
+// NextUI clears the pad at a wake from sleep
+static void on_wake_from_sleep(void) {
+    PadReset_record();
+    woke_from_sleep = true;
+}
+
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
@@ -287,7 +295,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     {
         int dirty_before = result.dirty ? 1 : 0;
         int dirty_tmp = dirty_before;
-        PWR_update(&dirty_tmp, show_setting, NULL, NULL);
+        PWR_update(&dirty_tmp, show_setting, NULL, on_wake_from_sleep);
 
         if (dirty_tmp && !dirty_before) {
             result.dirty = true;
@@ -421,14 +429,6 @@ void ModuleCommon_quit(void) {
 
     UiLayer_clear(UI_LAYER_STATUS);
     UiLayer_clear(UI_LAYER_ANIMATION);
-}
-
-static bool woke_from_sleep = false;
-
-// NextUI clears the pad at a wake from sleep
-static void on_wake_from_sleep(void) {
-    PadReset_record();
-    woke_from_sleep = true;
 }
 
 static void update_power(int* dirty, int* show_setting) {

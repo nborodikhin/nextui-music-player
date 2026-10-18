@@ -16,9 +16,7 @@ static void sendButtonEvents(uint32_t mask, uint32_t now, RawEventListener& list
 
 void InputDriver::update(const PadState& padState, bool padReset, uint32_t now,
                          RawEventListener& listener) {
-    // A reset that the app did not count makes a held button leave the pad with no release
-    const bool reset = padReset || (pressedPads & ~padState.pressed & ~padState.justReleased) != 0;
-    if (reset) {
+    if (padReset) {
         pressedPads = 0;
     }
 
@@ -42,7 +40,7 @@ void InputDriver::update(const PadState& padState, bool padReset, uint32_t now,
     };
     InputState::getInstance().setState(validatedState, now);
 
-    if (reset) {
+    if (padReset) {
         listener.onRawEvent({now, event::ButtonReset{}});
     }
     sendButtonEvents<event::ButtonUp>(earlyUps, now, listener);

@@ -141,16 +141,6 @@ TEST(pad_gives_nothing_while_a_button_is_held) {
     CHECK(isRecord(log.records[1], Kind::Up, Button::A, 32));
 }
 
-TEST(pad_resets_when_a_button_leaves_with_no_release) {
-    InputDriver pad;
-    RawLog log;
-    InputDriverTest::update(pad, {bit(Button::X) | bit(Button::Y), bit(Button::X) | bit(Button::Y), 0}, 0, log);
-    InputDriverTest::update(pad, {0, 0, 0}, 16, log);  // the app cleared the pad
-    InputDriverTest::update(pad, {0, 0, 0}, 32, log);
-    CHECK_EQ_SZ(log.records.size(), 3);
-    CHECK(log.records[2].kind == Kind::Reset && log.records[2].time == 16);
-}
-
 // The app cleared the pad, and the hat released LEFT before the next poll: one reset, and no
 // up of LEFT
 TEST(pad_resets_when_the_app_counts_a_reset) {
@@ -203,7 +193,7 @@ TEST(pad_state_gives_the_held_buttons) {
     CHECK(!state.isPressed(Button::A) && state.isPressed(Button::B));
     CHECK(state.isJustReleased(Button::A) && !state.isJustPressed(Button::A));
     CHECK(state.getTime() == 16);
-    InputDriverTest::update(pad, {0, 0, 0}, 32, log);  // the app cleared the pad
+    InputDriverTest::update(pad, {0, 0, 0}, 32, log, true);  // the app cleared the pad
     CHECK(!state.isPressed(Button::B));
 }
 
@@ -537,7 +527,7 @@ TEST(pad_and_detector_together) {
     InputDriverTest::update(pad, {bit(Button::B), bit(Button::B), 0}, 0, f.detector);
     InputDriverTest::update(pad, {0, 0, bit(Button::B)}, 16, f.detector);
     InputDriverTest::update(pad, {bit(Button::A), bit(Button::A), 0}, 32, f.detector);
-    InputDriverTest::update(pad, {0, 0, 0}, 48, f.detector);  // the app cleared the pad
+    InputDriverTest::update(pad, {0, 0, 0}, 48, f.detector, true);  // the app cleared the pad
     f.tick(48, 1000);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::B, 0));
@@ -547,7 +537,6 @@ int main(void) {
     printf("input events\n");
     RUN(pad_gives_buttons_in_bit_order_and_down_before_up);
     RUN(pad_gives_nothing_while_a_button_is_held);
-    RUN(pad_resets_when_a_button_leaves_with_no_release);
     RUN(pad_resets_when_the_app_counts_a_reset);
     RUN(pad_gives_the_late_up_after_the_downs);
     RUN(pad_gives_the_early_up_before_the_downs);
