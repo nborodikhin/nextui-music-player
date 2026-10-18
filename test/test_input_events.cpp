@@ -107,8 +107,8 @@ namespace input {
 // Reaches the private part of the driver
 struct InputDriverTest {
     static void update(InputDriver& driver, const PadState& padState, uint32_t now,
-                       RawEventListener& listener) {
-        driver.update(padState, now, listener);
+                       RawEventListener& listener, bool padReset = false) {
+        driver.update(padState, padReset, now, listener);
     }
 
     static void setHeld(InputDriver& driver, uint32_t mask) { driver.pressedPads = mask; }
@@ -149,6 +149,46 @@ TEST(pad_resets_when_a_button_leaves_with_no_release) {
     InputDriverTest::update(pad, {0, 0, 0}, 32, log);
     CHECK_EQ_SZ(log.records.size(), 3);
     CHECK(log.records[2].kind == Kind::Reset && log.records[2].time == 16);
+}
+
+// The app cleared the pad, and the hat released LEFT before the next poll: one reset, and no
+// up of LEFT
+TEST(pad_resets_when_the_app_counts_a_reset) {
+    InputDriver pad;
+    RawLog log;
+    const uint32_t dpad = bit(Button::DpadUp) | bit(Button::DpadDown) | bit(Button::DpadLeft) |
+                          bit(Button::DpadRight);
+    InputDriverTest::update(pad, {bit(Button::DpadLeft), bit(Button::DpadLeft), 0}, 0, log);
+    InputDriverTest::update(pad, {0, 0, dpad}, 16, log, true);
+    InputDriverTest::update(pad, {0, 0, 0}, 32, log);
+    CHECK_EQ_SZ(log.records.size(), 2);
+    CHECK(isRecord(log.records[0], Kind::Down, Button::DpadLeft, 0));
+    CHECK(log.records[1].kind == Kind::Reset && log.records[1].time == 16);
+}
+
+// A button that goes down and up in one frame goes up after each down of the frame
+TEST(pad_gives_the_late_up_after_the_downs) {
+    InputDriver pad;
+    RawLog log;
+    // A goes down and up, and SELECT goes down. A has the lower bit.
+    InputDriverTest::update(pad, {bit(Button::Select), bit(Button::A) | bit(Button::Select), bit(Button::A)}, 0, log);
+    CHECK_EQ_SZ(log.records.size(), 3);
+    CHECK(isRecord(log.records[0], Kind::Down, Button::A, 0));
+    CHECK(isRecord(log.records[1], Kind::Down, Button::Select, 0));
+    CHECK(isRecord(log.records[2], Kind::Up, Button::A, 0));
+}
+
+// A held button that goes up and down again in one frame stays held
+TEST(pad_gives_the_early_up_before_the_downs) {
+    InputDriver pad;
+    RawLog log;
+    InputDriverTest::update(pad, {bit(Button::A), bit(Button::A), 0}, 0, log);
+    InputDriverTest::update(pad, {bit(Button::A), bit(Button::A), bit(Button::A)}, 16, log);
+    InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 32, log);
+    CHECK_EQ_SZ(log.records.size(), 4);
+    CHECK(isRecord(log.records[1], Kind::Up, Button::A, 16));
+    CHECK(isRecord(log.records[2], Kind::Down, Button::A, 16));
+    CHECK(isRecord(log.records[3], Kind::Up, Button::A, 32));
 }
 
 // The pressed mask of the state is the set of buttons that the pad holds
@@ -336,6 +376,17 @@ TEST(combo_in_one_frame) {
     CHECK(isSelectACombo(f.log.records[0], 0));
 }
 
+// A goes down and up in the frame where SELECT goes down. A has the lower bit.
+TEST(combo_in_one_frame_with_an_up_of_a_member) {
+    InputDriver pad;
+    Fixture f;
+    const uint32_t both = bit(Button::Select) | bit(Button::A);
+    InputDriverTest::update(pad, {bit(Button::Select), both, bit(Button::A)}, 0, f.detector);
+    InputDriverTest::update(pad, {0, 0, bit(Button::Select)}, 16, f.detector);
+    CHECK_EQ_SZ(f.log.records.size(), 1);
+    CHECK(isSelectACombo(f.log.records[0], 0));
+}
+
 TEST(combo_members_give_no_event_until_both_are_up) {
     Fixture f;
     f.down(Button::Select, 0);
@@ -497,6 +548,9 @@ int main(void) {
     RUN(pad_gives_buttons_in_bit_order_and_down_before_up);
     RUN(pad_gives_nothing_while_a_button_is_held);
     RUN(pad_resets_when_a_button_leaves_with_no_release);
+    RUN(pad_resets_when_the_app_counts_a_reset);
+    RUN(pad_gives_the_late_up_after_the_downs);
+    RUN(pad_gives_the_early_up_before_the_downs);
     RUN(pad_state_gives_the_held_buttons);
     RUN(pad_gives_only_the_up_of_a_held_button);
     RUN(pad_state_gives_a_button_held_before_the_first_update);
@@ -511,6 +565,7 @@ int main(void) {
     RUN(no_combo_in_the_other_order);
     RUN(combo_at_one_time_in_each_order);
     RUN(combo_in_one_frame);
+    RUN(combo_in_one_frame_with_an_up_of_a_member);
     RUN(combo_members_give_no_event_until_both_are_up);
     RUN(combo_member_alone_gives_a_short_press_at_the_up);
     RUN(release_after_the_long_press_deadline_gives_the_long_press);

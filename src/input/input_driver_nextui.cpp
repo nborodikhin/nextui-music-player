@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "button_detector.hpp"
+#include "pad_reset.h"
 #include "player.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -74,7 +75,11 @@ static std::optional<MediaKey> toMediaKey(USBHIDEvent hidEvent) {
 
 void InputDriver::poll(RawEventListener& listener) {
     const uint32_t time = SDL_GetTicks();
-    update(readPadState(), time, listener);
+    // A driver starts with no held button, thus a reset before its first poll is not a change
+    const uint32_t resetCount = PadReset_getCount();
+    const bool padReset = padResetCount && *padResetCount != resetCount;
+    padResetCount = resetCount;
+    update(readPadState(), padReset, time, listener);
 
     USBHIDEvent hidEvent;
     while ((hidEvent = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {

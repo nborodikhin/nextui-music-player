@@ -19,6 +19,7 @@
 #include "test_control.h"
 #include "seek_scan.h"
 #include "display_helper.h"
+#include "pad_reset.h"
 
 static bool autosleep_disabled = false;
 static FrameState frame = {0};
@@ -424,11 +425,13 @@ void ModuleCommon_quit(void) {
 
 static bool woke_from_sleep = false;
 
-static void mark_woke_from_sleep(void) {
+// NextUI clears the pad at a wake from sleep
+static void on_wake_from_sleep(void) {
+    PadReset_record();
     woke_from_sleep = true;
 }
 
-static void update_power(int* dirty, int* show_setting, PWR_callback_t after_sleep) {
+static void update_power(int* dirty, int* show_setting) {
     // Track overlay-triggering buttons for auto-hide (check BEFORE PWR_update)
     // MENU = brightness, SELECT = color temp, PLUS/MINUS = volume
     bool overlay_buttons_active = PAD_isPressed(BTN_PLUS) || PAD_isPressed(BTN_MINUS)
@@ -445,7 +448,7 @@ static void update_power(int* dirty, int* show_setting, PWR_callback_t after_sle
     }
 
     // Call platform PWR_update
-    PWR_update(dirty, show_setting, NULL, after_sleep);
+    PWR_update(dirty, show_setting, NULL, on_wake_from_sleep);
     if (audio_sink_status_changed()) *dirty = 1;
 
     // After visible period, force hide overlay
@@ -466,12 +469,12 @@ static void update_power(int* dirty, int* show_setting, PWR_callback_t after_sle
 }
 
 void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
-    update_power(dirty, show_setting, NULL);
+    update_power(dirty, show_setting);
 }
 
 void ModuleCommon_PWR_updateWithWake(int* dirty, int* show_setting, bool* woke) {
     woke_from_sleep = false;
-    update_power(dirty, show_setting, mark_woke_from_sleep);
+    update_power(dirty, show_setting);
     *woke = woke_from_sleep;
 }
 
