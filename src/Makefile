@@ -85,10 +85,13 @@ else
 ZIG_SYSTEM := linux
 endif
 ZIG ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
+# ./dev deps fetch puts zig-c++ beside zig. It runs `zig c++`, under a name that
+# an IDE knows as the name of a compiler.
+ZIG_CXX = $(dir $(ZIG))zig-c++
 ifeq ($(PLATFORM), desktop)
-CXX = $(ZIG) c++
+CXX = $(ZIG_CXX)
 else
-CXX = $(ZIG) c++ -target aarch64-linux-gnu.$(GLIBC_VERSION)
+CXX = $(ZIG_CXX) -target aarch64-linux-gnu.$(GLIBC_VERSION)
 endif
 # The container of a build is removed after it, thus the cache of Zig lives in
 # the project. It keeps the libc++ that Zig builds once for each target.
@@ -125,6 +128,9 @@ $(error No NextUI tree at $(NEXTUI_ROOT) - run ./dev deps fetch, or set NEXTUI_R
 endif
 ifeq (,$(wildcard $(ZIG)))
 $(error No Zig at $(ZIG) - run ./dev deps fetch, or set ZIG)
+endif
+ifeq (,$(wildcard $(ZIG_CXX)))
+$(error No zig-c++ at $(ZIG_CXX) - run ./dev deps fetch)
 endif
 ifneq ($(PLATFORM), desktop)
 ifeq (,$(filter 2.%,$(GLIBC_VERSION)))

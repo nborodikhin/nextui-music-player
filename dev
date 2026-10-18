@@ -959,6 +959,23 @@ def load_zig(system):
     )
 
 
+# A script beside `zig` that runs `zig c++`. An IDE that reads the compile
+# commands from a dry run of make knows a compiler by the name of the program
+# that runs, and it does not know `zig`.
+ZIG_CXX_NAME = "zig-c++"
+ZIG_CXX_SCRIPT = """#!/bin/sh
+exec "$(dirname "$0")/zig" c++ "$@"
+"""
+
+
+def write_zig_cxx(zig):
+    """Make the zig-c++ script exist beside `zig`."""
+    script = zig.root / ZIG_CXX_NAME
+    if not script.is_file() or script.read_text(encoding="utf-8") != ZIG_CXX_SCRIPT:
+        script.write_text(ZIG_CXX_SCRIPT, encoding="utf-8")
+    script.chmod(0o755)
+
+
 def zig_installed(zig):
     if not (zig.root / "zig").is_file() or not zig.marker.is_file():
         return False
@@ -1014,6 +1031,7 @@ def fetch_zig(system):
     it already does. Returns True when it fetched an archive."""
     zig = load_zig(system)
     if zig_installed(zig):
+        write_zig_cxx(zig)
         return False
 
     # A tree of the layout with one archive directly in `path` is removed.
@@ -1050,6 +1068,7 @@ def fetch_zig(system):
         if zig.root.exists():
             shutil.rmtree(zig.root)
         top[0].rename(zig.root)
+    write_zig_cxx(zig)
     zig.marker.write_text(zig.sha256 + "\n", encoding="utf-8")
     return True
 

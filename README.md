@@ -202,9 +202,14 @@ Open the project root as a Makefile project. CLion collects the compiler
 flags from a dry run of one make goal, and the default goal builds `src/`
 only, thus symbols in `test/` do not resolve and *Find Usages* does not
 find them. Point CLion at the `ide` goal, which also compiles the unit
-tests:
+tests.
 
-1. Run `./dev deps fetch` and `./dev build desktop` once.
+CLion knows a compiler by the name of the program that runs, and it does not
+know `zig`. Thus the Makefiles compile C++ with `zig-c++`, a script that
+`./dev deps fetch` puts beside `zig` and that runs `zig c++`.
+
+1. Run `./dev deps fetch` and `./dev build desktop` once. Run
+   `./dev deps fetch` again if `deps/zig/` has no `zig-c++` script.
 2. **Settings | Build, Execution, Deployment | Makefile**: set
    **Build target** to `ide`.
 3. **Tools | Makefile | Reload Makefile Project**.

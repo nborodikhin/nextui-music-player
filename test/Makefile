@@ -57,7 +57,8 @@ CXXFLAGS ?= -std=c++23 -O0 -g -Wall -Wextra -fno-exceptions -fno-rtti
 ZIG_CPU    := $(shell uname -m | sed -e s/arm64/aarch64/ -e s/amd64/x86_64/)
 ZIG_SYSTEM := $(if $(filter Darwin,$(shell uname -s)),macos,linux)
 ZIG        ?= ../deps/zig/$(ZIG_CPU)-$(ZIG_SYSTEM)/zig
-CXX         = $(ZIG) c++
+# zig-c++ runs `zig c++`, under a name that an IDE knows (see src/Makefile).
+CXX         = $(dir $(ZIG))zig-c++
 export ZIG_GLOBAL_CACHE_DIR = $(CURDIR)/bin/zig-cache
 export ZIG_LOCAL_CACHE_DIR  = $(CURDIR)/bin/zig-cache
 INC      = -I../src $(shell pkg-config --cflags sdl2)
