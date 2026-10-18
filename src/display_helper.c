@@ -190,5 +190,7 @@ void DisplayHelper_moveToOutput(void) {
 		PLAT_enableBacklight(1);
 
 	last_output_poll = SDL_GetTicks();
+	// Drop each press of the switch: the user did not see the new screen
+	PAD_poll();
 	PadReset_run();
 }
