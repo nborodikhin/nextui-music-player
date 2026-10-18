@@ -152,8 +152,7 @@ void clearRows(SDL_Surface* screen, int top, int bottom) {
         .h = bottom - top,
     };
     // Transparent black is the clear color of the platform, as GFX_clear() uses it
-    //noinspection HardcodedColor
-    SDL_FillRect(screen, &rows, SDL_MapRGBA(screen->format, 0, 0, 0, 0));
+    SDL_FillRect(screen, &rows, 0);
 }
 
 // The page draws no layer of its own, thus useLayers changes nothing. Each part draws only
