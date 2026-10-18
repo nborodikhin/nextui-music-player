@@ -1,6 +1,6 @@
 #ifdef DEBUG
 
-#include "module_input_test.h"
+#include "ui/module_input_test.h"
 
 #include <algorithm>
 #include <array>
@@ -23,6 +23,7 @@ extern "C" {
 
 using namespace input;
 
+namespace ui {
 namespace {
 
 // One request of each type
@@ -205,9 +206,10 @@ void InputTestPage::draw(SDL_Surface* screen, bool) {
 }
 
 }  // namespace
+}  // namespace ui
 
 ModuleExitReason InputTestModule_run(DisplayContext* display) {
-    InputTestPage page;
+    ui::InputTestPage page;
     return runPageLoop(page, display);
 }
 

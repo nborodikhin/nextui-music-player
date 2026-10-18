@@ -1,5 +1,5 @@
-#ifndef __MODULE_INPUT_TEST_H__
-#define __MODULE_INPUT_TEST_H__
+#ifndef __UI_MODULE_INPUT_TEST_H__
+#define __UI_MODULE_INPUT_TEST_H__
 
 #ifdef __cplusplus
 extern "C" {

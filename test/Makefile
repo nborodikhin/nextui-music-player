@@ -125,8 +125,8 @@ check: headers
 # it compiles alone as C++ and has no extern "C" block. The shim that the build
 # forces into NextUI's config.c is not an interface, thus it is not checked. A
 # check runs again only after a change of a file that the header includes.
-HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h))
-CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp)
+HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h $(SRC)/ui/*.h))
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp)
 HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
                 $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
 HEADER_INC    = $(INC) $(DESKTOP_INC) \
@@ -351,7 +351,7 @@ DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/pla
               -DUSE_SDL2 -DUSE_GL
 # Every object of the desktop build except the two that this test replaces: its
 # own main, and ui_utils.o, which the test compiles from the source instead.
-DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/audio/*.o \
+DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
                         $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
                       | grep -v -e musicplayer.o -e ui_utils.o)
 # The objects come from the desktop build, thus they must be as new as the sources.
@@ -376,14 +376,14 @@ $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_fonts.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_music_playing.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 

@@ -254,7 +254,7 @@ endif
 
 # The input test screen is a diagnostic screen of the debug kind.
 ifeq ($(KIND), debug)
-LOCAL_SRC += module_input_test.cpp
+LOCAL_SRC += ui/module_input_test.cpp
 endif
 
 # Sources that live outside src/ (shared NextUI code + per-platform code).

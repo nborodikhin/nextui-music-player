@@ -18,7 +18,7 @@
 #include "wifi.h"
 #include "album_art.h"
 #include "list_nav.h"
-#include "module_input_test.h"
+#include "ui/module_input_test.h"
 
 static const int screen_off_values[] = {60, 90, 120, 0};
 #define SCREEN_OFF_VALUE_COUNT 4
