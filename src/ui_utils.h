@@ -136,6 +136,10 @@ void ScreenTitle_frameEnd(int* dirty, bool has_header);
 // one state that ScreenTitle_start() begins.
 void render_screen_header(SDL_Surface* screen, const char* text, int show_setting);
 
+// Draws the screen title `text` in the room that the status group of width `status_w`
+// leaves. The caller draws the status group.
+void render_screen_title(SDL_Surface* screen, const char* text, int status_w);
+
 // Adjust scroll offset to keep selected item visible
 void adjust_list_scroll(int selected, int* scroll, int items_per_page);
 

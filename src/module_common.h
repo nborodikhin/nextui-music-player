@@ -15,6 +15,8 @@ extern "C" {
 
 // Module exit reasons
 typedef enum {
+    MODULE_EXIT_NONE,       // Stay on the screen. A zeroed field reads as this value
+    MODULE_EXIT_BACK,       // Return to the screen that opened this one
     MODULE_EXIT_TO_MENU,    // User pressed B, return to main menu
     MODULE_EXIT_QUIT        // User confirmed quit, exit app entirely
 } ModuleExitReason;
@@ -50,6 +52,10 @@ void ModuleCommon_signalStop(void);
 // Returns true once a signal asked the app to stop. The loop between the
 // modules reads it, because no module is in operation there to see the quit.
 bool ModuleCommon_stopSignalled(void);
+
+// Returns true when the app must quit: a signal, a confirmed Quit dialog, or the control
+// channel asked for it. A loop that does not call ModuleCommon_handleGlobalInput() reads it.
+bool ModuleCommon_isQuitRequested(void);
 
 // Disable/enable autosleep (for modules with active playback)
 void ModuleCommon_setAutosleepDisabled(bool disabled);
@@ -99,6 +105,15 @@ void ModuleCommon_quit(void);
 // PWR_update wrapper with overlay auto-hide on button release
 // Call this instead of PWR_update directly in modules
 void ModuleCommon_PWR_update(int* dirty, int* show_setting);
+
+// As ModuleCommon_PWR_update(), and also sets `woke` to true when the device woke from sleep
+// in this call, else to false. The sleep clears the screen.
+void ModuleCommon_PWR_updateWithWake(int* dirty, int* show_setting, bool* woke);
+
+// Returns true one time after ModuleCommon_frameBegin() moved the app to a new output. The
+// move made the display again, thus the screen holds nothing. A loop that does not call
+// ModuleCommon_handleGlobalInput() calls this.
+bool ModuleCommon_takeOutputSwitched(void);
 
 // Handle a single HID volume event. Returns true if the event was a volume event.
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);

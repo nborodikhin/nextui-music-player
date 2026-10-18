@@ -490,8 +490,6 @@ void ScreenTitle_frameEnd(int* dirty, bool has_header) {
 }
 
 void render_screen_header(SDL_Surface* screen, const char* text, int show_setting) {
-    uint32_t now = SDL_GetTicks();
-
     // The status group draws first and gives its width, thus the title takes the room
     // that is left and never runs under the wifi and battery pill. The width changes
     // with the clock, with Bluetooth and with the signal, thus only the platform knows
@@ -500,6 +498,11 @@ void render_screen_header(SDL_Surface* screen, const char* text, int show_settin
     if (screen_has_status_group(screen)) {
         status_w = GFX_blitHardwareGroup(screen, show_setting);
     }
+    render_screen_title(screen, text, status_w);
+}
+
+void render_screen_title(SDL_Surface* screen, const char* text, int status_w) {
+    uint32_t now = SDL_GetTicks();
 
     // The title takes the font of a row of the list, as the menu of the platform
     // does. The secondary text role keeps it apart from a row.

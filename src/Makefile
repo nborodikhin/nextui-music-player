@@ -218,7 +218,7 @@ LOCAL_SRC = \
     musicplayer.cpp player.c filedb.c playlist.c playlist_m3u.c \
     db.c db_schema.c db_statement.c debug.c \
     radio.c radio_net.c album_art.c lyrics.c radio_hls.c radio_curated.c \
-    downloader.c selfupdate.c selfupdate_install.c display_helper.c \
+    downloader.c selfupdate.c selfupdate_install.c display_helper.c pad_reset.c \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
@@ -233,6 +233,8 @@ LOCAL_SRC = \
     ui_theme_utils.c keyboard_map.c utf8.c \
     spectrum.c \
     spectrum_ceiling.c \
+    input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
+    input/common_button_handler.cpp ui_page.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c
@@ -248,6 +250,11 @@ endif
 # call site gets a stub that does nothing.
 ifeq ($(KIND), debug)
 LOCAL_SRC += test_control.c
+endif
+
+# The input test screen is a diagnostic screen of the debug kind.
+ifeq ($(KIND), debug)
+LOCAL_SRC += ui/module_input_test.cpp
 endif
 
 # Sources that live outside src/ (shared NextUI code + per-platform code).

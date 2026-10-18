@@ -19,6 +19,7 @@
 #include "test_control.h"
 #include "seek_scan.h"
 #include "display_helper.h"
+#include "pad_reset.h"
 
 static bool autosleep_disabled = false;
 static FrameState frame = {0};
@@ -96,6 +97,14 @@ static bool audio_sink_status_changed(void) {
         seen_bluetooth = bluetooth;
     }
     return changed;
+}
+
+static bool woke_from_sleep = false;
+
+// NextUI clears the pad at a wake from sleep
+static void on_wake_from_sleep(void) {
+    PadReset_record();
+    woke_from_sleep = true;
 }
 
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
@@ -286,7 +295,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     {
         int dirty_before = result.dirty ? 1 : 0;
         int dirty_tmp = dirty_before;
-        PWR_update(&dirty_tmp, show_setting, NULL, NULL);
+        PWR_update(&dirty_tmp, show_setting, NULL, on_wake_from_sleep);
 
         if (dirty_tmp && !dirty_before) {
             result.dirty = true;
@@ -422,7 +431,7 @@ void ModuleCommon_quit(void) {
     UiLayer_clear(UI_LAYER_ANIMATION);
 }
 
-void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
+static void update_power(int* dirty, int* show_setting) {
     // Track overlay-triggering buttons for auto-hide (check BEFORE PWR_update)
     // MENU = brightness, SELECT = color temp, PLUS/MINUS = volume
     bool overlay_buttons_active = PAD_isPressed(BTN_PLUS) || PAD_isPressed(BTN_MINUS)
@@ -439,7 +448,7 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     }
 
     // Call platform PWR_update
-    PWR_update(dirty, show_setting, NULL, NULL);
+    PWR_update(dirty, show_setting, NULL, on_wake_from_sleep);
     if (audio_sink_status_changed()) *dirty = 1;
 
     // After visible period, force hide overlay
@@ -459,6 +468,16 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
     overlay_buttons_were_active = overlay_buttons_active;
 }
 
+void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
+    update_power(dirty, show_setting);
+}
+
+void ModuleCommon_PWR_updateWithWake(int* dirty, int* show_setting, bool* woke) {
+    woke_from_sleep = false;
+    update_power(dirty, show_setting);
+    *woke = woke_from_sleep;
+}
+
 void ModuleCommon_requestQuit(void) {
     quit_requested = true;
 }
@@ -469,6 +488,10 @@ void ModuleCommon_signalStop(void) {
 
 bool ModuleCommon_stopSignalled(void) {
     return stop_signalled != 0;
+}
+
+bool ModuleCommon_isQuitRequested(void) {
+    return quit_requested || stop_signalled != 0;
 }
 
 void ModuleCommon_frameBegin(void) {
@@ -486,6 +509,12 @@ void ModuleCommon_frameBegin(void) {
     TestControl_tick();
     if (key_locked) update_key_lock();
     Toast_tick();
+}
+
+bool ModuleCommon_takeOutputSwitched(void) {
+    bool switched   = output_switched;
+    output_switched = false;
+    return switched;
 }
 
 void ModuleCommon_markSurfaceDrawn(void) {

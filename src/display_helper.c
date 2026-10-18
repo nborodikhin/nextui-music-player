@@ -7,6 +7,7 @@
 #include "defines.h"
 #include "api.h"
 #include "display_helper.h"
+#include "pad_reset.h"
 #include "selfupdate.h"
 #include "ui_theme.h"
 
@@ -134,7 +135,7 @@ void DisplayHelper_prepareForExternal(void) {
 	// Wait a bit to get it released before the external program starts reading input.
 	SDL_Delay(INPUT_SETTLE_MS);
 	PAD_poll();
-	PAD_reset();
+	PadReset_run();
 
 	release_video();
 }
@@ -149,7 +150,7 @@ void DisplayHelper_recoverDisplay(void) {
 	// dismissed it.
 	SDL_Delay(INPUT_SETTLE_MS);
 	PAD_poll();
-	PAD_reset();
+	PadReset_run();
 }
 
 // Time of the last read of the cable state.
@@ -189,5 +190,7 @@ void DisplayHelper_moveToOutput(void) {
 		PLAT_enableBacklight(1);
 
 	last_output_poll = SDL_GetTicks();
-	PAD_reset();
+	// Drop each press of the switch: the user did not see the new screen
+	PAD_poll();
+	PadReset_run();
 }
