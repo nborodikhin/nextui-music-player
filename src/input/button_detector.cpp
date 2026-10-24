@@ -7,30 +7,34 @@ namespace input {
 ButtonDetector::ButtonDetector(ButtonListener& listener, std::span<const ButtonRequest> requests)
     : listener(listener) {
     for (const ButtonRequest& request : requests) {
-        std::visit(Overloaded{
-                       [this](const request::LongPress& r) { longPressMask |= getButtonBit(r.button); },
-                       [this](const request::Repeat& r) { repeatMask |= getButtonBit(r.button); },
-                       [this](const request::Combo& r) {
-                           assert(comboCount < kMaxCombos);
-                           if (comboCount == kMaxCombos) return;
-                           combos[comboCount++] = r;
-                           comboMask |= getButtonBit(r.first) | getButtonBit(r.second);
-                       },
-                   },
-                   request);
+        if (const auto* typedRequest = std::get_if<request::LongPress>(&request)) {
+            longPressMask |= getButtonBit(typedRequest->button);
+        }
+        if (const auto* typedRequest = std::get_if<request::Repeat>(&request)) {
+            repeatMask |= getButtonBit(typedRequest->button);
+        }
+        if (const auto* typedRequest = std::get_if<request::Combo>(&request)) {
+            assert(comboCount < kMaxCombos);
+            if (comboCount == kMaxCombos) continue;
+            combos[comboCount++] = *typedRequest;
+            comboMask |= getButtonBit(typedRequest->first) | getButtonBit(typedRequest->second);
+        }
     }
     assert((repeatMask & longPressMask) == 0);
     assert((repeatMask & comboMask) == 0);
 }
 
-void ButtonDetector::onRawEvent(const RawEvent& event) {
-    std::visit(Overloaded{
-                   [&](const event::ButtonDown& e) { onButtonDown(e.button, event.time); },
-                   [&](const event::ButtonUp& e) { onButtonUp(e.button, event.time); },
-                   [this](const event::ButtonReset&) { reset(); },
-                   [](const event::Media&) {},
-               },
-               event.kind);
+bool ButtonDetector::onRawEvent(const RawEvent& event) {
+    if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
+        onButtonDown(typedEvent->button, event.time);
+    }
+    if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
+        onButtonUp(typedEvent->button, event.time);
+    }
+    if (std::get_if<event::ButtonReset>(&event.kind)) {
+        reset();
+    }
+    return false;
 }
 
 void ButtonDetector::onTick(uint32_t now) {

@@ -337,6 +337,8 @@ typedef struct {
     MenuItemBadgeCallback render_badge;   // Optional: render right-side badge
     MenuItemIconCallback get_icon;        // Optional: get icon for item
     MenuItemCustomTextCallback render_text; // Optional: custom text rendering
+    bool title_only;                      // The caller draws the status group: draw the title only
+    int status_w;                         // With title_only: the width of the status group
 } SimpleMenuConfig;
 
 // Render a simple menu with optional customization callbacks.
