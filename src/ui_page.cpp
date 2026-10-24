@@ -1,12 +1,14 @@
 #include "ui_page.hpp"
 
-#include <initializer_list>
+#include <utility>
 #include <vector>
 
 #include "input/button_detector.hpp"
 #include "input/common_button_handler.hpp"
 #include "input/input_driver.hpp"
+#include "input/input_manager.hpp"
 #include "input/input_state.hpp"
+#include "pad_reset.h"
 #include "ui_utils.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -19,38 +21,22 @@ using namespace input;
 
 namespace {
 
-// Gives a button event to the common handler, and to the page when the common handler did
-// not handle it.
-class FirstHandlerButtonListener : public ButtonListener {
+// Gives each raw event to the input manager, and then to the detector. The input manager finds
+// the owner of a press before the detector makes the button events of that press.
+class RawEventFanOut : public RawEventListener {
 public:
-    FirstHandlerButtonListener(std::initializer_list<ButtonListener*> chain)
-        : listeners(chain) {}
+    RawEventFanOut(InputManager& manager, ButtonDetector& detector)
+        : manager(manager), detector(detector) {}
 
-    bool onButtonEvent(const ButtonEvent& event) override {
-        for (const auto listener : listeners) {
-            if (listener->onButtonEvent(event)) return true;
-        }
+    bool onRawEvent(const RawEvent& event) override {
+        manager.onRawEvent(event);
+        detector.onRawEvent(event);
         return false;
     }
 
 private:
-    std::vector<ButtonListener*> listeners;
-};
-
-// Gives a raw event to the page, and then to the detector.
-class CompositeRawEventListener : public RawEventListener {
-public:
-    CompositeRawEventListener(std::initializer_list<RawEventListener*> chain)
-        : listeners(chain) {}
-
-    void onRawEvent(const RawEvent& event) override {
-        for (RawEventListener* listener : listeners) {
-            listener->onRawEvent(event);
-        }
-    }
-
-private:
-    std::vector<RawEventListener*> listeners;
+    InputManager& manager;
+    ButtonDetector& detector;
 };
 
 // Draws the status group, or the hardware bar in its place, in the top right corner of the
@@ -84,13 +70,54 @@ private:
     SDL_Surface* scratch = nullptr;
 };
 
+class PlatformPlaybackControl : public PlaybackControl {
+public:
+    void togglePlayback() override { ModuleCommon_togglePlayback(); }
+    void skipTrack(bool next) override { ModuleCommon_skipTrack(next); }
+    void changeVolume(int step) override { ModuleCommon_changeVolume(step); }
+};
+
+// A dialog that a global button asked for. The page loop runs it after the events of the frame.
+enum class Dialog : uint8_t {
+    None,
+    Quit,
+    ControlsHelp,
+};
+
+// Runs the dialog in a frame loop of its own. The loop polled the pad, thus the pad is reset:
+// the driver and the detector forget each button that changed while the dialog was open.
+void runDialog(Dialog dialog, HelpId helpId, DisplayContext* display) {
+    switch (dialog) {
+        case Dialog::None:         return;
+        case Dialog::Quit:         ModuleCommon_runQuitDialog(display); break;
+        case Dialog::ControlsHelp: ModuleCommon_runControlsHelp(display, helpId); break;
+    }
+    PadReset_run();
+}
+
 }  // namespace
 
 ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
-    CommonButtonHandler commonButtonHandler;
-    FirstHandlerButtonListener buttonChain({&commonButtonHandler, &page});
-    ButtonDetector detector(buttonChain, page.getButtonRequests());
-    CompositeRawEventListener rawChain({&page, &detector});
+    PlatformPlaybackControl playback;
+    CommonButtonHandler commonButtonHandler(playback);
+    // A dialog runs after the events of the frame. A dialog that ran inside a listener would let
+    // the remaining events of the frame reach the page after the dialog closed.
+    Dialog pendingDialog = Dialog::None;
+    // A page with no controls help takes no dialog, and START still does nothing on it, as on a
+    // legacy module
+    commonButtonHandler.setHelpRequestedCallback([&] {
+        if (page.getHelpId() != HELP_NONE) pendingDialog = Dialog::ControlsHelp;
+    });
+    commonButtonHandler.setQuitRequestedCallback([&] { pendingDialog = Dialog::Quit; });
+
+    InputManager manager({&page, &commonButtonHandler});
+    std::vector<ButtonRequest> requests;
+    const auto globalRequests = CommonButtonHandler::getButtonRequests();
+    requests.assign(globalRequests.begin(), globalRequests.end());
+    const auto pageRequests = page.getButtonRequests();
+    requests.insert(requests.end(), pageRequests.begin(), pageRequests.end());
+    ButtonDetector detector(manager, requests);
+    RawEventFanOut rawInput(manager, detector);
     InputDriver driver;
     StatusGroup statusGroup;
     InputState& state = InputState::getInstance();
@@ -110,15 +137,32 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
 
     while (true) {
         ModuleCommon_frameBegin();
-        SDL_Surface* const screen = DisplayHelper_getSurface(display);
+        SDL_Surface* screen = DisplayHelper_getSurface(display);
         if (ModuleCommon_isQuitRequested()) {
             page.onExit();
             return MODULE_EXIT_QUIT;
         }
 
-        driver.poll(rawChain);
+        // frameBegin() opens the lock at SELECT + A, thus the frame reads it after that
+        state.setKeyLocked(ModuleCommon_isKeyLocked());
+        driver.poll(rawInput);
         const uint32_t now = state.getTime();
         detector.onTick(now);
+
+        if (pendingDialog != Dialog::None) {
+            runDialog(pendingDialog, page.getHelpId(), display);
+            pendingDialog = Dialog::None;
+            if (ModuleCommon_isQuitRequested()) {
+                page.onExit();
+                return MODULE_EXIT_QUIT;
+            }
+            // The dialog drew over the screen, and a new output can have come in the meantime
+            screen = DisplayHelper_getSurface(display);
+            page.invalidateAll();
+            clearScreen   = true;
+            statusChanged = true;
+        }
+
         statusChanged = commonButtonHandler.onTick(now) || statusChanged;
         // A new output made the display again: the screen holds nothing
         const bool outputSwitched = ModuleCommon_takeOutputSwitched();

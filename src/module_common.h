@@ -7,6 +7,7 @@ extern "C" {
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
+#include "display_helper.h"
 #include "help_screen.h"
 #include "player.h"
 
@@ -117,6 +118,30 @@ bool ModuleCommon_takeOutputSwitched(void);
 
 // Handle a single HID volume event. Returns true if the event was a volume event.
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event);
+
+// Changes the system volume by step, in the range of the platform.
+void ModuleCommon_changeVolume(int step);
+
+// Stops the radio that streams, or pauses or resumes the player. When nothing plays, starts the
+// last radio station. Returns true when it acted.
+bool ModuleCommon_togglePlayback(void);
+
+// Pass true in next to go to the next track or station, false for the previous one. Acts on the
+// radio that is active, else on the player. Returns true when it acted.
+bool ModuleCommon_skipTrack(bool next);
+
+// Does the action of a button of USB earphones: the volume, play/pause, next or previous, on the
+// radio or on the player that is active. Returns true when it acted.
+bool ModuleCommon_handleMediaKey(USBHIDEvent hid_event);
+
+// Shows the Quit dialog until the user closes it, in a frame loop of its own. Returns true when
+// the user confirmed the quit, or when the app must quit for another reason. The caller then
+// draws its whole screen again, and resets the pad when it reads input as events.
+bool ModuleCommon_runQuitDialog(DisplayContext* display);
+
+// Shows the controls help of help_id until the user pushes a button, in a frame loop of its own.
+// The caller then draws its whole screen again, and resets the pad when it reads input as events.
+void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id);
 
 
 // Begin one module-loop iteration: start the frame timer, poll input.

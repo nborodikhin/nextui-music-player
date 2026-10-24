@@ -107,6 +107,67 @@ static void on_wake_from_sleep(void) {
     woke_from_sleep = true;
 }
 
+bool ModuleCommon_togglePlayback(void) {
+    // Radio first: it takes priority while it streams
+    RadioState radio_state = Radio_getState();
+    PlayerState player_state = Player_getState();
+
+    if (radio_state == RADIO_STATE_PLAYING || radio_state == RADIO_STATE_BUFFERING) {
+        Radio_stop();
+        return true;
+    }
+    if (player_state == PLAYER_STATE_PLAYING || player_state == PLAYER_STATE_PAUSED) {
+        Player_togglePause();
+        return true;
+    }
+    // Nothing plays: resume the last radio station
+    const char* last_url = Radio_getCurrentUrl();
+    if (last_url && last_url[0] != '\0') {
+        Radio_play(last_url);
+        return true;
+    }
+    return false;
+}
+
+bool ModuleCommon_skipTrack(bool next) {
+    RadioState radio_state = Radio_getState();
+
+    if (radio_state == RADIO_STATE_PLAYING || radio_state == RADIO_STATE_BUFFERING || radio_state == RADIO_STATE_CONNECTING) {
+        // Radio is active - switch stations
+        RadioStation* stations;
+        int station_count = Radio_getStations(&stations);
+        if (station_count <= 1) return false;
+        int current_idx = Radio_findCurrentStationIndex();
+        if (current_idx < 0) return false;
+        int new_idx = next ? (current_idx + 1) % station_count
+                           : (current_idx - 1 + station_count) % station_count;
+        Radio_stop();
+        Radio_play(stations[new_idx].url);
+        return true;
+    }
+    if (PlayerModule_isActive()) {
+        if (next) {
+            PlayerModule_nextTrack();
+        } else {
+            PlayerModule_prevTrack();
+        }
+        return true;
+    }
+    return false;
+}
+
+bool ModuleCommon_handleMediaKey(USBHIDEvent hid_event) {
+    switch (hid_event) {
+        case USB_HID_EVENT_PLAY_PAUSE:  return ModuleCommon_togglePlayback();
+        case USB_HID_EVENT_NEXT_TRACK:  return ModuleCommon_skipTrack(true);
+        case USB_HID_EVENT_PREV_TRACK:  return ModuleCommon_skipTrack(false);
+        case USB_HID_EVENT_VOLUME_UP:
+        case USB_HID_EVENT_VOLUME_DOWN: return ModuleCommon_handleHIDVolume(hid_event);
+        case USB_HID_EVENT_NONE:        return false;
+    }
+    return false;
+}
+
 GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_setting, HelpId help_id) {
     GlobalInputResult result = {false, false, false};
 
@@ -131,75 +192,9 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     // Poll USB HID events (earphone buttons)
     USBHIDEvent hid_event;
     while ((hid_event = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {
-        if (ModuleCommon_handleHIDVolume(hid_event)) {
+        if (ModuleCommon_handleMediaKey(hid_event)) {
             result.dirty = true;
             result.input_consumed = true;
-        }
-        else if (hid_event == USB_HID_EVENT_PLAY_PAUSE) {
-            // Check what's currently playing and handle accordingly
-            // Check radio first (takes priority when streaming)
-            RadioState radio_state = Radio_getState();
-            PlayerState player_state = Player_getState();
-
-            if (radio_state == RADIO_STATE_PLAYING || radio_state == RADIO_STATE_BUFFERING) {
-                // Radio is streaming - stop it
-                Radio_stop();
-                result.dirty = true;
-                result.input_consumed = true;
-            }
-            else if (player_state == PLAYER_STATE_PLAYING || player_state == PLAYER_STATE_PAUSED) {
-                // Music player is active - toggle pause
-                Player_togglePause();
-                result.dirty = true;
-                result.input_consumed = true;
-            }
-            else {
-                // Nothing playing - check if we can resume radio
-                const char* last_url = Radio_getCurrentUrl();
-                if (last_url && last_url[0] != '\0') {
-                    // Resume last radio station
-                    Radio_play(last_url);
-                    result.dirty = true;
-                    result.input_consumed = true;
-                }
-            }
-        }
-        else if (hid_event == USB_HID_EVENT_NEXT_TRACK || hid_event == USB_HID_EVENT_PREV_TRACK) {
-            // Next/previous track - check what's currently active
-            RadioState radio_state = Radio_getState();
-
-            if (radio_state == RADIO_STATE_PLAYING || radio_state == RADIO_STATE_BUFFERING || radio_state == RADIO_STATE_CONNECTING) {
-                // Radio is active - switch stations
-                RadioStation* stations;
-                int station_count = Radio_getStations(&stations);
-                if (station_count > 1) {
-                    // Find current station index
-                    int current_idx = Radio_findCurrentStationIndex();
-                    if (current_idx < 0) continue;
-                    // Calculate new index
-                    int new_idx;
-                    if (hid_event == USB_HID_EVENT_NEXT_TRACK) {
-                        new_idx = (current_idx + 1) % station_count;
-                    } else {
-                        new_idx = (current_idx - 1 + station_count) % station_count;
-                    }
-                    // Switch to new station
-                    Radio_stop();
-                    Radio_play(stations[new_idx].url);
-                    result.dirty = true;
-                    result.input_consumed = true;
-                }
-            }
-            else if (PlayerModule_isActive()) {
-                // Music player is active - next/previous song
-                if (hid_event == USB_HID_EVENT_NEXT_TRACK) {
-                    PlayerModule_nextTrack();
-                } else {
-                    PlayerModule_prevTrack();
-                }
-                result.dirty = true;
-                result.input_consumed = true;
-            }
         }
     }
 
@@ -303,6 +298,61 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     }
 
     return result;
+}
+
+// The work of each frame of a dialog loop that does not depend on the dialog: the track
+// advancement and the resume saving, and the earphone buttons
+static void tick_dialog_frame(void) {
+    Background_tick();
+    USBHIDEvent hid_event;
+    while ((hid_event = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {
+        ModuleCommon_handleMediaKey(hid_event);
+    }
+}
+
+// The dialog covers the screen, thus the layers of the screen go
+static void clear_screen_layers(void) {
+    UiLayer_clear(UI_LAYER_STATUS);
+    UiLayer_clear(UI_LAYER_ANIMATION);
+}
+
+bool ModuleCommon_runQuitDialog(DisplayContext* display) {
+    clear_screen_layers();
+    while (!ModuleCommon_isQuitRequested()) {
+        ModuleCommon_frameBegin();
+        tick_dialog_frame();
+        if (PAD_justPressed(BTN_A)) {
+            quit_requested = true;
+            return true;
+        }
+        if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_START)) return false;
+
+        SDL_Surface* screen = DisplayHelper_getSurface(display);
+        render_confirmation_dialog(screen, NULL, "Quit Music Player?");
+        ModuleCommon_markSurfaceDrawn();
+        ModuleCommon_frameEnd(screen);
+    }
+    return true;
+}
+
+void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id) {
+    clear_screen_layers();
+    while (!ModuleCommon_isQuitRequested()) {
+        ModuleCommon_frameBegin();
+        tick_dialog_frame();
+        if (PAD_justPressed(BTN_A) || PAD_justPressed(BTN_B) || PAD_justPressed(BTN_X) ||
+            PAD_justPressed(BTN_Y) || PAD_justPressed(BTN_START) || PAD_justPressed(BTN_SELECT) ||
+            PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_DOWN) ||
+            PAD_justPressed(BTN_LEFT) || PAD_justPressed(BTN_RIGHT) ||
+            PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_MENU)) {
+            return;
+        }
+
+        SDL_Surface* screen = DisplayHelper_getSurface(display);
+        render_controls_help(screen, help_id);
+        ModuleCommon_markSurfaceDrawn();
+        ModuleCommon_frameEnd(screen);
+    }
 }
 
 void ModuleCommon_setAutosleepDisabled(bool disabled) {
@@ -539,18 +589,19 @@ void ModuleCommon_frameEnd(SDL_Surface* screen) {
     GFX_sync();
 }
 
+void ModuleCommon_changeVolume(int step) {
+    int vol = GetVolume() + step;
+    if (vol < 0) vol = 0;
+    if (vol > 20) vol = 20;
+    // keymon does not see these buttons: set the system volume, which NextUI puts on
+    // the mixer of the output
+    SetVolume(vol);
+}
+
 bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     if (hid_event != USB_HID_EVENT_VOLUME_UP && hid_event != USB_HID_EVENT_VOLUME_DOWN) {
         return false;
     }
-    int vol = GetVolume();
-    if (hid_event == USB_HID_EVENT_VOLUME_UP) {
-        vol = (vol < 20) ? vol + 1 : 20;
-    } else {
-        vol = (vol > 0) ? vol - 1 : 0;
-    }
-    // keymon does not see these buttons: set the system volume, which NextUI puts on
-    // the mixer of the output
-    SetVolume(vol);
+    ModuleCommon_changeVolume(hid_event == USB_HID_EVENT_VOLUME_UP ? 1 : -1);
     return true;
 }

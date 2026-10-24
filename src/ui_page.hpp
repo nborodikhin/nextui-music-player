@@ -7,22 +7,25 @@
 #include <SDL2/SDL.h>
 
 #include "display_helper.h"
-#include "input/input_events.hpp"
+#include "help_screen.h"
+#include "input/input_listeners.hpp"
 #include "module_common.h"
 
 // A screen that runPage() operates. It gets the raw events and the button events of each
 // frame, and a tick. It sets its dirty flag when its state changed, and runPage() then
 // calls draw().
-class UiPage : public input::RawEventListener, public input::ButtonListener {
+class UiPage : public input::InputListener {
 public:
     // Returns the long presses, the repeats and the combos that the page uses.
     virtual std::span<const input::ButtonRequest> getButtonRequests() const = 0;
+
+    virtual HelpId getHelpId() const { return HELP_NONE; }
 
     // Called one time before the first frame, and one time after the last frame.
     virtual void onEnter() {}
     virtual void onExit() {}
 
-    void onRawEvent(const input::RawEvent&) override {}
+    bool onRawEvent(const input::RawEvent&) override { return false; }
     bool onButtonEvent(const input::ButtonEvent&) override { return false; }
 
     // Called each frame after the events.
@@ -65,8 +68,7 @@ private:
     ModuleExitReason exitReason = MODULE_EXIT_NONE;
 };
 
-// Runs the frame loop of the page until it requests an exit, and returns the reason. The
-// loop does not run the global handler: the page has full control of the buttons.
+// Runs the frame loop of the page until it requests an exit, and returns the reason.
 ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display);
 
 #endif

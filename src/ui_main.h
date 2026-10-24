@@ -12,9 +12,10 @@ extern "C" {
 #include "help_screen.h"
 #include "menu_rows.h"
 
-// Render the main menu.
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                 int menu_scroll, const MenuRows* rows);
+// Render the main menu with no status group: the caller draws it, and gives its width in
+// status_w.
+void render_menu(SDL_Surface* screen, int status_w, int menu_selected, int menu_scroll,
+                 const MenuRows* rows);
 
 // Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title);

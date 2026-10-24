@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <span>
 
-#include "input_events.hpp"
+#include "input_listeners.hpp"
 
 namespace input {
 
@@ -24,7 +24,8 @@ public:
     // member that goes down, the first one in the requests wins.
     ButtonDetector(ButtonListener& listener, std::span<const ButtonRequest> requests);
 
-    void onRawEvent(const RawEvent& event) override;
+    // Returns false: the detector takes no input
+    bool onRawEvent(const RawEvent& event) override;
 
     // Gives the long presses and the repeats that are due at the time now.
     void onTick(uint32_t now);

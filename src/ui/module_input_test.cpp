@@ -40,7 +40,8 @@ class InputTestPage final : public UiPage {
 public:
     std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
 
-    void onRawEvent(const RawEvent& event) override {
+    // Consumes each down and each Media event, thus the global buttons do not act
+    bool onRawEvent(const RawEvent& event) override {
         if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
             held |= getButtonBit(typedEvent->button);
             addEntry(event.time, "raw", "DOWN", getButtonName(typedEvent->button));
@@ -49,9 +50,13 @@ public:
             held &= ~getButtonBit(typedEvent->button);
             addEntry(event.time, "raw", "UP", getButtonName(typedEvent->button));
         }
-        if (const auto* typedEvent = std::get_if<event::ButtonReset>(&event.kind)) {
+        if (std::get_if<event::ButtonReset>(&event.kind)) {
             held = 0;
             addEntry(event.time, "raw", "RESET", "");
+        }
+        if (const auto* typedEvent = std::get_if<event::ButtonCancel>(&event.kind)) {
+            held &= ~getButtonBit(typedEvent->button);
+            addEntry(event.time, "raw", "CANCEL", getButtonName(typedEvent->button));
         }
         if (const auto* typedEvent = std::get_if<event::Media>(&event.kind)) {
             addEntry(event.time, "raw", "Media", getMediaKeyName(typedEvent->key));
@@ -60,6 +65,7 @@ public:
         if ((held & kExitButtons) == kExitButtons) {
             exitTo(MODULE_EXIT_BACK);
         }
+        return std::get_if<event::ButtonDown>(&event.kind) || std::get_if<event::Media>(&event.kind);
     }
 
     bool onButtonEvent(const ButtonEvent& event) override {
