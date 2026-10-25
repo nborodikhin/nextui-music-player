@@ -8,7 +8,6 @@
 #include "module_common.h"
 #include "resume.h"
 #include "toast.h"
-#include "ui_layers.h"
 #include "ui_main.h"
 #include "ui_page.hpp"
 #include "ui_utils.h"
@@ -57,23 +56,24 @@ ListNavInput toListNavInput(Button button) {
 
 class MainMenuPage final : public UiPage {
 public:
-    explicit MainMenuPage(SDL_Surface* screen) {
-        nav.items_per_page = calc_list_layout(screen).items_per_page;
-    }
-
     std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
 
     HelpId getHelpId() const override { return HELP_MAIN_MENU; }
 
+    void onScreenChanged(SDL_Surface* screen) override {
+        nav.items_per_page = calc_list_layout(screen).items_per_page;
+        // The rows are not built before onEnter()
+        if (rows.count >= 0) ListNav_reconcile(&nav, rows.count);
+    }
+
     void onEnter() override { updateRows(); }
 
-    // Records the input of the frame. onTick() acts on it.
     bool onButtonEvent(const ButtonEvent& event) override {
         if (const auto* typedEvent = std::get_if<event::ShortPress>(&event.kind)) {
-            return record(typedEvent->button);
+            return pressButton(typedEvent->button);
         }
         if (const auto* typedEvent = std::get_if<event::Repeat>(&event.kind)) {
-            return record(typedEvent->button);
+            return pressButton(typedEvent->button);
         }
         return false;
     }
@@ -81,15 +81,12 @@ public:
     void onTick(uint32_t) override {
         // Track advancement and resume saving
         Background_tick();
-        if (Background_isPlaying()) ModuleCommon_setAutosleepDisabled(true);
         updateRows();
-        act();
         // The software scroll of the Resume row needs a draw in each frame
         if (menu_needs_scroll_redraw()) invalidate();
     }
 
     void draw(SDL_Surface* screen, bool) override {
-        nav.items_per_page = calc_list_layout(screen).items_per_page;
         render_menu(screen, InputState::getInstance().getStatusGroupWidth(), nav.selected,
                     nav.scroll, &rows);
     }
@@ -118,42 +115,31 @@ private:
         if (changed) invalidate();
     }
 
-    bool record(Button button) {
-        const ListNavInput input = toListNavInput(button);
-        if (input != LIST_NAV_NONE) {
-            frameInput.nav = static_cast<ListNavInput>(frameInput.nav | input);
+    // Returns: true when the button has an action on the menu
+    bool pressButton(Button button) {
+        const ListNavInput navInput = toListNavInput(button);
+        if (navInput != LIST_NAV_NONE) {
+            moveCursor(navInput);
             return true;
         }
         switch (button) {
-            case Button::A: frameInput.a = true; return true;
-            case Button::X: frameInput.x = true; return true;
-            case Button::B: frameInput.b = true; return true;
+            case Button::A: openItem(); return true;
+            case Button::X: clearPlayingItem(); return true;
+            case Button::B: askExit(); return true;
             default:        return false;
         }
     }
 
-    // Does one action for the input of the frame: a move, then A, then X, then B
-    void act() {
-        const FrameInput input = frameInput;
-        frameInput             = {};
-        if (input.nav != LIST_NAV_NONE && ListNav_step(&nav, input.nav).moved) {
-            lastSelection = MenuRows_selectionAt(&rows, nav.selected);
-            UiLayer_clear(UI_LAYER_ANIMATION);
-            invalidate();
-        } else if (input.a) {
-            open();
-        } else if (input.x) {
-            clearPlayingItem();
-        } else if (input.b) {
-            askExit();
-        }
+    void moveCursor(ListNavInput navInput) {
+        if (!ListNav_step(&nav, navInput).moved) return;
+        lastSelection = MenuRows_selectionAt(&rows, nav.selected);
+        invalidate();
     }
 
-    void open() {
+    void openItem() {
         const MenuSelection item = MenuRows_selectionAt(&rows, nav.selected);
         // The cursor is off the end
         if (item == MENU_NONE) return;
-        UiLayer_clear(UI_LAYER_ANIMATION);
         lastSelection = item;
         selection     = item;
         exitTo(MODULE_EXIT_BACK);
@@ -168,7 +154,6 @@ private:
         } else {
             Resume_clear();
         }
-        UiLayer_clear(UI_LAYER_ANIMATION);
         nav.selected  = 0;
         lastSelection = MENU_NONE;
         updateRows();
@@ -177,7 +162,6 @@ private:
 
     void askExit() {
         if (Toast_isShowing(exitPrompt)) {
-            UiLayer_clear(UI_LAYER_ANIMATION);
             exiting = true;
             // Unbound: it has to outlive the menu as the last frame on the screen
             Toast_show("Exiting...", TOAST_DURATION);
@@ -201,15 +185,6 @@ private:
         .count        = -1,
         .selection    = {},
     };
-    // The buttons of the frame, in the order of the actions
-    struct FrameInput {
-        ListNavInput nav = LIST_NAV_NONE;
-        bool a           = false;
-        bool x           = false;
-        bool b           = false;
-    };
-
-    FrameInput frameInput   = {};
     MenuSelection selection = MENU_NONE;
     bool exiting            = false;
 };
@@ -218,7 +193,7 @@ private:
 }  // namespace ui
 
 MenuSelection MenuModule_run(DisplayContext* display) {
-    ui::MainMenuPage page(DisplayHelper_getSurface(display));
+    ui::MainMenuPage page;
     if (runPageLoop(page, display) == MODULE_EXIT_QUIT) {
         // Give the "Exiting..." toast a moment on the screen before NextUI takes over
         if (page.isExiting()) SDL_Delay(ui::kExitToastDelayMs);

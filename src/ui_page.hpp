@@ -21,6 +21,11 @@ public:
 
     virtual HelpId getHelpId() const { return HELP_NONE; }
 
+    // Called after the creation of the page and before onEnter(), and again each time the
+    // screen no longer holds the last draw of the page, such as for a new output or after a
+    // sleep. The surface can have a new size. The page then draws everything on the next frame.
+    virtual void onScreenChanged(SDL_Surface*) {}
+
     // Called one time before the first frame, and one time after the last frame.
     virtual void onEnter() {}
     virtual void onExit() {}

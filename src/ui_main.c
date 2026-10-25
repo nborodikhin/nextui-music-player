@@ -7,6 +7,7 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
 #include "selfupdate.h"
 #include "module_common.h"
@@ -93,6 +94,13 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 void render_menu(SDL_Surface* screen, int status_w, int menu_selected, int menu_scroll,
                  const MenuRows* rows) {
     current_rows = *rows;
+
+    // Only the playback row has a marquee. A plain row draws no layer, thus the marquee
+    // of the playback row leaves the layer here.
+    if (!MenuRows_isPlayItem(MenuRows_selectionAt(rows, menu_selected)) && resume_scroll.text[0]) {
+        UiLayer_clear(UI_LAYER_ANIMATION);
+        ScrollText_forget(&resume_scroll);
+    }
 
     const char* items[MENU_ROWS_MAX];
     for (int i = 0; i < rows->count; i++) {

@@ -9,6 +9,7 @@
 #include "input/input_manager.hpp"
 #include "input/input_state.hpp"
 #include "pad_reset.h"
+#include "ui_layers.h"
 #include "ui_utils.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -123,6 +124,8 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
     InputState& state = InputState::getInstance();
 
     ScreenTitle_start(false);
+    SDL_Surface* lastScreen = DisplayHelper_getSurface(display);
+    page.onScreenChanged(lastScreen);
     page.onEnter();
     page.invalidateAll();
     // The coordinator clears the screen only for its own invalidateAll(). A page that paints
@@ -167,6 +170,13 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
         // A new output made the display again: the screen holds nothing
         const bool outputSwitched = ModuleCommon_takeOutputSwitched();
         statusChanged             = statusChanged || outputSwitched;
+        // A new surface and the sleep leave the screen empty. A new surface can have a new size.
+        if (outputSwitched || commonButtonHandler.hasWoken() || screen != lastScreen) {
+            lastScreen = screen;
+            page.onScreenChanged(screen);
+            page.invalidateAll();
+            clearScreen = true;
+        }
         page.onTick(now);
 
         const HardwareBar bar = state.getHardwareBar();
@@ -180,9 +190,8 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
                 clearScreen = true;
             }
         }
-        // The sleep and a new output cleared the screen, and a frame of the title draws on the
-        // screen outside of the page
-        if (commonButtonHandler.hasWoken() || outputSwitched || titleDirty) {
+        // A frame of the title draws on the screen outside of the page
+        if (titleDirty) {
             page.invalidateAll();
             clearScreen = true;
         }
@@ -212,6 +221,9 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
         const ModuleExitReason reason = page.getExitReason();
         if (reason != MODULE_EXIT_NONE) {
             page.onExit();
+            // The next screen does not know what the page left on the layers
+            UiLayer_clear(UI_LAYER_STATUS);
+            UiLayer_clear(UI_LAYER_ANIMATION);
             return reason;
         }
     }

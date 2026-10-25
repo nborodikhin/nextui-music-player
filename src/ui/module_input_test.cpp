@@ -40,7 +40,7 @@ class InputTestPage final : public UiPage {
 public:
     std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
 
-    // Consumes each down and each Media event, thus the global buttons do not act
+    // Consumes each event, thus the global buttons do not act
     bool onRawEvent(const RawEvent& event) override {
         if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
             held |= getButtonBit(typedEvent->button);
@@ -65,7 +65,7 @@ public:
         if ((held & kExitButtons) == kExitButtons) {
             exitTo(MODULE_EXIT_BACK);
         }
-        return std::get_if<event::ButtonDown>(&event.kind) || std::get_if<event::Media>(&event.kind);
+        return true;
     }
 
     bool onButtonEvent(const ButtonEvent& event) override {
