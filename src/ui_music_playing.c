@@ -179,7 +179,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
 
     // Artist name (Medium font, gray)
     const char *artist = info->artist[0] ? info->artist : "Unknown Artist";
-    GFX_truncateText(Fonts_getArtist(), artist, truncated, max_w_text, 0);
+    UI_truncateText(Fonts_getArtist(), artist, truncated, max_w_text, 0);
     SDL_Surface *artist_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (artist_surf) {
@@ -255,7 +255,7 @@ void render_playing(SDL_Surface *screen, int show_setting, BrowserContext *brows
         lyrics_shown_count = 0;
         const char *album = info->album[0] ? info->album : "";
         if (album[0]) {
-            GFX_truncateText(Fonts_getSmall(), album, truncated, max_w_text, 0);
+            UI_truncateText(Fonts_getSmall(), album, truncated, max_w_text, 0);
             SDL_Surface *album_surf = TTF_RenderUTF8_Blended(
                 Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
             if (album_surf) {

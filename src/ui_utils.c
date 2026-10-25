@@ -8,6 +8,7 @@
 #define CHIP_PADDING_Y 2
 #define CHIP_MIN_HEIGHT 16
 #include "ui_fonts.h"
+#include "utf8.h"
 #include "ui_icons.h"
 #include "module_common.h"
 #include "ui_layers.h"
@@ -753,6 +754,32 @@ void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected) {
     }
 }
 
+int UI_truncateText(TTF_Font* font, const char* in_name, char* out_name, int max_width,
+                    int padding) {
+    size_t length = strlen(in_name);
+    memcpy(out_name, in_name, length + 1);
+
+    int width = 0;
+    TTF_SizeUTF8(font, out_name, &width, NULL);
+    width += padding;
+
+    size_t kept = length;
+    while (width > max_width && kept > 0) {
+        // Cut whole characters until "..." fits in the place of the cut text
+        do {
+            out_name[kept] = '\0';
+            kept -= UTF8_lastCharBytes(out_name);
+        } while (kept > 0 && kept + 3 > length);
+
+        if (kept + 3 <= length) memcpy(out_name + kept, "...", 4);
+        else out_name[0] = '\0';
+
+        TTF_SizeUTF8(font, out_name, &width, NULL);
+        width += padding;
+    }
+    return width;
+}
+
 // Get the width of a list row, and the text that fits inside it. The text goes
 // to "truncated". "prefix_width" is the space that something before the text
 // takes, such as an icon or an indicator; give 0 where there is none. A row
@@ -768,13 +795,12 @@ static int calc_list_item_width(TTF_Font* font, const char* text, char* truncate
 
     if (raw_text_w + padding > available_width) {
         // Text needs truncation - extend pill to full width (no right padding gap)
-        GFX_truncateText(font, text, truncated, available_width, padding);
+        UI_truncateText(font, text, truncated, available_width, padding);
         return max_width;
     }
 
     // Text fits - use actual text width with padding
-    strncpy(truncated, text, 255);
-    truncated[255] = '\0';
+    UTF8_copy(truncated, 256, text);
     return MIN(max_width, prefix_width + raw_text_w + padding);
 }
 

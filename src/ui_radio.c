@@ -263,8 +263,8 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
             pill_max_width -= genre_width + SCALE1(PADDING * 2);
         }
         int name_max_width = pill_max_width - prefix_width;
-        int text_width = GFX_truncateText(Fonts_getMedium(), station->name, truncated, name_max_width, SCALE1(BUTTON_PADDING * 2));
-        // GFX_truncateText() gives the width with its padding already in it.
+        int text_width = UI_truncateText(Fonts_getMedium(), station->name, truncated, name_max_width, SCALE1(BUTTON_PADDING * 2));
+        // UI_truncateText() returns the width with its padding.
         int pill_width = MIN(pill_max_width, prefix_width + text_width);
 
         if (selected && genre_width > 0) {
@@ -308,7 +308,7 @@ void render_radio_add_stations(SDL_Surface* screen, int show_setting,
         }
 
         // The row that the cursor is on moves the whole name. Another row shows
-        // the name that GFX_truncateText() cut, thus its end lands on a
+        // the name that UI_truncateText() cut, thus its end lands on a
         // character and not in the middle of a glyph.
         render_list_item_text(screen, &radio_list_scroll,
                               selected ? station->name : truncated, Fonts_getMedium(),

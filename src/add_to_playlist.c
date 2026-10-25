@@ -188,7 +188,7 @@ void AddToPlaylist_render(SDL_Surface* screen) {
 
         // Truncate text if needed
         char truncated[160];
-        GFX_truncateText(font, label, truncated, db.content_w, 0);
+        UI_truncateText(font, label, truncated, db.content_w, 0);
 
         SDL_Surface* text_surf = TTF_RenderUTF8_Blended(font, truncated, color);
         if (text_surf) {

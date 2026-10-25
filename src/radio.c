@@ -6,6 +6,8 @@
 #include "album_art.h"
 #include "radio_hls.h"
 #include "radio_curated.h"
+#include "icy.h"
+#include "utf8.h"
 #include "player.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -684,11 +686,10 @@ static int parse_headers(void) {
             radio.metadata.bitrate = atoi(line + 7);
         }
         else if (strncasecmp(line, "icy-name:", 9) == 0) {
-            strncpy(radio.metadata.station_name, line + 9, sizeof(radio.metadata.station_name) - 1);
-            // Trim leading space
-            char* name = radio.metadata.station_name;
+            const char* name = line + 9;
             while (*name == ' ') name++;
-            memmove(radio.metadata.station_name, name, strlen(name) + 1);
+            UTF8_fromUnknown(radio.metadata.station_name, sizeof(radio.metadata.station_name),
+                             (const uint8_t*)name, strlen(name));
         }
         else if (strncasecmp(line, "content-type:", 13) == 0) {
             strncpy(radio.metadata.content_type, line + 13, sizeof(radio.metadata.content_type) - 1);
@@ -723,76 +724,21 @@ static int parse_headers(void) {
     return 0;
 }
 
-static bool extract_icy_title_tag(char* title, int title_size, const char* tag) {
-    int tag_len = strlen(tag);
-    char* match = title;
-    while ((match = strstr(match, tag)) != NULL) {
-        if (match == title || isspace((unsigned char)match[-1]) ||
-            match[-1] == ',' || match[-1] == ';') {
-            char* value = match + tag_len;
-            char* value_end = strchr(value, '"');
-            if (value_end) {
-                int value_len = value_end - value;
-                if (value_len >= title_size) value_len = title_size - 1;
-                memmove(title, value, value_len);
-                title[value_len] = '\0';
-                return true;
-            }
-        }
-        match += tag_len;
-    }
-    return false;
-}
-
-static void normalize_icy_title(char* title, int title_size) {
-    if (!strchr(title, '=')) return;
-    if (extract_icy_title_tag(title, title_size, "text=\"")) return;
-    if (extract_icy_title_tag(title, title_size, "title=\"")) return;
-    title[0] = '\0';
-}
-
 // Parse ICY metadata block
 static void parse_icy_metadata(const uint8_t* data, int len) {
-    // Format: StreamTitle='Artist - Title';StreamUrl='...';
-    char meta[4096];
-    if (len >= sizeof(meta)) len = sizeof(meta) - 1;
-    memcpy(meta, data, len);
-    meta[len] = '\0';
-
-    // Save old values to detect changes
-    char old_artist[256], old_title[256];
-    strncpy(old_artist, radio.metadata.artist, sizeof(old_artist) - 1);
-    strncpy(old_title, radio.metadata.title, sizeof(old_title) - 1);
-
-    // Find StreamTitle
-    char* title_start = strstr(meta, "StreamTitle='");
-    if (title_start) {
-        title_start += 13;
-        char* title_end = strchr(title_start, '\'');
-        if (title_end) {
-            *title_end = '\0';
-            strncpy(radio.metadata.title, title_start, sizeof(radio.metadata.title) - 1);
-            radio.metadata.title[sizeof(radio.metadata.title) - 1] = '\0';
-
-            // Try to parse "Artist - Title" format
-            char* separator = strstr(radio.metadata.title, " - ");
-            if (separator) {
-                *separator = '\0';
-                strncpy(radio.metadata.artist, radio.metadata.title, sizeof(radio.metadata.artist) - 1);
-                radio.metadata.artist[sizeof(radio.metadata.artist) - 1] = '\0';
-                memmove(radio.metadata.title, separator + 3, strlen(separator + 3) + 1);
-            } else {
-                radio.metadata.artist[0] = '\0';
-            }
-            normalize_icy_title(radio.metadata.title, sizeof(radio.metadata.title));
-
-            // Fetch album art if metadata changed
-            if (strcmp(old_artist, radio.metadata.artist) != 0 ||
-                strcmp(old_title, radio.metadata.title) != 0) {
-                album_art_fetch(radio.metadata.artist, radio.metadata.title);
-            }
-        }
+    char artist[sizeof(radio.metadata.artist)];
+    char title[sizeof(radio.metadata.title)];
+    if (!ICY_parseStreamTitle(data, (size_t)len, artist, sizeof(artist), title, sizeof(title))) {
+        return;
     }
+
+    bool changed = strcmp(artist, radio.metadata.artist) != 0 ||
+                   strcmp(title, radio.metadata.title) != 0;
+    strcpy(radio.metadata.artist, artist);
+    strcpy(radio.metadata.title, title);
+
+    // Fetch album art if metadata changed
+    if (changed) album_art_fetch(radio.metadata.artist, radio.metadata.title);
 }
 
 // ============== HLS SUPPORT ==============

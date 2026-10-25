@@ -7,6 +7,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Longest UTF-8 character plus its terminator
 #define UTF8_CHAR_SIZE 5
@@ -45,6 +46,26 @@ size_t UTF8_copy(char* dst, size_t dst_size, const char* src);
  * that many bytes removes one character, marks included.
  */
 size_t UTF8_lastCharBytes(const char* text);
+
+/**
+ * Decode UTF-16 text from src_len bytes at src into dst as UTF-8, at most
+ * dst_size - 1 bytes, always terminating. The text ends at the first NUL code
+ * unit. Pass true in big_endian for big-endian code units.
+ *
+ * @return bytes written, not counting the terminator
+ */
+size_t UTF8_fromUtf16(char* dst, size_t dst_size, const uint8_t* src, size_t src_len,
+                      bool big_endian);
+
+/**
+ * Copy text with no declared charset from src into dst as UTF-8, at most
+ * dst_size - 1 bytes, always terminating. The text ends at the first NUL byte or
+ * after src_len bytes. If the whole text is valid UTF-8, it is copied as is,
+ * otherwise it is converted from ISO-8859-1.
+ *
+ * @return bytes written, not counting the terminator
+ */
+size_t UTF8_fromUnknown(char* dst, size_t dst_size, const uint8_t* src, size_t src_len);
 
 #ifdef __cplusplus
 }

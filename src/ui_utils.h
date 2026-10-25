@@ -16,6 +16,17 @@ extern "C" {
 // Format a time as MM:SS, or as H:MM:SS from one hour
 void format_time(char* buf, int ms);
 
+// Copy in_name to out_name, truncated so that its width with padding is no more
+// than max_width. A truncated text ends in "...".
+//
+// Requirement: out_name is at least the size of in_name.
+// Returns: the width in pixels of out_name, with padding
+// Note: this replaces GFX_truncateText() of NextUI, which can cut a UTF-8
+// character. Remove it when the pinned NextUI has
+// https://github.com/LoveRetro/NextUI/pull/876.
+int UI_truncateText(TTF_Font* font, const char* in_name, char* out_name, int max_width,
+                    int padding);
+
 // Get format name string
 const char* get_format_name(AudioFormat format);
 // Scrolling text state for marquee animation

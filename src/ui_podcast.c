@@ -1147,7 +1147,7 @@ static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_
     int ty = top;
 
     // Title (medium font, white). The title of a feed fits `truncated`.
-    GFX_truncateText(Fonts_getMedium(), feed->title, truncated, s->text_max_w, 0);
+    UI_truncateText(Fonts_getMedium(), feed->title, truncated, s->text_max_w, 0);
     SDL_Surface* t = TTF_RenderUTF8_Blended(
         Fonts_getMedium(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (t) {
@@ -1162,7 +1162,7 @@ static void draw_feed_summary(SDL_Surface* screen, const PodcastFeed* feed, SDL_
 
     // Author (small font, gray)
     if (s->author_h) {
-        GFX_truncateText(Fonts_getSmall(), feed->author, truncated, s->text_max_w, 0);
+        UI_truncateText(Fonts_getSmall(), feed->author, truncated, s->text_max_w, 0);
         SDL_Surface* a = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (a) {
@@ -1678,7 +1678,7 @@ void render_podcast_download_queue(SDL_Surface* screen, int show_setting,
 
         // Feed title as secondary info (tiny font, below subtitle)
         if (item->feed_title[0]) {
-            GFX_truncateText(Fonts_getTiny(), item->feed_title, truncated, pos.text_max_width, 0);
+            UI_truncateText(Fonts_getTiny(), item->feed_title, truncated, pos.text_max_width, 0);
             // Render as part of subtitle line if space allows
         }
     }
