@@ -134,9 +134,12 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
 
     // The title asks for the next frame while its marquee moves
     int titleDirty = 0;
-    // The status group changes only when the power management asks for a draw
+    // The status group changes when the power management asks for a draw, and with time
     bool statusChanged = true;
     HardwareBar lastBar = state.getHardwareBar();
+    // The wifi, the battery level and the clock in the status group send no event
+    constexpr uint32_t kStatusRefreshMs = 1000;
+    uint32_t surfaceDrawnAt = 0;
 
     while (true) {
         ModuleCommon_frameBegin();
@@ -178,6 +181,10 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
             clearScreen = true;
         }
         page.onTick(now);
+        if (now - surfaceDrawnAt >= kStatusRefreshMs) {
+            page.invalidateAll();
+            statusChanged = true;
+        }
 
         const HardwareBar bar = state.getHardwareBar();
         // A new width moves the title. A new bar adds or removes the hints at the bottom.
@@ -212,6 +219,7 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
                 GFX_blitHardwareHints(screen, static_cast<int>(bar));
             }
             ModuleCommon_markSurfaceDrawn();
+            surfaceDrawnAt = now;
         }
         statusChanged = false;
         titleDirty = 0;
