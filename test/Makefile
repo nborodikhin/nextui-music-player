@@ -76,6 +76,9 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
            $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
            $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
+TESTS   += $(BIN)/test_id3
+TESTS   += $(BIN)/test_radio_hls
+TESTS   += $(BIN)/test_icy
 TESTS   += $(BIN)/test_playlist_m3u
 TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
@@ -224,6 +227,9 @@ $(BIN)/test_ui_theme: test_ui_theme.c $(SRC)/ui_theme_utils.c $(SRC)/ui_theme.h 
 $(BIN)/test_utf8: test_utf8.c $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_utf8.c $(SRC)/utf8.c
 
+$(BIN)/test_id3: test_id3.c $(SRC)/id3.c $(SRC)/id3.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_id3.c $(SRC)/id3.c $(SRC)/utf8.c
+
 $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c \
                               $(SRC)/spectrum.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
@@ -278,6 +284,16 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
 	  $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  $(SRC)/utf8.c \
 	  -lsqlite3 -lpthread -lzip
+
+$(BIN)/test_icy: test_icy.c $(SRC)/icy.c $(SRC)/icy.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_icy.c $(SRC)/icy.c $(SRC)/utf8.c
+
+# radio_hls.c includes defines.h of NextUI, thus its test takes the include path of
+# the platform. The test gives its own radio_net_fetch().
+$(BIN)/test_radio_hls: test_radio_hls.c $(SRC)/radio_hls.c $(SRC)/radio_hls.h \
+                       $(SRC)/id3.c $(SRC)/id3.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(DB_INC) -o $@ test_radio_hls.c $(SRC)/radio_hls.c $(SRC)/id3.c \
+	  $(SRC)/utf8.c
 
 RESUME_TEST_MUSIC = $(TEST_TEMP_DIR)/resume-music
 RESUME_TEST_DB = $(TEST_TEMP_DIR)/resume.db

@@ -56,6 +56,8 @@ struct input_event_raw {
 #define MINIMP4_IMPLEMENTATION
 #include "audio/minimp4.h"
 #include "mp3_seek.h"
+#include "id3.h"
+#include "utf8.h"
 #include "audio/sonic.h"
 #include <fdk-aac/aacdecoder_lib.h>
 #include <opusfile.h>
@@ -1940,11 +1942,22 @@ static void set_album_art(const void* data, size_t size) {
 // Keep a lyrics tag of the track, if it has none yet. `len` is the text length in bytes.
 static void set_embedded_lyrics(const char* text, size_t len) {
     if (player.lyrics || !text) return;
-    while (len > 0 && (text[len - 1] == '\0' || text[len - 1] == '\n' || text[len - 1] == '\r' ||
-                       text[len - 1] == ' ')) len--;
-    if (len == 0) return;
 
-    player.lyrics = strndup(text, len);
+    // One byte of ISO-8859-1 gives two bytes of UTF-8 at most
+    size_t size = len * 2 + 1;
+    char* lyrics = (char*)malloc(size);
+    if (!lyrics) return;
+
+    len = UTF8_fromUnknown(lyrics, size, (const uint8_t*)text, len);
+    while (len > 0 && (lyrics[len - 1] == '\n' || lyrics[len - 1] == '\r' ||
+                       lyrics[len - 1] == ' ')) len--;
+    if (len == 0) {
+        free(lyrics);
+        return;
+    }
+
+    lyrics[len] = '\0';
+    player.lyrics = lyrics;
 }
 
 // Helper: read syncsafe integer (ID3v2)
@@ -1961,110 +1974,43 @@ static uint32_t read_be32(const uint8_t* data) {
            ((uint32_t)data[2] << 8) | (uint32_t)data[3];
 }
 
-// Helper: copy string, trimming trailing spaces
+// Copy a tag text as UTF-8, with no trailing spaces
 static void copy_metadata_string(char* dest, const char* src, size_t max_len) {
     if (!src || !dest || max_len == 0) return;
 
-    size_t len = strlen(src);
-    if (len >= max_len) len = max_len - 1;
-
-    memcpy(dest, src, len);
-    dest[len] = '\0';
-
-    // Trim trailing spaces and nulls
-    while (len > 0 && (dest[len-1] == ' ' || dest[len-1] == '\0')) {
-        dest[--len] = '\0';
-    }
+    size_t len = UTF8_fromUnknown(dest, max_len, (const uint8_t*)src, strlen(src));
+    while (len > 0 && dest[len - 1] == ' ') dest[--len] = '\0';
 }
 
-// Helper: convert UTF-16LE to ASCII (for ID3v2 text frames)
-static void utf16le_to_ascii(char* dest, const uint8_t* src, size_t src_len, size_t max_len) {
-    if (!dest || !src || max_len == 0) return;
-
-    size_t j = 0;
-    for (size_t i = 0; i + 1 < src_len && j < max_len - 1; i += 2) {
-        // Get UTF-16LE character (low byte first)
-        uint16_t ch = src[i] | (src[i + 1] << 8);
-
-        // Only copy ASCII range characters
-        if (ch > 0 && ch < 128) {
-            dest[j++] = (char)ch;
-        } else if (ch >= 128 && ch < 256) {
-            // Latin-1 supplement - just use low byte
-            dest[j++] = (char)ch;
-        }
-        // Skip non-ASCII/non-Latin1 characters
-    }
-    dest[j] = '\0';
-}
-
-// Helper: convert UTF-16BE to ASCII (for ID3v2 text frames)
-static void utf16be_to_ascii(char* dest, const uint8_t* src, size_t src_len, size_t max_len) {
-    if (!dest || !src || max_len == 0) return;
-
-    size_t j = 0;
-    for (size_t i = 0; i + 1 < src_len && j < max_len - 1; i += 2) {
-        // Get UTF-16BE character (high byte first)
-        uint16_t ch = (src[i] << 8) | src[i + 1];
-
-        // Only copy ASCII range characters
-        if (ch > 0 && ch < 128) {
-            dest[j++] = (char)ch;
-        } else if (ch >= 128 && ch < 256) {
-            // Latin-1 supplement
-            dest[j++] = (char)ch;
-        }
-    }
-    dest[j] = '\0';
-}
-
-// Parse ID3v1 tag (at end of file, 128 bytes)
+// Parse ID3v1 tag (at end of file, 128 bytes) into the fields that are still empty
 static void parse_id3v1(const char* filepath) {
     FILE* f = fopen(filepath, "rb");
     if (!f) return;
 
-    // Seek to last 128 bytes
-    if (fseek(f, -128, SEEK_END) != 0) {
+    if (fseek(f, -ID3_V1_TAG_SIZE, SEEK_END) != 0) {
         fclose(f);
         return;
     }
 
-    uint8_t tag[128];
-    if (fread(tag, 1, 128, f) != 128) {
+    uint8_t tag[ID3_V1_TAG_SIZE];
+    if (fread(tag, 1, sizeof(tag), f) != sizeof(tag)) {
         fclose(f);
         return;
     }
     fclose(f);
 
-    // Check for "TAG" header
-    if (tag[0] != 'T' || tag[1] != 'A' || tag[2] != 'G') {
-        return;
+    if (player.track_info.title[0] == '\0') {
+        ID3_readV1Field(player.track_info.title, sizeof(player.track_info.title), tag,
+                        ID3_V1_TITLE);
     }
-
-    // ID3v1 layout: TAG(3) + Title(30) + Artist(30) + Album(30) + Year(4) + Comment(30) + Genre(1)
-    char buf[31];
-
-    // Title (bytes 3-32)
-    if (player.track_info.title[0] == '\0' || strstr(player.track_info.title, ".") != NULL) {
-        memcpy(buf, &tag[3], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.title, buf, sizeof(player.track_info.title));
-    }
-
-    // Artist (bytes 33-62)
     if (player.track_info.artist[0] == '\0') {
-        memcpy(buf, &tag[33], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.artist, buf, sizeof(player.track_info.artist));
+        ID3_readV1Field(player.track_info.artist, sizeof(player.track_info.artist), tag,
+                        ID3_V1_ARTIST);
     }
-
-    // Album (bytes 63-92)
     if (player.track_info.album[0] == '\0') {
-        memcpy(buf, &tag[63], 30);
-        buf[30] = '\0';
-        copy_metadata_string(player.track_info.album, buf, sizeof(player.track_info.album));
+        ID3_readV1Field(player.track_info.album, sizeof(player.track_info.album), tag,
+                        ID3_V1_ALBUM);
     }
-
 }
 
 // Parse ID3v2 tag (at beginning of file)
@@ -2125,45 +2071,14 @@ static void parse_id3v2(const char* filepath) {
         // Skip flags
         pos += 10;
 
-        if (frame_size == 0 || pos + frame_size > tag_size) break;
+        // A subtraction, because a sum with a large frame size can wrap
+        if (frame_size == 0 || frame_size > tag_size - pos) break;
 
         // Process text frames (TIT2, TPE1, TALB, etc.)
         if (frame_id[0] == 'T' && frame_size > 1) {
             const uint8_t* frame_data = &tag_data[pos];
-            uint8_t encoding = frame_data[0];
-            const uint8_t* text_data = &frame_data[1];
-            size_t text_len = frame_size - 1;
-
             char temp[256];
-            temp[0] = '\0';
-
-            // Handle different encodings
-            // 0 = ISO-8859-1, 1 = UTF-16 with BOM, 2 = UTF-16BE, 3 = UTF-8
-            if (encoding == 0 || encoding == 3) {
-                // ISO-8859-1 or UTF-8: copy directly
-                size_t copy_len = text_len < 255 ? text_len : 255;
-                memcpy(temp, text_data, copy_len);
-                temp[copy_len] = '\0';
-            } else if (encoding == 1) {
-                // UTF-16 with BOM
-                if (text_len >= 2) {
-                    bool is_le = (text_data[0] == 0xFF && text_data[1] == 0xFE);
-                    bool is_be = (text_data[0] == 0xFE && text_data[1] == 0xFF);
-                    if (is_le || is_be) {
-                        text_data += 2;
-                        text_len -= 2;
-                    }
-                    if (is_be) {
-                        utf16be_to_ascii(temp, text_data, text_len, sizeof(temp));
-                    } else {
-                        // Default to LE
-                        utf16le_to_ascii(temp, text_data, text_len, sizeof(temp));
-                    }
-                }
-            } else if (encoding == 2) {
-                // UTF-16BE without BOM
-                utf16be_to_ascii(temp, text_data, text_len, sizeof(temp));
-            }
+            ID3_textToUtf8(temp, sizeof(temp), frame_data[0], &frame_data[1], frame_size - 1);
 
             // Assign to appropriate field
             if (strcmp(frame_id, "TIT2") == 0 && temp[0]) {  // Title
@@ -2178,43 +2093,22 @@ static void parse_id3v2(const char* filepath) {
         else if (strcmp(frame_id, "USLT") == 0 && frame_size > 4 && player.lyrics == NULL) {
             const uint8_t* frame_data = &tag_data[pos];
             uint8_t encoding = frame_data[0];
-            bool utf16 = (encoding == 1 || encoding == 2);
             size_t offset = 4;
-
-            // Skip the description: a null of 1 byte, or of 2 bytes at a 2-byte step for UTF-16
-            if (utf16) {
-                while (offset + 1 < frame_size &&
-                       (frame_data[offset] != 0 || frame_data[offset + 1] != 0)) offset += 2;
-                offset += 2;
-            } else {
-                while (offset < frame_size && frame_data[offset] != 0) offset++;
-                offset++;
-            }
+            offset += ID3_skipText(encoding, &frame_data[offset], frame_size - offset);
 
             if (offset < frame_size) {
                 const uint8_t* text = &frame_data[offset];
                 size_t text_len = frame_size - offset;
 
-                if (!utf16) {
-                    set_embedded_lyrics((const char*)text, text_len);
-                } else {
-                    // Encoding 1 starts with a BOM; encoding 2 is big-endian without one
-                    bool is_be = (encoding == 2);
-                    if (encoding == 1 && text_len >= 2) {
-                        is_be = (text[0] == 0xFE && text[1] == 0xFF);
-                        if (is_be || (text[0] == 0xFF && text[1] == 0xFE)) {
-                            text += 2;
-                            text_len -= 2;
-                        }
-                    }
-                    size_t max_len = text_len / 2 + 1;
-                    char* converted = (char*)malloc(max_len);
-                    if (converted) {
-                        if (is_be) utf16be_to_ascii(converted, text, text_len, max_len);
-                        else utf16le_to_ascii(converted, text, text_len, max_len);
-                        set_embedded_lyrics(converted, strlen(converted));
-                        free(converted);
-                    }
+                // One UTF-16 code unit gives three bytes of UTF-8 at most, and one byte
+                // of the other encodings gives two
+                bool utf16 = (encoding == 1 || encoding == 2);
+                size_t size = utf16 ? text_len / 2 * 3 + 1 : text_len * 2 + 1;
+                char* converted = (char*)malloc(size);
+                if (converted) {
+                    size_t length = ID3_textToUtf8(converted, size, encoding, text, text_len);
+                    set_embedded_lyrics(converted, length);
+                    free(converted);
                 }
             }
         }
@@ -2232,23 +2126,7 @@ static void parse_id3v2(const char* filepath) {
                 uint8_t pic_type = frame_data[offset];
                 offset++;
 
-                // Skip description (null-terminated, encoding-dependent)
-                if (encoding == 1 || encoding == 2) {
-                    // UTF-16: look for a null code unit, 2 bytes at a time. A byte scan
-                    // would match the high byte of the last character ("r\0" + "\0\0")
-                    // and leave the image one byte early.
-                    while (offset + 1 < frame_size) {
-                        if (frame_data[offset] == 0 && frame_data[offset + 1] == 0) {
-                            offset += 2;
-                            break;
-                        }
-                        offset += 2;
-                    }
-                } else {
-                    // ISO-8859-1 or UTF-8: single null
-                    while (offset < frame_size && frame_data[offset] != '\0') offset++;
-                    offset++;
-                }
+                offset += ID3_skipText(encoding, &frame_data[offset], frame_size - offset);
 
                 // Now frame_data + offset points to the image data
                 if (offset < frame_size) {
@@ -2286,7 +2164,8 @@ static void parse_mp3_metadata(const char* filepath) {
     parse_id3v2(filepath);
 
     // Fall back to ID3v1 for any missing fields
-    if (player.track_info.artist[0] == '\0' || player.track_info.album[0] == '\0') {
+    if (player.track_info.title[0] == '\0' || player.track_info.artist[0] == '\0' ||
+        player.track_info.album[0] == '\0') {
         parse_id3v1(filepath);
     }
 }
@@ -2635,6 +2514,22 @@ static int load_streaming(const char* filepath) {
     return 0;
 }
 
+// Use the filename without its extension as the title, when no tag gave one
+static void set_title_from_filename(const char* filepath) {
+    pthread_mutex_lock(&player.mutex);
+
+    if (player.track_info.title[0] == '\0') {
+        const char* filename = strrchr(filepath, '/');
+        if (filename) filename++; else filename = filepath;
+        strncpy(player.track_info.title, filename, sizeof(player.track_info.title) - 1);
+
+        char* ext = strrchr(player.track_info.title, '.');
+        if (ext) *ext = '\0';
+    }
+
+    pthread_mutex_unlock(&player.mutex);
+}
+
 int Player_load(const char* filepath) {
     if (!filepath || !player.audio_initialized) return -1;
 
@@ -2648,16 +2543,8 @@ int Player_load(const char* filepath) {
     // Store filename
     strncpy(player.current_file, filepath, sizeof(player.current_file) - 1);
 
-    // Extract title from filename
-    const char* filename = strrchr(filepath, '/');
-    if (filename) filename++; else filename = filepath;
-    strncpy(player.track_info.title, filename, sizeof(player.track_info.title) - 1);
-
-    // Remove extension from title
-    char* ext = strrchr(player.track_info.title, '.');
-    if (ext) *ext = '\0';
-
-    // Clear artist/album
+    // Each tag reader sees an empty field for each field that no tag gave
+    player.track_info.title[0] = '\0';
     player.track_info.artist[0] = '\0';
     player.track_info.album[0] = '\0';
 
@@ -2670,6 +2557,7 @@ int Player_load(const char* filepath) {
         format == AUDIO_FORMAT_M4A || format == AUDIO_FORMAT_AAC ||
         format == AUDIO_FORMAT_OPUS) {
         parse_metadata(format, filepath);
+        set_title_from_filename(filepath);
         result = load_streaming(filepath);
 
         // Album art fetch moved to module_player.c (after Player_play)

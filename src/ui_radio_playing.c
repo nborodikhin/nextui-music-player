@@ -126,7 +126,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     // Genre (like Artist in local player) - gray, medium font
     const char* genre = (current_station && current_station->genre[0]) ? current_station->genre : "Radio";
-    GFX_truncateText(Fonts_getArtist(), genre, truncated, max_w_half, 0);
+    UI_truncateText(Fonts_getArtist(), genre, truncated, max_w_half, 0);
     SDL_Surface* genre_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (genre_surf) {
@@ -145,7 +145,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     // three playing screens hold one hierarchy.
     const char* station_name = meta->station_name[0] ? meta->station_name :
                                (current_station ? current_station->name : "Unknown Station");
-    GFX_truncateText(Fonts_getTitle(), station_name, truncated, max_w_full, 0);
+    UI_truncateText(Fonts_getTitle(), station_name, truncated, max_w_full, 0);
     SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
         Fonts_getTitle(), truncated, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (name_surf) {
@@ -233,7 +233,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     }
     if (meta->artist[0]) {
         // Artist line (smaller font)
-        GFX_truncateText(Fonts_getSmall(), meta->artist, truncated, max_w_full, 0);
+        UI_truncateText(Fonts_getSmall(), meta->artist, truncated, max_w_full, 0);
         SDL_Surface* artist_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (artist_surf) {
@@ -249,7 +249,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     // Show slogan if no title/artist available
     if (!meta->title[0] && !meta->artist[0] && current_station && current_station->slogan[0]) {
-        GFX_truncateText(Fonts_getAlbum(), current_station->slogan, truncated, max_w_full, 0);
+        UI_truncateText(Fonts_getAlbum(), current_station->slogan, truncated, max_w_full, 0);
         SDL_Surface* slogan_surf = TTF_RenderUTF8_Blended(
             Fonts_getAlbum(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (slogan_surf) {

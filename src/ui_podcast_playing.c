@@ -234,7 +234,7 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
     int max_w_text = hw - SCALE1(PADDING * 2);
 
     // Podcast name (like Artist in music player) - gray, artist font
-    GFX_truncateText(Fonts_getArtist(), feed->title, truncated, max_w_text, 0);
+    UI_truncateText(Fonts_getArtist(), feed->title, truncated, max_w_text, 0);
     SDL_Surface* podcast_surf = TTF_RenderUTF8_Blended(
         Fonts_getArtist(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
     if (podcast_surf) {
@@ -335,9 +335,10 @@ void render_podcast_playing(SDL_Surface* screen, int show_setting,
             TTF_SizeUTF8(desc_font, remaining, &tw, NULL);
 
             if (tw <= max_w_text || line == max_lines - 1) {
-                GFX_truncateText(desc_font, remaining, truncated, max_w_text, 0);
+                char last_line[sizeof(desc_buf)];
+                UI_truncateText(desc_font, remaining, last_line, max_w_text, 0);
                 SDL_Surface* d = TTF_RenderUTF8_Blended(
-                    desc_font, truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
+                    desc_font, last_line, Theme_getColor(THEME_ROLE_SECONDARY, false));
                 if (d) {
                     SDL_Rect d_at = {
                         .x = SCALE1(PADDING),

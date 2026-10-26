@@ -587,8 +587,8 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
 
     // Content text (truncated if needed)
     if (has_content) {
-        char truncated[64];
-        GFX_truncateText(Fonts_getSmall(), content, truncated, db.box_w - SCALE1(20), 0);
+        char truncated[256];
+        UI_truncateText(Fonts_getSmall(), content, truncated, db.box_w - SCALE1(20), 0);
         SDL_Surface* name_surf = TTF_RenderUTF8_Blended(
             Fonts_getSmall(), truncated, Theme_getColor(THEME_ROLE_SECONDARY, false));
         if (name_surf) {

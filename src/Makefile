@@ -230,7 +230,7 @@ LOCAL_SRC = \
     ui_fonts.c ui_icons.c ui_utils.c browser.c ui_album_art.c \
     ui_main.c ui_music.c ui_radio.c ui_downloader.c ui_podcast.c \
     ui_playlist.c ui_system.c ui_settings.c ui_keyboard.c ui_theme.c \
-    ui_theme_utils.c keyboard_map.c utf8.c \
+    ui_theme_utils.c keyboard_map.c utf8.c id3.c icy.c \
     spectrum.c \
     spectrum_ceiling.c \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \

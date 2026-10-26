@@ -1,5 +1,7 @@
 #include "radio_hls.h"
 #include "radio_net.h"
+#include "id3.h"
+#include "utf8.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +61,31 @@ void radio_hls_resolve_url(const char* base, const char* relative, char* result,
     }
 }
 
+// Returns the first place of needle in haystack, or NULL
+static const uint8_t* find_bytes(const uint8_t* haystack, size_t haystack_len,
+                                 const char* needle, size_t needle_len) {
+    if (needle_len > haystack_len) return NULL;
+    for (size_t index = 0; index + needle_len <= haystack_len; index++) {
+        if (memcmp(haystack + index, needle, needle_len) == 0) return haystack + index;
+    }
+    return NULL;
+}
+
+// Decode the value of the attribute `name` of the playlist line from line to line_end
+// into dst. Leaves dst unchanged when the line has no such attribute.
+static void read_extinf_attribute(const char* line, const char* line_end, const char* name,
+                                  char* dst, size_t dst_size) {
+    size_t name_len = strlen(name);
+    const uint8_t* value = find_bytes((const uint8_t*)line, (size_t)(line_end - line), name,
+                                      name_len);
+    if (!value) return;
+
+    value += name_len;
+    size_t rest = (size_t)((const uint8_t*)line_end - value);
+    const uint8_t* value_end = (const uint8_t*)memchr(value, '"', rest);
+    if (value_end) UTF8_fromUnknown(dst, dst_size, value, (size_t)(value_end - value));
+}
+
 // Parse M3U8 playlist content
 int radio_hls_parse_playlist(HLSContext* ctx, const char* content, const char* base_url) {
     ctx->segment_count = 0;
@@ -105,31 +132,12 @@ int radio_hls_parse_playlist(HLSContext* ctx, const char* content, const char* b
                 segment_title[0] = '\0';
                 segment_artist[0] = '\0';
 
-                // Parse title="..."
-                char* title_start = strstr(line_buf, "title=\"");
-                if (title_start) {
-                    title_start += 7;
-                    char* title_end = strchr(title_start, '"');
-                    if (title_end) {
-                        int len = title_end - title_start;
-                        if (len > 127) len = 127;
-                        strncpy(segment_title, title_start, len);
-                        segment_title[len] = '\0';
-                    }
-                }
-
-                // Parse artist="..."
-                char* artist_start = strstr(line_buf, "artist=\"");
-                if (artist_start) {
-                    artist_start += 8;
-                    char* artist_end = strchr(artist_start, '"');
-                    if (artist_end) {
-                        int len = artist_end - artist_start;
-                        if (len > 127) len = 127;
-                        strncpy(segment_artist, artist_start, len);
-                        segment_artist[len] = '\0';
-                    }
-                }
+                // The line buffer can cut a long line, thus read the attributes from the
+                // whole line
+                read_extinf_attribute(line, eol, "title=\"", segment_title,
+                                      sizeof(segment_title));
+                read_extinf_attribute(line, eol, "artist=\"", segment_artist,
+                                      sizeof(segment_artist));
             } else if (strncmp(line_buf, "#EXT-X-ENDLIST", 14) == 0) {
                 ctx->is_live = false;
             } else if (line_buf[0] != '#' && line_buf[0] != '\0') {
@@ -199,6 +207,21 @@ int radio_hls_fetch_playlist(HLSContext* ctx, const char* url) {
     return seg_count;
 }
 
+// Copy a stream title of the form "Artist - Title" into artist and title, or the whole
+// stream title into title when it has no " - ". The split happens before the copy,
+// because UTF-8 can be longer than the source, and a field can cut the separator.
+static void set_stream_title(char* stream_title, char* artist, int artist_size, char* title,
+                             int title_size) {
+    char* song = stream_title;
+    char* separator = strstr(stream_title, " - ");
+    if (separator && artist && artist_size > 0) {
+        *separator = '\0';
+        UTF8_copy(artist, (size_t)artist_size, stream_title);
+        song = separator + 3;
+    }
+    UTF8_copy(title, (size_t)title_size, song);
+}
+
 // Parse ID3 tags from HLS segment
 int radio_hls_parse_id3_metadata(const uint8_t* data, int len,
                                   char* artist, int artist_size,
@@ -237,89 +260,62 @@ int radio_hls_parse_id3_metadata(const uint8_t* data, int len,
             frame_size = ((data[pos+4] & 0x7F) << 21) | ((data[pos+5] & 0x7F) << 14) |
                          ((data[pos+6] & 0x7F) << 7) | (data[pos+7] & 0x7F);
         } else {
-            frame_size = (data[pos+4] << 24) | (data[pos+5] << 16) |
-                         (data[pos+6] << 8) | data[pos+7];
+            frame_size = ((uint32_t)data[pos+4] << 24) | ((uint32_t)data[pos+5] << 16) |
+                         ((uint32_t)data[pos+6] << 8) | data[pos+7];
         }
 
-        if (frame_size == 0 || pos + 10 + frame_size > (uint32_t)total_size) break;
+        // A subtraction, because a sum with a large frame size can wrap
+        if (frame_size == 0 || frame_size > (uint32_t)(total_size - pos - 10)) break;
 
         const uint8_t* frame_data = &data[pos + 10];
 
         // TIT2 = Title
         if (strcmp(frame_id, "TIT2") == 0 && frame_size > 1 && title && title_size > 0) {
-            int encoding = frame_data[0];
-            const char* text = (const char*)&frame_data[1];
-            int text_len = frame_size - 1;
-            if (text_len > title_size - 1) text_len = title_size - 1;
-
-            if (encoding == 0 || encoding == 3) {  // ISO-8859-1 or UTF-8
-                memcpy(title, text, text_len);
-                title[text_len] = '\0';
-            }
+            ID3_textToUtf8(title, title_size, frame_data[0], &frame_data[1], frame_size - 1);
         }
         // TPE1 = Artist
         else if (strcmp(frame_id, "TPE1") == 0 && frame_size > 1 && artist && artist_size > 0) {
-            int encoding = frame_data[0];
-            const char* text = (const char*)&frame_data[1];
-            int text_len = frame_size - 1;
-            if (text_len > artist_size - 1) text_len = artist_size - 1;
-
-            if (encoding == 0 || encoding == 3) {
-                memcpy(artist, text, text_len);
-                artist[text_len] = '\0';
-            }
+            ID3_textToUtf8(artist, artist_size, frame_data[0], &frame_data[1], frame_size - 1);
         }
-        // TXXX = User-defined text (may contain StreamTitle)
+        // TXXX = User-defined text: encoding, description, value (may contain StreamTitle)
         else if (strcmp(frame_id, "TXXX") == 0 && frame_size > 1 && title && title_size > 0) {
-            int encoding = frame_data[0];
-            if (encoding == 0 || encoding == 3) {
-                const char* desc = (const char*)&frame_data[1];
-                if (strstr(desc, "StreamTitle") || strstr(desc, "TITLE")) {
-                    const char* value = desc;
-                    while (*value && (value - (const char*)frame_data) < (int)frame_size) value++;
-                    value++;
+            uint8_t encoding = frame_data[0];
+            const uint8_t* text = &frame_data[1];
+            size_t text_len = frame_size - 1;
+            size_t value_start = ID3_skipText(encoding, text, text_len);
 
-                    if ((value - (const char*)frame_data) < (int)frame_size) {
-                        int val_len = frame_size - (value - (const char*)frame_data);
-                        if (val_len > title_size - 1) val_len = title_size - 1;
-
-                        memcpy(title, value, val_len);
-                        title[val_len] = '\0';
-
-                        // Try to parse "Artist - Title" format
-                        char* separator = strstr(title, " - ");
-                        if (separator && artist && artist_size > 0) {
-                            *separator = '\0';
-                            strncpy(artist, title, artist_size - 1);
-                            artist[artist_size - 1] = '\0';
-                            memmove(title, separator + 3, strlen(separator + 3) + 1);
-                        }
-                    }
+            char description[64];
+            ID3_textToUtf8(description, sizeof(description), encoding, text, value_start);
+            if (value_start < text_len &&
+                (strstr(description, "StreamTitle") || strstr(description, "TITLE"))) {
+                // One byte of the source gives two bytes of UTF-8 at most
+                size_t value_len = text_len - value_start;
+                char* stream_title = (char*)malloc(value_len * 2 + 1);
+                if (stream_title) {
+                    ID3_textToUtf8(stream_title, value_len * 2 + 1, encoding,
+                                   text + value_start, value_len);
+                    set_stream_title(stream_title, artist, artist_size, title, title_size);
+                    free(stream_title);
                 }
             }
         }
-        // PRIV = Private frame (some streams put metadata here)
+        // PRIV = Private frame (some streams put metadata here). A standard frame starts
+        // with an owner identifier and a NUL, thus the search does not stop at a NUL.
         else if (strcmp(frame_id, "PRIV") == 0 && frame_size > 0 && title && title_size > 0) {
-            char priv_data[512];
-            int copy_len = frame_size < sizeof(priv_data) - 1 ? frame_size : sizeof(priv_data) - 1;
-            memcpy(priv_data, frame_data, copy_len);
-            priv_data[copy_len] = '\0';
-
-            char* title_start = strstr(priv_data, "StreamTitle='");
-            if (title_start) {
-                title_start += 13;
-                char* title_end = strchr(title_start, '\'');
-                if (title_end) {
-                    *title_end = '\0';
-                    strncpy(title, title_start, title_size - 1);
-                    title[title_size - 1] = '\0';
-
-                    char* separator = strstr(title, " - ");
-                    if (separator && artist && artist_size > 0) {
-                        *separator = '\0';
-                        strncpy(artist, title, artist_size - 1);
-                        artist[artist_size - 1] = '\0';
-                        memmove(title, separator + 3, strlen(separator + 3) + 1);
+            static const char kMark[] = "StreamTitle='";
+            const size_t mark_len = sizeof(kMark) - 1;
+            const uint8_t* value = find_bytes(frame_data, frame_size, kMark, mark_len);
+            if (value) {
+                value += mark_len;
+                size_t rest = frame_size - (size_t)(value - frame_data);
+                const uint8_t* value_end = (const uint8_t*)memchr(value, '\'', rest);
+                if (value_end) {
+                    size_t value_len = (size_t)(value_end - value);
+                    char* stream_title = (char*)malloc(value_len * 2 + 1);
+                    if (stream_title) {
+                        UTF8_fromUnknown(stream_title, value_len * 2 + 1, value, value_len);
+                        set_stream_title(stream_title, artist, artist_size, title, title_size);
+                        free(stream_title);
                     }
                 }
             }

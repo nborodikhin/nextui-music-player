@@ -277,7 +277,7 @@ TEST(test_menu_row_reserves_the_icon_once) {
 
     // A long title: the pill takes the row, and the title ends where the row ends,
     // thus it lost one icon and no more. The text stays under the 256 bytes of
-    // `truncated`, which the platform fills with no bound.
+    // `truncated`, which UI_truncateText() fills with no bound.
     char text[200];
     memset(text, 'W', sizeof(text) - 1);
     text[sizeof(text) - 1] = '\0';
@@ -295,6 +295,62 @@ TEST(test_menu_row_reserves_the_icon_once) {
     SDL_FreeSurface(screen);
 }
 
+// The kept text is a prefix of the input that ends at the start of a character
+static bool ends_on_a_character(const char *input, const char *kept, size_t kept_len) {
+    if (strncmp(input, kept, kept_len) != 0) return false;
+    return ((unsigned char)input[kept_len] & 0xC0) != 0x80;
+}
+
+// Text that is too wide loses whole characters and ends in "..."
+TEST(test_truncate_keeps_whole_characters) {
+    TTF_Font *font = large_font_or_skip();
+    if (!font) return;
+
+    // 2-, 3- and 4-byte characters, so each cut position meets each kind
+    const char *inputs[] = {"Café Café Café Café", "周杰伦周杰伦周杰伦周杰伦",
+                            "A\xF0\x9F\x8E\xB5" "B\xF0\x9F\x8E\xB5" "C\xF0\x9F\x8E\xB5" "D"};
+    for (int index = 0; index < 3; index++) {
+        const char *input = inputs[index];
+        int full_w;
+        TTF_SizeUTF8(font, input, &full_w, NULL);
+
+        for (int max_w = full_w - 1; max_w > 0; max_w -= SCALE1(3)) {
+            char out[64];
+            int width = UI_truncateText(font, input, out, max_w, 0);
+            size_t out_len = strlen(out);
+            CHECK(out_len <= strlen(input));
+            CHECK(out_len >= 3);
+            CHECK_EQ_INT(strcmp(out + out_len - 3, "..."), 0);
+            CHECK(ends_on_a_character(input, out, out_len - 3));
+
+            int out_w;
+            TTF_SizeUTF8(font, out, &out_w, NULL);
+            CHECK_EQ_INT(width, out_w);
+            // Only "..." alone can stay wider than the limit
+            if (out_len > 3) CHECK(width <= max_w);
+        }
+    }
+}
+
+// Text that fits stays whole, and text shorter than "..." never grows
+TEST(test_truncate_short_text) {
+    TTF_Font *font = large_font_or_skip();
+    if (!font) return;
+
+    char out[16];
+    int text_w;
+    TTF_SizeUTF8(font, "Song", &text_w, NULL);
+    int padding = SCALE1(4);
+    CHECK_EQ_INT(UI_truncateText(font, "Song", out, text_w + padding, padding), text_w + padding);
+    CHECK_EQ_INT(strcmp(out, "Song"), 0);
+
+    // Too wide even for "...": the result is "..." or nothing, never past the input
+    UI_truncateText(font, "Song", out, 1, 0);
+    CHECK_EQ_INT(strcmp(out, "..."), 0);
+    UI_truncateText(font, "\xC3\xA9", out, 1, 0);
+    CHECK_EQ_INT(strcmp(out, ""), 0);
+}
+
 int main(void) {
     RUN(test_format_time);
     RUN(test_chip_on_the_top_pill_row);
@@ -307,5 +363,7 @@ int main(void) {
     RUN(test_screen_title_area);
     RUN(test_screen_title_paint_stays_in_its_area);
     RUN(test_menu_row_reserves_the_icon_once);
+    RUN(test_truncate_keeps_whole_characters);
+    RUN(test_truncate_short_text);
     return test_summary();
 }
