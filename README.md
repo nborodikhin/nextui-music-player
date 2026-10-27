@@ -151,6 +151,7 @@ The player compiles against the dependencies specified in `deps.json`.
 ```bash
 ./dev deps fetch   # fetch any missing dependencies (no-op for already fetched ones)
 ./dev deps update  # updates dependencies to versions specified by deps file
+./dev deps fetch --origin ../nextui-music-player   # take NextUI and Zig from that checkout
 ```
 
 `fetch` is a step of `build`, so the first build on a fresh clone will pull
@@ -161,7 +162,17 @@ each build, the desktop and the unit tests too. `fetch` downloads the Linux Zig
 for the CPU of the host into `deps/zig/`, which the toolchain images run. On
 macOS it also downloads the macOS Zig for the desktop build. It checks the
 sha256 of each archive, and its minisign signature where `minisign` is
-installed.
+installed. It keeps each archive in `deps/downloads/`, thus a fetch again
+downloads nothing.
+
+A secondary checkout, such as a git worktree, takes its dependencies from an
+origin checkout. `fetch` makes each NextUI tree a git worktree of the NextUI
+clone of the origin, thus it clones no history, and it unpacks Zig from the
+archive that the origin keeps. In a linked git worktree of this repository, the
+origin is the main worktree. `--origin <checkout>` names another origin, and
+`--origin none` clones and downloads in the checkout itself. `./dev clean --deps`
+removes a NextUI worktree through git, and keeps a NextUI clone that has
+worktrees.
 
 A dependency can name a directory of patches, which `fetch` applies to the
 checkout. `deps/patches/nextui/` holds them for the NextUI trees: each one is a
@@ -224,6 +235,12 @@ know `zig`. Thus the Makefiles compile C++ with `zig-c++`, a script that
 
 # Run host-side unit tests
 ./dev test
+
+# Run the desktop app
+./dev run desktop
+./dev run desktop --headless -- --test-control case.txt,std
+./dev run desktop --sdcard runs/a      # own sdcard and /tmp, needs bwrap
+./dev run desktop --sdcard runs/b --sdcard-template seed
 
 # Build, install, and run on connected devices
 ./dev devices                          # the app, the pak version and the paths
@@ -426,6 +443,15 @@ that cannot compose gives the surface alone, and the layers are then absent.
 
 The same option operates a device build. The app also continues to accept the
 buttons of the hardware during a run.
+
+Each desktop run reads and writes the shared sdcard `/var/tmp/nextui/sdcard`, thus
+two runs at one time change the data of each other. `./dev run desktop --sdcard
+<dir>` runs the app in a mount namespace of bwrap, with `<dir>` in place of the
+shared sdcard and with a private `/tmp`. `.system`, `Tools` and `Music` come from
+the shared sdcard, read-only. `--sdcard-template <template>` copies `<template>`
+into `<dir>` when `<dir>` is missing or empty. A path in the script must be
+outside `/tmp`. Without bwrap, as on macOS, `--sdcard` has no effect and `dev`
+warns.
 
 
 ### Project Structure

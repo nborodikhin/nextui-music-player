@@ -7,6 +7,8 @@
 #     Could be set per call with --docker or --podman
 
 import argparse
+import contextlib
+import fcntl
 import glob
 import hashlib
 import http.client
@@ -39,6 +41,7 @@ RESTART_FLAG = "/tmp/nextui-music-player.restart"
 MANIFEST = ROOT / "dist.manifest"
 DEPS_MANIFEST = ROOT / "deps.json"
 PIN_FILE_NAME = ".music-player-pinned-version"
+DEPS_LOCK = "deps/.fetch.lock"
 CONTAINER_PROJECT = "/root/workspace/nextui-music-player"
 DIST_DIR = ROOT / "dist"
 DIST_PAK = DIST_DIR / PAK_NAME
@@ -51,6 +54,11 @@ SELFUPDATE_HEADER = ROOT / "src/selfupdate.h"
 QR_CODE_HEADER = ROOT / "src/qr_code_data.h"
 QR_CODE_PNG = ROOT / "src/qr-code.png"
 DEV_CONFIG_FILE = ROOT / ".dev"
+DESKTOP_PREFIX = Path("/var/tmp/nextui")
+DESKTOP_SDCARD = DESKTOP_PREFIX / "sdcard"
+# The directories of the sdcard that an isolated desktop run reads from the
+# shared sdcard, and does not write.
+SHARED_SDCARD_DIRS = (".system", "Tools", "Music")
 DEFAULT_CONTAINER_RUNTIME = "docker"
 RADIO_SAMPLE_SIZE = 64 * 1024
 RADIO_TIMEOUT_SECONDS = 15
@@ -541,7 +549,13 @@ def write_pin(dependency, ref, commit):
 
 def exclude_pin(dependency):
     """Keep the marker out of the dependency's own git status."""
-    exclude = dependency.root / ".git" / "info" / "exclude"
+    # In a worktree, .git is a file, and the exclude file is in the common
+    # directory.
+    common = git(dependency.root, "rev-parse", "--path-format=absolute",
+                 "--git-common-dir", check=False)
+    if not common:
+        return
+    exclude = Path(common) / "info" / "exclude"
     if not exclude.parent.is_dir():
         return
     lines = exclude.read_text().splitlines() if exclude.exists() else []
@@ -642,10 +656,10 @@ def warn_unpinned(statuses):
     print(colorize("\n".join(block), YELLOW), file=sys.stderr, flush=True)
 
 
-def resolve_ref(root, ref):
+def resolve_ref(root, ref, remote):
     """Resolve a ref to a commit. Branches must resolve to the remote tip, so
-    origin/<ref> wins; tags and raw revisions fall through to the bare name."""
-    for candidate in ("origin/" + ref, ref):
+    <remote>/<ref> wins; tags and raw revisions fall through to the bare name."""
+    for candidate in (remote + "/" + ref, ref):
         commit = git(
             root, "rev-parse", "--verify", "--quiet", candidate + "^{commit}",
             check=False,
@@ -694,12 +708,133 @@ def checkout_dependency(dependency, ref, commit):
     write_pin(dependency, ref, commit)
 
 
+# The origin that --origin of `deps fetch` names: a path, ORIGIN_NONE, or None
+# when the command names no origin.
+REQUESTED_ORIGIN = None
+ORIGIN_NONE = "none"
+
+
+def checkout_origin():
+    """The checkout whose NextUI clones and Zig archives this checkout takes, or
+    None when this checkout clones and downloads its own. Without --origin, a
+    linked git worktree takes the main worktree."""
+    if REQUESTED_ORIGIN == ORIGIN_NONE:
+        return None
+    if REQUESTED_ORIGIN is not None:
+        origin = Path(REQUESTED_ORIGIN).expanduser().resolve()
+        if origin == ROOT:
+            raise DevError("--origin names this checkout")
+    else:
+        common = git(ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir",
+                     check=False)
+        if not common or Path(common) == (ROOT / ".git").resolve():
+            return None
+        origin = Path(common).parent
+    if not (origin / DEPS_MANIFEST.name).is_file():
+        raise DevError("{} is not a checkout of the app: it has no {}".format(
+            origin, DEPS_MANIFEST.name))
+    return origin
+
+
+def normalized_git_url(url):
+    url = url.rstrip("/")
+    return url[:-len(".git")] if url.endswith(".git") else url
+
+
+def manifest_remote(dependency, root):
+    """The remote of the clone at `root` whose URL is the git_url of the manifest.
+    The clone of an origin can have more remotes, and its origin can be a fork."""
+    wanted = normalized_git_url(dependency.git_url)
+    for name in git(root, "remote", check=False).split():
+        url = git(root, "remote", "get-url", name, check=False)
+        if normalized_git_url(url) == wanted:
+            return name
+    raise DevError(
+        "{}: no remote of {} has the URL {}. Add a remote with that URL.".format(
+            dependency.name, root, dependency.git_url
+        )
+    )
+
+
+@contextlib.contextmanager
+def file_lock(path, purpose):
+    """Hold an exclusive lock on `path` for the block. Another ./dev that holds it
+    makes this one wait, and the wait prints `purpose`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Waiting for another ./dev that {}".format(purpose), flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+# The lock file that the ./dev which started this one holds, for a ./dev that
+# it starts in the origin.
+HELD_DEPS_LOCK_ENV = "DEV_HELD_DEPS_LOCK"
+
+
+def dependency_lock(checkout=ROOT):
+    """The lock of the dependency checkouts of `checkout`. A ./dev that reads or
+    changes them holds it, thus it never sees a checkout that another ./dev
+    makes or removes at the same time. A secondary checkout holds the lock of
+    its origin too, while it uses the clones of the origin."""
+    path = (checkout / DEPS_LOCK).resolve()
+    if os.environ.get(HELD_DEPS_LOCK_ENV) == str(path):
+        return contextlib.nullcontext()
+    return file_lock(path, "fetches the dependencies of " + str(checkout))
+
+
+def add_worktree_of(dependency, source):
+    """Add the checkout as a worktree of the clone at `source`, at the pinned
+    commit, with the patch set applied."""
+    remote = manifest_remote(dependency, source)
+    commit = resolve_ref(source, dependency.ref, remote)
+    if not commit:
+        print("{}: fetching tags for {} into {}".format(
+            dependency.name, dependency.ref, source), flush=True)
+        run_command(["git", "-C", str(source), "fetch", "--tags", remote])
+        commit = resolve_ref(source, dependency.ref, remote)
+    if not commit:
+        raise DevError("{}: {} is not in {}".format(
+            dependency.name, dependency.ref, dependency.git_url))
+    print("Adding {} as a worktree of {}".format(dependency.path, source), flush=True)
+    # A worktree whose directory was deleted by hand stays registered, and
+    # blocks the add.
+    git(source, "worktree", "prune")
+    git(source, "worktree", "add", "--detach", dependency.root, commit)
+    apply_patches(dependency)
+    write_pin(dependency, dependency.ref, commit)
+
+
+def add_dependency_worktree(dependency, origin):
+    """Make the checkout a git worktree of the clone of the origin, thus it shares
+    the history of the origin and clones nothing."""
+    source = origin / dependency.path
+    with dependency_lock(origin):
+        if not (source / ".git").exists():
+            print("{}: {} has no {}; fetching it there first".format(
+                dependency.name, origin, dependency.path), flush=True)
+            env = os.environ.copy()
+            env[HELD_DEPS_LOCK_ENV] = str((origin / DEPS_LOCK).resolve())
+            run_command([str(origin / "dev"), "deps", "fetch"], cwd=origin, env=env)
+            if not (source / ".git").exists():
+                raise DevError("{}: {} still has no {}".format(
+                    dependency.name, origin, dependency.path))
+        add_worktree_of(dependency, source)
+
+
 def clone_dependency(dependency):
+    origin = checkout_origin()
+    if origin is not None:
+        add_dependency_worktree(dependency, origin)
+        return
     print(
         "Cloning {} into {}".format(dependency.git_url, dependency.path), flush=True
     )
     run_command(["git", "clone", dependency.git_url, str(dependency.root)])
-    commit = resolve_ref(dependency.root, dependency.ref)
+    commit = resolve_ref(dependency.root, dependency.ref, "origin")
     if not commit:
         raise DevError(
             "{}: {} is not in {}".format(
@@ -767,17 +902,18 @@ def fetch_dependency(dependency):
     if status.state != "stale":
         return False
 
-    commit = resolve_ref(dependency.root, dependency.ref)
+    remote = manifest_remote(dependency, dependency.root)
+    commit = resolve_ref(dependency.root, dependency.ref, remote)
     if not commit:
         # A clone only holds the tags that existed at the time, thus a manifest
         # that moves onto a newer release tag needs them from the remote.
         print("{}: fetching tags for {}".format(dependency.name, dependency.ref),
               flush=True)
         run_command(
-            ["git", "-C", str(dependency.root), "fetch", "--tags", "origin"],
+            ["git", "-C", str(dependency.root), "fetch", "--tags", remote],
             check=False,
         )
-        commit = resolve_ref(dependency.root, dependency.ref)
+        commit = resolve_ref(dependency.root, dependency.ref, remote)
     if not commit:
         print(
             "{}: {} is not fetched yet - run ./dev deps update".format(
@@ -808,10 +944,10 @@ def update_dependency(dependency):
         return
 
     print("Updating " + dependency.name, flush=True)
-    run_command(["git", "-C", str(root), "remote", "update", "--prune"])
-    run_command(["git", "-C", str(root), "fetch", "--tags", "origin"])
+    remote = manifest_remote(dependency, root)
+    run_command(["git", "-C", str(root), "fetch", "--prune", "--tags", remote])
 
-    commit = resolve_ref(root, dependency.ref)
+    commit = resolve_ref(root, dependency.ref, remote)
     if not commit:
         raise DevError(
             "{}: {} is not in {}".format(
@@ -853,9 +989,10 @@ def update_dependency(dependency):
 def resolve_dependency_checkouts():
     """Bring stale pins forward and report what every checkout is sitting on."""
     statuses = []
-    for dependency in load_dependencies():
-        fetch_dependency(dependency)
-        statuses.append(dependency_status(dependency))
+    with dependency_lock():
+        for dependency in load_dependencies():
+            fetch_dependency(dependency)
+            statuses.append(dependency_status(dependency))
 
     missing = [status for status in statuses if status.state == "missing"]
     if missing:
@@ -904,6 +1041,9 @@ ZIG_HOST_CPUS = {
     "arm64": "aarch64",
 }
 ZIG_DEVICE_SYSTEM = "linux"
+# The Zig archives that ./dev downloaded, kept for a fetch again and for the
+# checkouts that take this checkout as their origin.
+ZIG_DOWNLOADS = "deps/downloads"
 ZIG_HOST_SYSTEM = "macos" if os.uname().sysname == "Darwin" else "linux"
 
 
@@ -931,6 +1071,10 @@ class Zig:
     @property
     def marker(self):
         return self.root / ".music-player-zig"
+
+    @property
+    def archive_file(self):
+        return PurePosixPath(urllib.parse.urlparse(self.url).path).name
 
 
 def load_zig(system):
@@ -1026,9 +1170,46 @@ def zig_systems():
     return sorted({ZIG_DEVICE_SYSTEM, ZIG_HOST_SYSTEM})
 
 
+def kept_zig_archive(checkout, zig):
+    """The archive of `zig` that `checkout` keeps, when its sha256 agrees with the
+    pin. The minisign check ran when the archive was downloaded."""
+    path = checkout / ZIG_DOWNLOADS / zig.archive_file
+    if not path.is_file():
+        return None
+    if sha256_of(path) != zig.sha256:
+        print("{}: the sha256 does not agree with {}".format(path, DEPS_MANIFEST.name),
+              flush=True)
+        return None
+    return path
+
+
+def download_zig(zig, store):
+    """Download and verify the archive of `zig`, and keep it in `store`."""
+    print("Downloading Zig {} ({}) into {}".format(zig.version, zig.archive, store),
+          flush=True)
+    store.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=store, prefix=".zig-") as work:
+        archive = Path(work) / zig.archive_file
+        download(zig.url, archive)
+        digest = sha256_of(archive)
+        if digest != zig.sha256:
+            raise DevError(
+                "{}: sha256 is {}, {} pins {}".format(
+                    archive.name, digest, DEPS_MANIFEST.name, zig.sha256
+                )
+            )
+        verify_zig_signature(zig, archive)
+        # A rename in one directory, thus a fetch at the same time never reads
+        # a part of the file.
+        kept = store / zig.archive_file
+        os.replace(archive, kept)
+    return kept
+
+
 def fetch_zig(system):
     """Make the pinned Zig for `system` exist, without touching the network when
-    it already does. Returns True when it fetched an archive."""
+    it already does or when this checkout or its origin keeps the archive.
+    Returns True when it unpacked an archive."""
     zig = load_zig(system)
     if zig_installed(zig):
         write_zig_cxx(zig)
@@ -1039,23 +1220,22 @@ def fetch_zig(system):
     if old_marker.is_file():
         shutil.rmtree(ROOT / zig.path)
 
-    print("Fetching Zig {} ({}) into {}".format(zig.version, zig.archive, zig.path),
-          flush=True)
+    origin = checkout_origin()
+    store = (origin or ROOT) / ZIG_DOWNLOADS
+    with file_lock(store / ".lock", "downloads into " + str(store)):
+        archive = None
+        for checkout in (ROOT, origin) if origin else (ROOT,):
+            archive = kept_zig_archive(checkout, zig)
+            if archive:
+                break
+        if archive is None:
+            archive = download_zig(zig, store)
+
+    print("Unpacking Zig {} ({}) from {} into {}".format(
+        zig.version, zig.archive, archive, zig.path), flush=True)
     zig.root.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=zig.root.parent, prefix=".zig-") as work:
-        work = Path(work)
-        archive = work / PurePosixPath(urllib.parse.urlparse(zig.url).path).name
-        download(zig.url, archive)
-        digest = sha256_of(archive)
-        if digest != zig.sha256:
-            raise DevError(
-                "{}: sha256 is {}, {} pins {}".format(
-                    archive.name, digest, DEPS_MANIFEST.name, zig.sha256
-                )
-            )
-        verify_zig_signature(zig, archive)
-
-        tree = work / "tree"
+        tree = Path(work) / "tree"
         with tarfile.open(archive) as source:
             if hasattr(tarfile, "data_filter"):
                 source.extractall(tree, filter="data")
@@ -1102,24 +1282,29 @@ def command_deps_list(args):
 
 
 def command_deps_fetch(args):
+    global REQUESTED_ORIGIN
+    REQUESTED_ORIGIN = args.origin
+    if checkout_origin() is not None and not isolation_available():
+        warn_shared_desktop_state()
     if zig_selected(args.dependency):
         for system in zig_systems():
             if not fetch_zig(system):
                 print(describe_zig(load_zig(system)))
     unpinned = []
-    for dependency in selected_dependencies(args.dependency):
-        if args.force:
-            restore_dependency(dependency)
-            continue
+    with dependency_lock():
+        for dependency in selected_dependencies(args.dependency):
+            if args.force:
+                restore_dependency(dependency)
+                continue
 
-        if fetch_dependency(dependency):
-            continue
+            if fetch_dependency(dependency):
+                continue
 
-        status = dependency_status(dependency)
-        if status.state == "pinned":
-            print(describe(status))
-        else:
-            unpinned.append(status)
+            status = dependency_status(dependency)
+            if status.state == "pinned":
+                print(describe(status))
+            else:
+                unpinned.append(status)
 
     if unpinned:
         warn_unpinned(unpinned)
@@ -1169,7 +1354,9 @@ def restore_dependency(dependency):
             )
         run_command(["git", "-C", str(dependency.root), "reset", "--hard", "--quiet"])
 
-    commit = resolve_ref(dependency.root, dependency.ref)
+    commit = resolve_ref(
+        dependency.root, dependency.ref, manifest_remote(dependency, dependency.root)
+    )
     if not commit:
         raise DevError(
             "{}: {} is not fetched - run ./dev deps update".format(
@@ -1184,8 +1371,9 @@ def command_deps_update(args):
     if zig_selected(args.dependency):
         for system in zig_systems():
             fetch_zig(system)
-    for dependency in selected_dependencies(args.dependency):
-        update_dependency(dependency)
+    with dependency_lock():
+        for dependency in selected_dependencies(args.dependency):
+            update_dependency(dependency)
     return 0
 
 
@@ -1348,11 +1536,28 @@ def resolve_device_targets(values, devices, allow_desktop):
     return unique(build_platforms), targets
 
 
+def external_git_dirs(checkouts):
+    """The git common directory of each checkout that is a worktree and that has
+    the directory outside of itself."""
+    found = []
+    for checkout in checkouts:
+        common = git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir",
+                     check=False)
+        if not common:
+            continue
+        common = Path(common)
+        if common == checkout / ".git" or common in found:
+            continue
+        found.append(common)
+    return found
+
+
 def run_container(runtime, platform, command, check=True):
     container_command = [runtime, "run"]
     if sys.stdin.isatty() and sys.stdout.isatty():
         container_command.append("-it")
     container_command.extend(["-v", "{}:{}".format(ROOT, CONTAINER_PROJECT)])
+    checkouts = [ROOT]
     for dependency in load_dependencies():
         if not dependency.root.is_dir():
             raise DevError(
@@ -1366,6 +1571,10 @@ def run_container(runtime, platform, command, check=True):
                 ),
             ]
         )
+        checkouts.append(dependency.root.resolve())
+    for common in external_git_dirs(checkouts):
+        # The .git file of a worktree holds the absolute path of this directory.
+        container_command.extend(["-v", "{}:{}:ro".format(common, common)])
     container_command.extend(
         [
             "-w",
@@ -1489,7 +1698,7 @@ def build_desktop(kind):
     nextui = nextui_dependency()
     nextui_root = nextui.root.resolve()
     desktop_root = nextui_root / "workspace" / "desktop"
-    prefix_local = Path("/var/tmp/nextui")
+    prefix_local = DESKTOP_PREFIX
     setup_marker = prefix_local / ".desktop_setup_ok"
     system = os.uname().sysname
 
@@ -1505,39 +1714,42 @@ def build_desktop(kind):
     env["PREFIX_LOCAL"] = str(prefix_local)
     env["UNION_PLATFORM"] = "desktop"
 
-    if desktop_setup_stale(nextui, setup_marker):
-        print("Preparing NextUI desktop workspace...", flush=True)
-        if system == "Darwin" and not os.access("/usr/local/bin/gcc", os.X_OK):
+    # Each checkout writes the shared prefix and reads it to compile and link,
+    # thus one desktop build at a time runs this part.
+    with file_lock(prefix_local / ".lock", "builds for the desktop"):
+        if desktop_setup_stale(nextui, setup_marker):
+            print("Preparing NextUI desktop workspace...", flush=True)
+            if system == "Darwin" and not os.access("/usr/local/bin/gcc", os.X_OK):
+                run_command(
+                    ["sudo", str(desktop_root / "macos_create_gcc_symlinks.sh")],
+                    env=env,
+                )
+            run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=env)
             run_command(
-                ["sudo", str(desktop_root / "macos_create_gcc_symlinks.sh")],
+                ["make", "-C", str(nextui_root), "build", "PLATFORM=desktop"],
                 env=env,
             )
-        run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=env)
+            prefix_local.mkdir(parents=True, exist_ok=True)
+            setup_marker.touch()
+            print("Desktop workspace setup complete.")
+
+        installed_header = prefix_local / "include/msettings.h"
+        previous_header = installed_header.read_bytes() if installed_header.exists() else None
+        previous_stat = installed_header.stat() if previous_header is not None else None
+        run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=env)
+        if previous_header is not None and installed_header.read_bytes() == previous_header:
+            os.utime(installed_header, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
         run_command(
-            ["make", "-C", str(nextui_root), "build", "PLATFORM=desktop"],
+            [
+                "make",
+                "-C",
+                str(ROOT / "src"),
+                "PLATFORM=desktop",
+                "KIND=" + kind,
+                "NEXTUI_ROOT=" + nextui.make_root,
+            ],
             env=env,
         )
-        prefix_local.mkdir(parents=True, exist_ok=True)
-        setup_marker.touch()
-        print("Desktop workspace setup complete.")
-
-    installed_header = prefix_local / "include/msettings.h"
-    previous_header = installed_header.read_bytes() if installed_header.exists() else None
-    previous_stat = installed_header.stat() if previous_header is not None else None
-    run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=env)
-    if previous_header is not None and installed_header.read_bytes() == previous_header:
-        os.utime(installed_header, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
-    run_command(
-        [
-            "make",
-            "-C",
-            str(ROOT / "src"),
-            "PLATFORM=desktop",
-            "KIND=" + kind,
-            "NEXTUI_ROOT=" + nextui.make_root,
-        ],
-        env=env,
-    )
 
 
 VERSION_NUMBER = r"(0|[1-9][0-9]*)"
@@ -1867,8 +2079,106 @@ def run_on_device(device):
     launch_from_nextui(device)
 
 
-def run_desktop(extra_args=None, headless=False):
-    prefix = "/var/tmp/nextui"
+def isolation_available():
+    return shutil.which("bwrap") is not None
+
+
+def warn_shared_desktop_state():
+    warn(
+        "bwrap is not installed, thus a desktop run uses the shared sdcard {} and the "
+        "shared /tmp. Runs of different checkouts are not independent, and two desktop "
+        "runs at one time, headless too, are not safe.".format(DESKTOP_SDCARD)
+    )
+
+
+def test_control_paths(app_args):
+    """The file paths in each --test-control argument of the app."""
+    values = []
+    for index, arg in enumerate(app_args):
+        if arg == "--test-control" and index + 1 < len(app_args):
+            values.append(app_args[index + 1])
+        elif arg.startswith("--test-control="):
+            values.append(arg.split("=", 1)[1])
+    paths = []
+    for value in values:
+        for side in value.split(","):
+            if side and side != "std" and not side.startswith("fd:"):
+                paths.append(Path(side))
+    return paths
+
+
+def check_desktop_isolation(sdcard, template, app_args):
+    """Stop before the build when the options of an isolated run cannot work."""
+    if template is not None and sdcard is None:
+        raise DevError("--sdcard-template requires --sdcard")
+    if sdcard is None or not isolation_available():
+        # The run uses the shared sdcard, and ignores the template.
+        return
+    if template is None:
+        pass
+    elif not template.is_dir():
+        raise DevError("No such template directory: " + str(template))
+    else:
+        shared = [name for name in SHARED_SDCARD_DIRS if (template / name).exists()]
+        if shared:
+            raise DevError(
+                "{} holds {}, which an isolated run takes from the shared sdcard".format(
+                    template, ", ".join(shared)
+                )
+            )
+    for path in test_control_paths(app_args):
+        # The app runs in ROOT, thus a relative path starts there.
+        resolved = (ROOT / path).resolve()
+        if resolved == Path("/tmp") or Path("/tmp") in resolved.parents:
+            raise DevError(
+                "{}: an isolated run has a private /tmp, thus the control channel "
+                "must be outside /tmp".format(path)
+            )
+
+
+def seed_sdcard(sdcard, template):
+    """Copy `template` into `sdcard` when `sdcard` is missing or empty. The copy
+    goes to a staging directory first, thus a copy that stops half-way leaves no
+    directory that a later run takes as seeded."""
+    staging = sdcard.with_name(sdcard.name + ".seeding")
+    if staging.exists():
+        shutil.rmtree(staging)
+    if sdcard.is_dir() and any(sdcard.iterdir()):
+        print("{} holds files; keeping them and copying no template".format(sdcard))
+        return
+    print("Seeding {} from {}".format(sdcard, template), flush=True)
+    try:
+        shutil.copytree(template, staging, symlinks=True)
+    except (shutil.Error, OSError) as error:
+        raise DevError("cannot copy {}: {}".format(template, error))
+    if sdcard.exists():
+        sdcard.rmdir()
+    staging.rename(sdcard)
+
+
+def isolated_command(sdcard, args):
+    """`args` in a mount namespace where `sdcard` replaces the shared sdcard,
+    the shared directories are read-only, and /tmp is private."""
+    for name in ("Music", "Tools"):
+        (DESKTOP_SDCARD / name).mkdir(parents=True, exist_ok=True)
+    command = [
+        "bwrap",
+        "--dev-bind", "/", "/",
+        "--bind", str(sdcard), str(DESKTOP_SDCARD),
+    ]
+    for name in SHARED_SDCARD_DIRS:
+        # bwrap finds the source of a bind in the root of the host, thus the
+        # bind of `sdcard` above does not hide it.
+        command += ["--ro-bind", str(DESKTOP_SDCARD / name), str(DESKTOP_SDCARD / name)]
+    command += ["--tmpfs", "/tmp"]
+    if Path("/tmp/.X11-unix").is_dir():
+        command += ["--bind", "/tmp/.X11-unix", "/tmp/.X11-unix"]
+    command += ["--die-with-parent", "--"]
+    return command + args
+
+
+def run_desktop(extra_args=None, headless=False, sdcard=None, template=None):
+    prefix = str(DESKTOP_PREFIX)
     env = os.environ.copy()
     changed = {}
     for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
@@ -1880,10 +2190,20 @@ def run_desktop(extra_args=None, headless=False):
         # no focus. The dummy driver stops the app, thus do not use it.
         env["SDL_VIDEODRIVER"] = "offscreen"
         changed["SDL_VIDEODRIVER"] = env["SDL_VIDEODRIVER"]
-    (Path(prefix) / "sdcard/.userdata/shared").mkdir(parents=True, exist_ok=True)
-    (Path(prefix) / "sdcard/.userdata/desktop").mkdir(parents=True, exist_ok=True)
+    if sdcard is not None and not isolation_available():
+        warn_shared_desktop_state()
+        sdcard = None
+    data_root = DESKTOP_SDCARD
+    if sdcard is not None:
+        data_root = sdcard.resolve()
+        if template is not None:
+            seed_sdcard(data_root, template.resolve())
+    (data_root / ".userdata/shared").mkdir(parents=True, exist_ok=True)
+    (data_root / ".userdata/desktop").mkdir(parents=True, exist_ok=True)
 
     args = [str(ROOT / "bin/desktop/musicplayer.elf")] + list(extra_args or [])
+    if sdcard is not None:
+        args = isolated_command(data_root, args)
     # Print the command so it can be repeated by hand, with the options of the
     # app and a debugger.
     assignments = " ".join(
@@ -1913,13 +2233,49 @@ def clean_local():
             path.unlink()
 
 
+def worktree_git_dir(root):
+    """The git directory that the .git file of a worktree at `root` names, or
+    None when `root` is not a worktree."""
+    marker = root / ".git"
+    if not marker.is_file():
+        return None
+    text = marker.read_text(encoding="utf-8", errors="replace").strip()
+    if not text.startswith("gitdir:"):
+        return None
+    return Path(text[len("gitdir:"):].strip())
+
+
+def other_worktrees(root):
+    """The paths of the worktrees of the clone at `root`, other than `root`."""
+    listing = git(root, "worktree", "list", "--porcelain", check=False)
+    paths = [Path(line[len("worktree "):]) for line in listing.splitlines()
+             if line.startswith("worktree ")]
+    return [path for path in paths if path.resolve() != root.resolve()]
+
+
 def clean_dependencies():
     for dependency in load_dependencies():
         root = dependency.root
+        git_dir = worktree_git_dir(root) if root.is_dir() else None
         if root.is_symlink():
             print("Unlinking " + dependency.path)
             root.unlink()
+        elif git_dir is not None and git_dir.is_dir():
+            # git removes the worktree and its entry in the clone of the origin.
+            print("Removing the worktree " + dependency.path)
+            common = git(root, "rev-parse", "--path-format=absolute",
+                         "--git-common-dir")
+            run_command(["git", "--git-dir", common, "worktree", "remove", "--force",
+                         str(root)])
+        elif git_dir is not None:
+            print("Removing {}, a worktree whose origin is gone".format(dependency.path))
+            shutil.rmtree(root)
         elif root.is_dir():
+            worktrees = other_worktrees(root)
+            if worktrees:
+                warn("{} has worktrees in other checkouts, thus it stays: {}".format(
+                    dependency.path, ", ".join(str(path) for path in worktrees)))
+                continue
             print("Removing " + dependency.path)
             shutil.rmtree(root)
 
@@ -2456,7 +2812,8 @@ def command_test(_args):
 def command_clean(args):
     clean_local()
     if args.deps:
-        clean_dependencies()
+        with dependency_lock():
+            clean_dependencies()
     return 0
 
 
@@ -2525,6 +2882,12 @@ def command_install_or_run(args, should_run):
     app_args = getattr(args, "app_args", None) or []
     if app_args and not has_desktop:
         raise DevError("arguments after '--' go to the desktop app; add the desktop target")
+    sdcard = getattr(args, "sdcard", None)
+    template = getattr(args, "sdcard_template", None)
+    if (sdcard is not None or template is not None) and not has_desktop:
+        raise DevError("--sdcard and --sdcard-template apply to the desktop target only")
+    if has_desktop:
+        check_desktop_isolation(sdcard, template, app_args)
 
     only_desktop = all(platform_for_alias(target) == "desktop" for target in targets)
     if args.delete_data and has_desktop:
@@ -2576,6 +2939,8 @@ def command_install_or_run(args, should_run):
         run_desktop(
             extra_args=app_args,
             headless=getattr(args, "headless", False),
+            sdcard=sdcard,
+            template=template,
         )
 
     if failures:
@@ -2886,13 +3251,20 @@ def create_parser():
             "check out anything missing; an existing checkout is left as it is "
             "unless the manifest ref changed and already resolves locally"
         ),
-        usage="%(prog)s [dependency] [-h] [--force]",
+        usage="%(prog)s [dependency] [-h] [--force] [--origin checkout]",
     )
     deps_fetch_parser.add_argument("dependency", nargs="?", help="one name, or all")
     deps_fetch_parser.add_argument(
         "--force",
         action="store_true",
         help="restore a user-managed checkout to the manifest ref",
+    )
+    deps_fetch_parser.add_argument(
+        "--origin",
+        metavar="checkout",
+        help="take the NextUI history and the Zig archives from this checkout of "
+        "the app, and clone nothing (default: the main worktree when this "
+        "checkout is a linked git worktree; none to clone and download here)",
     )
     deps_fetch_parser.set_defaults(deps_handler=command_deps_fetch)
 
@@ -2973,7 +3345,8 @@ def create_parser():
         usage=(
             "%(prog)s target [pak.zip] [-h] [--docker | --podman] "
             "[--full] [--delete] [--delete-data] [-f]\n"
-            "       %(prog)s desktop [-h] [--headless] [-- app-argument ...]"
+            "       %(prog)s desktop [-h] [--headless] [--sdcard dir "
+            "[--sdcard-template dir]] [-- app-argument ...]"
         ),
         epilog=(
             "The desktop target takes more options than a device target,\n"
@@ -2982,11 +3355,19 @@ def create_parser():
             "  --headless            draw to an offscreen display. The app opens no\n"
             "                        window and takes no focus, thus a scripted run\n"
             "                        does not interrupt the user.\n"
+            "  --sdcard dir          run the app with dir in place of the shared sdcard\n"
+            "                        {sdcard}. .system, Tools and Music come\n"
+            "                        from the shared sdcard, read-only, and /tmp is\n"
+            "                        private. Thus runs at one time do not share their\n"
+            "                        data. Needs bwrap. Without bwrap, the run uses the\n"
+            "                        shared sdcard, and dev warns.\n"
+            "  --sdcard-template dir copy dir into the --sdcard directory when that\n"
+            "                        directory is missing or empty.\n"
             "  -- app-argument ...   give the rest of the line to the app. Example:\n"
             "                        ./dev run desktop -- --test-control script.txt,std\n"
             "\n"
             "./bin/desktop/musicplayer.elf --help gives the options of the app."
-        ),
+        ).format(sdcard=DESKTOP_SDCARD),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_install_options(
@@ -3002,6 +3383,18 @@ def create_parser():
         "--headless",
         action="store_true",
         help="desktop only: draw to an offscreen display, with no window",
+    )
+    run.add_argument(
+        "--sdcard",
+        type=Path,
+        metavar="dir",
+        help="desktop only: run with dir in place of the shared sdcard (needs bwrap)",
+    )
+    run.add_argument(
+        "--sdcard-template",
+        type=Path,
+        metavar="dir",
+        help="desktop only: copy dir into the --sdcard directory when it is missing or empty",
     )
     run.add_argument("-f", "--follow", action="store_true", help="follow the log")
     run.set_defaults(handler=command_run)
