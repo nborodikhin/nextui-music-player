@@ -1,10 +1,13 @@
-.DS_Store
-.dev
+# Each file and directory whose name starts with a dot: the local configuration
+# of tools and editors, scratch directories, locks and build markers. The
+# exceptions below are part of the repository.
+.*
+!.gitignore
+!.gitkeep
+!/.github/
+!/.dev.example
 log.txt
 state/NextUI.code-workspace
-.vscode/
-.claude/
-.vscode/settings.json
 BUILD.md
 src/opus_obj/
 src/build/
@@ -17,12 +20,9 @@ bin/tg5050/musicplayer.elf
 bin/my355/musicplayer.elf
 bin/h700/musicplayer.elf
 bin/desktop/musicplayer.elf
-# Records the build kind that the binary beside it has
-bin/*/.kind
 # Libraries the build copies out of a toolchain image
 bin/*/*.so*
 test/bin/
-.test_tmp/
 dist/
 __pycache__/
 # Downloaded on the device on first use, not shipped
@@ -36,4 +36,4 @@ state/youtube_queue.txt
 bin/wget
 # Zig, fetched by ./dev deps fetch
 /deps/zig/
-/deps/.zig-*/
+/deps/downloads/
