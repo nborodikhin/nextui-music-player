@@ -714,6 +714,16 @@ REQUESTED_ORIGIN = None
 ORIGIN_NONE = "none"
 
 
+def main_worktree(checkout):
+    """The main worktree of the repository of `checkout`, or None when `checkout`
+    is the main worktree."""
+    common = git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir",
+                 check=False)
+    if not common or Path(common) == (checkout / ".git").resolve():
+        return None
+    return Path(common).parent
+
+
 def checkout_origin():
     """The checkout whose NextUI clones and Zig archives this checkout takes, or
     None when this checkout clones and downloads its own. Without --origin, a
@@ -725,11 +735,9 @@ def checkout_origin():
         if origin == ROOT:
             raise DevError("--origin names this checkout")
     else:
-        common = git(ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir",
-                     check=False)
-        if not common or Path(common) == (ROOT / ".git").resolve():
+        origin = main_worktree(ROOT)
+        if origin is None:
             return None
-        origin = Path(common).parent
     if not (origin / DEPS_MANIFEST.name).is_file():
         raise DevError("{} is not a checkout of the app: it has no {}".format(
             origin, DEPS_MANIFEST.name))
@@ -746,7 +754,9 @@ def manifest_remote(dependency, root):
     The clone of an origin can have more remotes, and its origin can be a fork."""
     wanted = normalized_git_url(dependency.git_url)
     for name in git(root, "remote", check=False).split():
-        url = git(root, "remote", "get-url", name, check=False)
+        # The URL as configured. `remote get-url` applies url.*.insteadOf, thus
+        # it can differ from the URL that the clone was made from.
+        url = git(root, "config", "--get", "remote.{}.url".format(name), check=False)
         if normalized_git_url(url) == wanted:
             return name
     raise DevError(
@@ -812,6 +822,13 @@ def add_dependency_worktree(dependency, origin):
     """Make the checkout a git worktree of the clone of the origin, thus it shares
     the history of the origin and clones nothing."""
     source = origin / dependency.path
+    if not (source / ".git").exists() and main_worktree(origin) == ROOT:
+        # The fetch in the origin takes this checkout as its origin, and waits
+        # for the lock that this ./dev holds.
+        raise DevError(
+            "{} takes its dependencies from this checkout, and has no {}. Run "
+            "./dev deps fetch --origin none here first.".format(origin, dependency.path)
+        )
     with dependency_lock(origin):
         if not (source / ".git").exists():
             print("{}: {} has no {}; fetching it there first".format(
@@ -2091,6 +2108,10 @@ def warn_shared_desktop_state():
     )
 
 
+def in_tmp(path):
+    return path == Path("/tmp") or Path("/tmp") in path.parents
+
+
 def test_control_paths(app_args):
     """The file paths in each --test-control argument of the app."""
     values = []
@@ -2129,7 +2150,8 @@ def check_desktop_isolation(sdcard, template, app_args):
     for path in test_control_paths(app_args):
         # The app runs in ROOT, thus a relative path starts there.
         resolved = (ROOT / path).resolve()
-        if resolved == Path("/tmp") or Path("/tmp") in resolved.parents:
+        inside_root = resolved == ROOT or ROOT in resolved.parents
+        if in_tmp(resolved) and not inside_root:
             raise DevError(
                 "{}: an isolated run has a private /tmp, thus the control channel "
                 "must be outside /tmp".format(path)
@@ -2171,6 +2193,9 @@ def isolated_command(sdcard, args):
         # bind of `sdcard` above does not hide it.
         command += ["--ro-bind", str(DESKTOP_SDCARD / name), str(DESKTOP_SDCARD / name)]
     command += ["--tmpfs", "/tmp"]
+    if in_tmp(ROOT):
+        # The private /tmp hides a checkout under /tmp, and the app with it.
+        command += ["--bind", str(ROOT), str(ROOT)]
     if Path("/tmp/.X11-unix").is_dir():
         command += ["--bind", "/tmp/.X11-unix", "/tmp/.X11-unix"]
     command += ["--die-with-parent", "--"]
