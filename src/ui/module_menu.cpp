@@ -17,12 +17,16 @@ using namespace input;
 namespace ui {
 namespace {
 
-// How long the exit prompt stays up, which is also how long the confirming press has to
-// arrive: the prompt being on screen is the armed state.
+/**
+ * How long the exit prompt stays up, which is also how long the confirming press has to
+ * arrive: the prompt being on screen is the armed state.
+ */
 constexpr uint32_t kExitConfirmationWindowMs = 3000;
 
-// How long to show the "Exiting..." toast before the app quits. The last frame of the app
-// stays on the screen until NextUI draws its first frame, thus the toast must reach the screen.
+/**
+ * How long to show the "Exiting..." toast before the app quits. The last frame of the app
+ * stays on the screen until NextUI draws its first frame, thus the toast must reach the screen.
+ */
 constexpr uint32_t kExitToastDelayMs = 100;
 
 constexpr std::array<ButtonRequest, 2> kRequests = {
@@ -30,14 +34,16 @@ constexpr std::array<ButtonRequest, 2> kRequests = {
     request::Repeat{Button::DpadDown},
 };
 
-// The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed.
+/** The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed. */
 ToastToken exitPrompt = TOAST_TOKEN_NONE;
 
-// The item the cursor was on when the menu was last left. MENU_NONE on the first visit, thus
-// the cursor takes row 0: Resume or Now Playing where one exists, and Library otherwise.
+/**
+ * The item the cursor was on when the menu was last left. MENU_NONE on the first visit, thus
+ * the cursor takes row 0: Resume or Now Playing where one exists, and Library otherwise.
+ */
 MenuSelection lastSelection = MENU_NONE;
 
-// State of the playback row. Now Playing wins over Resume when both apply.
+/** State of the playback row. Now Playing wins over Resume when both apply. */
 MenuSelection getPlayingItem() {
     if (Background_isPlaying()) return MENU_NOW_PLAYING;
     if (Resume_isAvailable()) return MENU_RESUME;
@@ -95,8 +101,10 @@ public:
     bool isExiting() const { return exiting; }
 
 private:
-    // Builds the row map, and puts the cursor on the remembered item. The playback row comes and
-    // goes on its own, thus the map can change on a frame with no input.
+    /**
+     * Builds the row map, and puts the cursor on the remembered item. The playback row comes and
+     * goes on its own, thus the map can change on a frame with no input.
+     */
     void updateRows() {
         const MenuRows built = MenuRows_build(getPlayingItem());
         bool changed         = !MenuRows_equal(&built, &rows);
@@ -115,7 +123,7 @@ private:
         if (changed) invalidate();
     }
 
-    // Returns: true when the button has an action on the menu
+    /** Returns: true when the button has an action on the menu */
     bool pressButton(Button button) {
         const ListNavInput navInput = toListNavInput(button);
         if (navInput != LIST_NAV_NONE) {
@@ -145,7 +153,7 @@ private:
         exitTo(MODULE_EXIT_BACK);
     }
 
-    // Stops the playback or forgets the Resume record, and puts the cursor on the first row
+    /** Stops the playback or forgets the Resume record, and puts the cursor on the first row */
     void clearPlayingItem() {
         const MenuSelection item = MenuRows_selectionAt(&rows, nav.selected);
         if (!MenuRows_isPlayItem(item)) return;
@@ -179,7 +187,7 @@ private:
         .items_per_page  = 1,
         .external_scroll = false,
     };
-    // Row map as last built. count -1 so the first build always differs.
+    /** Row map as last built. count -1 so the first build always differs. */
     MenuRows rows = {
         .playing_item = MENU_NONE,
         .count        = -1,
