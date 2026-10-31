@@ -31,9 +31,19 @@
 // callbacks, and a fall that starts after them is still quick to the eye.
 #define SOUND_GONE_MS 250u
 #define PEAK_DECAY 0.97f
-#define MIN_DB -60.0f
-#define MAX_DB 0.0f
-#define FREQ_COMPENSATION 1.0f  // dB boost per octave for high frequencies
+// The levels of a bar are in dB below a sine at full scale. A bar of the whole
+// height is at MAX_DB, thus loud music has room above it.
+#define MIN_DB -65.0f
+#define MAX_DB -15.0f
+
+// The magnitude that the FFT gives for a sine at full scale: half the frame,
+// times 0.5 for the Hann window.
+#define FULL_SCALE_MAGNITUDE (SPECTRUM_FFT_SIZE / 4.0f)
+
+// Music has less energy in each bin as the frequency goes up. This gain per
+// octave from TILT_PIVOT_HZ keeps the bars of a typical mix at one height.
+#define TILT_DB_PER_OCTAVE 4.5f
+#define TILT_PIVOT_HZ 1000.0f
 #define FREQ_DISTRIBUTION 0.6f  // <1.0 = more bars for high freq, >1.0 = more bars for low freq
 
 static kiss_fftr_cfg fft_cfg = NULL;
@@ -191,6 +201,8 @@ static void init_bin_ranges(void) {
     int min_bin = (int)(min_freq / bin_resolution);
     int max_bin = (int)(max_freq / bin_resolution);
     if (max_bin > SPECTRUM_FFT_SIZE / 2) max_bin = SPECTRUM_FFT_SIZE / 2;
+    // Bin 0 is the DC offset and not a sound. It also has no frequency for the tilt.
+    if (min_bin < 1) min_bin = 1;
 
     for (int i = 0; i <= SPECTRUM_BARS; i++) {
         float t = (float)i / SPECTRUM_BARS;
@@ -203,13 +215,10 @@ static void init_bin_ranges(void) {
         bin_ranges[i] = bin;
     }
 
-    // Initialize frequency compensation (boost higher frequencies)
-    // This compensates for the natural 1/f energy distribution in audio
     for (int i = 0; i < SPECTRUM_BARS; i++) {
-        float t = (float)i / (SPECTRUM_BARS - 1);
-        // Apply progressive boost: 0 dB at lowest, FREQ_COMPENSATION*octaves at highest
-        float octaves = log2f(max_freq / min_freq);
-        freq_compensation[i] = t * octaves * FREQ_COMPENSATION;
+        int end_bin = bin_ranges[i + 1] > bin_ranges[i] ? bin_ranges[i + 1] : bin_ranges[i] + 1;
+        float center_hz = sqrtf((float)bin_ranges[i] * (float)end_bin) * bin_resolution;
+        freq_compensation[i] = TILT_DB_PER_OCTAVE * log2f(center_hz / TILT_PIVOT_HZ);
     }
 }
 
@@ -357,8 +366,7 @@ void Spectrum_update(void) {
 
         float avg_mag = (count > 0) ? sum / count : 0.0f;
 
-        float db = 20.0f * log10f(avg_mag + 1e-10f);
-        // Apply frequency compensation to boost higher frequencies
+        float db = 20.0f * log10f(avg_mag / FULL_SCALE_MAGNITUDE + 1e-10f);
         db += freq_compensation[i];
         float normalized = (db - MIN_DB) / (MAX_DB - MIN_DB);
         if (normalized < 0.0f) normalized = 0.0f;
