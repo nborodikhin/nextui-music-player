@@ -52,6 +52,10 @@ public:
     // Returns the time of the current frame in milliseconds.
     uint32_t getTime() const { return time; }
 
+    // Returns true while the keys are locked, as on HDMI after the screen timeout. Only the
+    // earphone buttons act then.
+    bool isKeyLocked() const { return keyLocked; }
+
     // Records the state of a new frame. Only the input driver calls it.
     void setState(const PadState& framePadState, uint32_t frameTime) {
         padState = framePadState;
@@ -64,6 +68,9 @@ public:
     // Records the width of the status group. Only the coordinator of a page calls it.
     void setStatusGroupWidth(int width) { statusGroupWidth = width; }
 
+    // Records the key lock of the frame. Only the coordinator of a page calls it.
+    void setKeyLocked(bool locked) { keyLocked = locked; }
+
 private:
     InputState() = default;
 
@@ -71,6 +78,7 @@ private:
     uint32_t time = 0;
     HardwareBar hardwareBar = HardwareBar::None;
     int statusGroupWidth    = 0;
+    bool keyLocked          = false;
 };
 
 }  // namespace input

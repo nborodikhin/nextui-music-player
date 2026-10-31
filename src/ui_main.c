@@ -7,10 +7,10 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
+#include "ui_layers.h"
 #include "ui_theme.h"
 #include "selfupdate.h"
 #include "module_common.h"
-#include "module_menu.h"
 #include "resume.h"
 #include "background.h"
 
@@ -91,9 +91,16 @@ static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
 }
 
 // Render the main menu
-void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
-                 int menu_scroll, const MenuRows* rows) {
+void render_menu(SDL_Surface* screen, int status_w, int menu_selected, int menu_scroll,
+                 const MenuRows* rows) {
     current_rows = *rows;
+
+    // Only the playback row has a marquee. A plain row draws no layer, thus the marquee
+    // of the playback row leaves the layer here.
+    if (!MenuRows_isPlayItem(MenuRows_selectionAt(rows, menu_selected)) && resume_scroll.text[0]) {
+        UiLayer_clear(UI_LAYER_ANIMATION);
+        ScrollText_forget(&resume_scroll);
+    }
 
     const char* items[MENU_ROWS_MAX];
     for (int i = 0; i < rows->count; i++) {
@@ -101,16 +108,18 @@ void render_menu(SDL_Surface* screen, int show_setting, int menu_selected,
     }
 
     SimpleMenuConfig config = {
-        .title = "Music Player",
-        .items = items,
-        .item_count = rows->count,
-        .btn_b_label = "EXIT",
-        .get_label = main_menu_get_label,
+        .title        = "Music Player",
+        .items        = items,
+        .item_count   = rows->count,
+        .btn_b_label  = "EXIT",
+        .get_label    = main_menu_get_label,
         .render_badge = NULL,
-        .get_icon = NULL,
-        .render_text = main_menu_render_text
+        .get_icon     = NULL,
+        .render_text  = main_menu_render_text,
+        .title_only   = true,
+        .status_w     = status_w,
     };
-    render_simple_menu(screen, show_setting, menu_selected, menu_scroll, &config);
+    render_simple_menu(screen, 0, menu_selected, menu_scroll, &config);
 }
 
 // Controls help text for each page/state

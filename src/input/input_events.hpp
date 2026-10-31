@@ -63,7 +63,12 @@ struct ButtonUp {
     Button button;
 };
 
-// The app cleared the pad: each held button is up, with no release.
+// Another listener consumed an event of the gesture. The button is up, with no release.
+struct ButtonCancel {
+    Button button;
+};
+
+// Each held button is up, with no release. The gesture ends.
 struct ButtonReset {};
 
 struct Media {
@@ -73,7 +78,9 @@ struct Media {
 
 struct RawEvent {
     uint32_t time;
-    std::variant<event::ButtonDown, event::ButtonUp, event::ButtonReset, event::Media> kind;
+    std::variant<event::ButtonDown, event::ButtonUp, event::ButtonReset, event::ButtonCancel,
+                 event::Media>
+        kind;
 };
 
 // The button events: what the input means.
@@ -121,30 +128,6 @@ struct Combo {
 }  // namespace request
 
 using ButtonRequest = std::variant<request::LongPress, request::Repeat, request::Combo>;
-
-class RawEventListener {
-public:
-    virtual void onRawEvent(const RawEvent& event) = 0;
-
-protected:
-    ~RawEventListener() = default;
-};
-
-class ButtonListener {
-public:
-    // Returns true when the listener handled the event. The event then goes to no other
-    // listener.
-    virtual bool onButtonEvent(const ButtonEvent& event) = 0;
-
-protected:
-    ~ButtonListener() = default;
-};
-
-// Gives std::visit one lambda for each type of a variant.
-template <class... Lambdas>
-struct Overloaded : Lambdas... {
-    using Lambdas::operator()...;
-};
 
 inline constexpr const char* getButtonName(Button button) {
     switch (button) {

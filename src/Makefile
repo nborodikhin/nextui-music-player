@@ -222,7 +222,7 @@ LOCAL_SRC = \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
-    module_common.c module_menu.c module_library.c module_player.c \
+    module_common.c module_library.c module_player.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_settings.c frame_state.c ui_layers.c lyric_window.c \
     ui_music_playing.c ui_radio_playing.c ui_podcast_playing.c \
@@ -234,7 +234,9 @@ LOCAL_SRC = \
     spectrum.c \
     spectrum_ceiling.c \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
-    input/common_button_handler.cpp ui_page.cpp \
+    input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
+    ui_page.cpp \
+    ui/module_menu.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c

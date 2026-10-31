@@ -1158,7 +1158,11 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
     char truncated[256];
     char label_buffer[256];
 
-    render_screen_header(screen, config->title, show_setting);
+    if (config->title_only) {
+        render_screen_title(screen, config->title, config->status_w);
+    } else {
+        render_screen_header(screen, config->title, show_setting);
+    }
     ListLayout layout = calc_list_layout(screen);
 
     // Calculate icon size and spacing (scale 24px icons to fit in PILL_SIZE)

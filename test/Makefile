@@ -46,9 +46,11 @@
 # seek_scan.c is the same shape as toast_state.c: the buttons and the clock come
 # in, and the seek and the position to show come out.
 #
-# input/input_driver.cpp and input/button_detector.cpp are C++ and the same shape as
-# seek_scan.c: the pad masks, the raw events and the clock come in, and the
-# events go out to a listener. The pad read stays in input/input_driver_nextui.cpp.
+# input/input_driver.cpp, input/button_detector.cpp, input/common_button_handler.cpp and
+# input/input_manager.cpp are C++ and the same shape as seek_scan.c: the pad masks, the raw
+# events and the clock come in, and the events go out to a listener. The pad read stays in
+# input/input_driver_nextui.cpp, and power management in
+# input/common_button_handler_nextui.cpp.
 #
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
@@ -182,11 +184,15 @@ $(BIN)/obj/%.o: %.cpp
 $(BIN):
 	mkdir -p $(BIN)
 
-INPUT_EVENTS_SRC = $(SRC)/input/input_driver.cpp $(SRC)/input/button_detector.cpp
+INPUT_EVENTS_SRC = $(SRC)/input/input_driver.cpp $(SRC)/input/button_detector.cpp \
+                   $(SRC)/input/common_button_handler.cpp $(SRC)/input/input_manager.cpp
 
 $(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input/input_events.hpp \
+                          $(SRC)/input/input_listeners.hpp \
                           $(SRC)/input/input_driver.hpp $(SRC)/input/input_state.hpp \
-                          $(SRC)/input/button_detector.hpp test.h | $(BIN)
+                          $(SRC)/input/button_detector.hpp \
+                          $(SRC)/input/common_button_handler.hpp $(SRC)/input/input_manager.hpp \
+                          $(SRC)/help_screen.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)

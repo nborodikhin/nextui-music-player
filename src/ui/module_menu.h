@@ -1,5 +1,5 @@
-#ifndef __MODULE_MENU_H__
-#define __MODULE_MENU_H__
+#ifndef __UI_MODULE_MENU_H__
+#define __UI_MODULE_MENU_H__
 
 #ifdef __cplusplus
 extern "C" {

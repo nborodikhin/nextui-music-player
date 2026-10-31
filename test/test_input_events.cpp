@@ -1,23 +1,27 @@
-// Tests for src/input/input_driver.cpp and src/input/button_detector.cpp - the raw events of the pad
-// and the button events that the detector makes from them.
+// Tests for src/input/input_driver.cpp, src/input/button_detector.cpp and
+// src/input/common_button_handler.cpp - the raw events of the pad, the button events that the
+// detector makes from them, and the global buttons.
 //
 // Pins the order of the raw events in one frame, the reset when the app cleared the
 // pad, each mode of the detector (immediate, deferred, repeat), the combo and its
-// block, and the time of each event.
+// block, the time of each event, and the dialogs and the earphone buttons of the handler.
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include "test.h"
 #include "input/button_detector.hpp"
+#include "input/common_button_handler.hpp"
 #include "input/input_driver.hpp"
+#include "input/input_manager.hpp"
 
 using namespace input;
 
 namespace {
 
 // A raw or a button event as one comparable record.
-enum class Kind { Down, Up, Reset, Media, Short, Long, Repeat, Combo };
+enum class Kind { Down, Up, Reset, Cancel, Media, Short, Long, Repeat, Combo };
 
 struct Record {
     Kind kind;
@@ -30,14 +34,23 @@ class RawLog : public RawEventListener {
 public:
     std::vector<Record> records;
 
-    void onRawEvent(const RawEvent& event) override {
-        std::visit(Overloaded{
-                       [&](const event::ButtonDown& e) { add(Kind::Down, e.button, event.time); },
-                       [&](const event::ButtonUp& e) { add(Kind::Up, e.button, event.time); },
-                       [&](const event::ButtonReset&) { add(Kind::Reset, Button::A, event.time); },
-                       [&](const event::Media&) { add(Kind::Media, Button::A, event.time); },
-                   },
-                   event.kind);
+    bool onRawEvent(const RawEvent& event) override {
+        if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
+            add(Kind::Down, typedEvent->button, event.time);
+        }
+        if (const auto* typedEvent = std::get_if<event::ButtonCancel>(&event.kind)) {
+            add(Kind::Cancel, typedEvent->button, event.time);
+        }
+        if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
+            add(Kind::Up, typedEvent->button, event.time);
+        }
+        if (std::get_if<event::ButtonReset>(&event.kind)) {
+            add(Kind::Reset, Button::A, event.time);
+        }
+        if (std::get_if<event::Media>(&event.kind)) {
+            add(Kind::Media, Button::A, event.time);
+        }
+        return false;
     }
 
 private:
@@ -51,13 +64,18 @@ public:
     std::vector<Record> records;
 
     bool onButtonEvent(const ButtonEvent& event) override {
-        std::visit(Overloaded{
-                       [&](const event::ShortPress& e) { add(Kind::Short, e.button, e.button, event.time); },
-                       [&](const event::LongPress& e) { add(Kind::Long, e.button, e.button, event.time); },
-                       [&](const event::Repeat& e) { add(Kind::Repeat, e.button, e.button, event.time); },
-                       [&](const event::Combo& e) { add(Kind::Combo, e.first, e.second, event.time); },
-                   },
-                   event.kind);
+        if (const auto* typedEvent = std::get_if<event::ShortPress>(&event.kind)) {
+            add(Kind::Short, typedEvent->button, typedEvent->button, event.time);
+        }
+        if (const auto* typedEvent = std::get_if<event::LongPress>(&event.kind)) {
+            add(Kind::Long, typedEvent->button, typedEvent->button, event.time);
+        }
+        if (const auto* typedEvent = std::get_if<event::Repeat>(&event.kind)) {
+            add(Kind::Repeat, typedEvent->button, typedEvent->button, event.time);
+        }
+        if (const auto* typedEvent = std::get_if<event::Combo>(&event.kind)) {
+            add(Kind::Combo, typedEvent->first, typedEvent->second, event.time);
+        }
         return true;
     }
 
@@ -533,6 +551,361 @@ TEST(pad_and_detector_together) {
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::B, 0));
 }
 
+// ---------------------------------------------------------------------------
+// CommonButtonHandler
+
+namespace {
+
+// Records each playback command as one string
+class FakePlaybackControl : public PlaybackControl {
+public:
+    std::vector<std::string> commands;
+
+    void togglePlayback() override { commands.push_back("toggle"); }
+    void skipTrack(bool next) override { commands.push_back(next ? "next" : "previous"); }
+    void changeVolume(int step) override { commands.push_back(step > 0 ? "volume+" : "volume-"); }
+};
+
+// Sets the key lock of InputState for one test, and clears it at the end
+struct KeyLock {
+    KeyLock() { InputState::getInstance().setKeyLocked(true); }
+    ~KeyLock() { InputState::getInstance().setKeyLocked(false); }
+};
+
+// Counts the calls of the help and quit callbacks of a handler
+struct Requests {
+    int help = 0;
+    int quit = 0;
+
+    explicit Requests(CommonButtonHandler& handler) {
+        handler.setHelpRequestedCallback([this] { help++; });
+        handler.setQuitRequestedCallback([this] { quit++; });
+    }
+};
+
+ButtonEvent shortPress(Button button) {
+    return {0, event::ShortPress{button}};
+}
+
+ButtonEvent longPress(Button button) {
+    return {0, event::LongPress{button}};
+}
+
+}  // namespace
+
+TEST(start_short_press_asks_for_the_controls_help) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    Requests requests(handler);
+    CHECK(handler.onButtonEvent(shortPress(Button::Start)));
+    CHECK_EQ_INT(requests.help, 1);
+    CHECK_EQ_INT(requests.quit, 0);
+}
+
+TEST(start_with_no_callback_does_nothing) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    CHECK(handler.onButtonEvent(shortPress(Button::Start)));
+    CHECK(handler.onButtonEvent(longPress(Button::Start)));
+}
+
+// The handler consumes the down of START and each Media event, and no other down
+TEST(handler_consumes_start_and_media) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    CHECK(handler.onRawEvent({0, event::ButtonDown{Button::Start}}));
+    CHECK(!handler.onRawEvent({0, event::ButtonDown{Button::A}}));
+    CHECK(handler.onRawEvent({0, event::Media{MediaKey::Next}}));
+    const KeyLock lock;
+    CHECK(!handler.onRawEvent({0, event::ButtonDown{Button::Start}}));
+    CHECK(handler.onRawEvent({0, event::Media{MediaKey::Next}}));
+}
+
+// The detector with the requests of the handler: the long press of START, and no short press
+TEST(start_long_press_asks_for_the_quit_dialog) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    Requests requests(handler);
+    ButtonDetector detector(handler, CommonButtonHandler::getButtonRequests());
+    detector.onRawEvent({0, event::ButtonDown{Button::Start}});
+    for (uint32_t now = 0; now <= 600; now += 16) detector.onTick(now);
+    CHECK_EQ_INT(requests.quit, 1);
+    detector.onRawEvent({700, event::ButtonUp{Button::Start}});
+    CHECK_EQ_INT(requests.quit, 1);
+    CHECK_EQ_INT(requests.help, 0);
+}
+
+// A volume button while START is held, in each order, ends the press of START with no dialog
+TEST(start_with_a_volume_button_asks_for_no_dialog) {
+    const Button volumeButtons[] = {Button::Plus, Button::Minus};
+    for (const Button volume : volumeButtons) {
+        for (const bool startFirst : {true, false}) {
+            FakePlaybackControl playback;
+            CommonButtonHandler handler(playback);
+            Requests requests(handler);
+            ButtonDetector detector(handler, CommonButtonHandler::getButtonRequests());
+            const Button first  = startFirst ? Button::Start : volume;
+            const Button second = startFirst ? volume : Button::Start;
+            detector.onRawEvent({0, event::ButtonDown{first}});
+            detector.onRawEvent({100, event::ButtonDown{second}});
+            for (uint32_t now = 100; now <= 800; now += 16) detector.onTick(now);
+            detector.onRawEvent({800, event::ButtonUp{volume}});
+            for (uint32_t now = 800; now <= 1500; now += 16) detector.onTick(now);
+            detector.onRawEvent({1500, event::ButtonUp{Button::Start}});
+            CHECK_EQ_INT(requests.help + requests.quit, 0);
+        }
+    }
+}
+
+TEST(handler_consumes_only_the_combos_of_start) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    CHECK(handler.onButtonEvent({0, event::Combo{Button::Start, Button::Plus}}));
+    CHECK(handler.onButtonEvent({0, event::Combo{Button::Minus, Button::Start}}));
+    CHECK(!handler.onButtonEvent({0, event::Combo{Button::Select, Button::A}}));
+}
+
+TEST(other_buttons_go_to_the_page) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    Requests requests(handler);
+    CHECK(!handler.onButtonEvent(shortPress(Button::A)));
+    CHECK(!handler.onButtonEvent(longPress(Button::B)));
+    CHECK_EQ_INT(requests.help + requests.quit, 0);
+}
+
+TEST(locked_keys_ask_for_no_dialog) {
+    FakePlaybackControl playback;
+    const KeyLock lock;
+    CommonButtonHandler handler(playback);
+    Requests requests(handler);
+    CHECK(!handler.onButtonEvent(shortPress(Button::Start)));
+    CHECK(!handler.onButtonEvent(longPress(Button::Start)));
+    CHECK_EQ_INT(requests.help + requests.quit, 0);
+}
+
+TEST(media_key_acts_also_while_locked) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    handler.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    {
+        const KeyLock lock;
+        handler.onRawEvent({16, event::Media{MediaKey::VolumeUp}});
+    }
+    handler.onRawEvent({32, event::ButtonDown{Button::A}});
+    CHECK_EQ_SZ(playback.commands.size(), 2);
+    CHECK(playback.commands[0] == "toggle");
+    CHECK(playback.commands[1] == "volume+");
+}
+
+TEST(media_keys_give_their_playback_commands) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    const MediaKey keys[] = {MediaKey::PlayPause, MediaKey::Next, MediaKey::Previous,
+                             MediaKey::VolumeUp, MediaKey::VolumeDown};
+    for (const MediaKey key : keys) handler.onRawEvent({0, event::Media{key}});
+    const std::vector<std::string> want = {"toggle", "next", "previous", "volume+", "volume-"};
+    CHECK(playback.commands == want);
+}
+
+// ---------------------------------------------------------------------------
+// InputManager
+
+namespace {
+
+// Writes each event that it gets to a shared log, as "<name> <event> <button>"
+class ChainListener : public InputListener {
+public:
+    ChainListener(const char* name, std::vector<std::string>& log) : name(name), log(log) {}
+
+    uint32_t consumeDownMask   = 0;
+    uint32_t consumeUpMask     = 0;
+    uint32_t consumeButtonMask = 0;
+    bool consumeMedia          = false;
+
+    bool onRawEvent(const RawEvent& event) override {
+        if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
+            add("down", typedEvent->button);
+            return (consumeDownMask & bit(typedEvent->button)) != 0;
+        }
+        if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
+            add("up", typedEvent->button);
+            return (consumeUpMask & bit(typedEvent->button)) != 0;
+        }
+        if (const auto* typedEvent = std::get_if<event::ButtonCancel>(&event.kind)) {
+            add("cancel", typedEvent->button);
+        }
+        if (std::get_if<event::ButtonReset>(&event.kind)) {
+            log.push_back(std::string(name) + " reset");
+        }
+        if (std::get_if<event::Media>(&event.kind)) {
+            log.push_back(std::string(name) + " media");
+            return consumeMedia;
+        }
+        return false;
+    }
+
+    bool onButtonEvent(const ButtonEvent& event) override {
+        if (const auto* typedEvent = std::get_if<event::ShortPress>(&event.kind)) {
+            add("short", typedEvent->button);
+            return (consumeButtonMask & bit(typedEvent->button)) != 0;
+        }
+        if (const auto* typedEvent = std::get_if<event::Repeat>(&event.kind)) {
+            add("repeat", typedEvent->button);
+            return (consumeButtonMask & bit(typedEvent->button)) != 0;
+        }
+        return false;
+    }
+
+private:
+    void add(const char* what, Button button) {
+        log.push_back(std::string(name) + " " + what + " " + getButtonName(button));
+    }
+
+    const char* name;
+    std::vector<std::string>& log;
+};
+
+// A page and a handler in an input manager, as the page loop has them
+struct ManagerFixture {
+    std::vector<std::string> log;
+    ChainListener page{"page", log};
+    ChainListener handler{"handler", log};
+    InputManager manager{{&page, &handler}};
+
+    void down(Button button) { manager.onRawEvent({0, event::ButtonDown{button}}); }
+    void up(Button button) { manager.onRawEvent({0, event::ButtonUp{button}}); }
+    void press(Button button) { manager.onButtonEvent({0, event::ShortPress{button}}); }
+};
+
+bool isLog(const std::vector<std::string>& log, const std::vector<std::string>& want) {
+    if (log == want) return true;
+    for (const std::string& line : log) printf("      %s\n", line.c_str());
+    return false;
+}
+
+}  // namespace
+
+TEST(manager_gives_an_unconsumed_press_to_each_listener) {
+    ManagerFixture f;
+    f.down(Button::A);
+    f.press(Button::A);
+    f.up(Button::A);
+    CHECK(isLog(f.log, {"page down A", "handler down A", "page short A", "handler short A",
+                        "page up A", "handler up A"}));
+}
+
+// The page consumes a button event: the handler that saw the down gets a cancel, and the page gets
+// each later event of the gesture
+TEST(manager_button_event_sets_the_owner) {
+    ManagerFixture f;
+    f.page.consumeButtonMask = bit(Button::A);
+    f.handler.consumeDownMask    = bit(Button::Start);
+    f.down(Button::A);
+    f.press(Button::A);
+    f.down(Button::Start);
+    f.up(Button::Start);
+    f.up(Button::A);
+    CHECK(isLog(f.log, {"page down A", "handler down A", "page short A", "handler cancel A",
+                        "page down START", "page up START", "page up A"}));
+}
+
+// The page intercepts an up: the handler gets a cancel of the button in place of its up
+TEST(manager_intercepted_up_cancels_the_later_listener) {
+    ManagerFixture f;
+    f.page.consumeUpMask = bit(Button::A);
+    f.down(Button::A);
+    f.up(Button::A);
+    CHECK(isLog(f.log, {"page down A", "handler down A", "page up A", "handler cancel A"}));
+}
+
+// The handler consumes START: the page that saw the down gets a cancel, and the handler gets each
+// event of each button until no button is held
+TEST(manager_owner_cancels_the_earlier_listener) {
+    ManagerFixture f;
+    f.handler.consumeDownMask    = bit(Button::Start);
+    f.page.consumeButtonMask = bit(Button::A);
+    f.down(Button::Start);
+    f.down(Button::A);
+    f.press(Button::A);
+    f.up(Button::A);
+    f.up(Button::Start);
+    CHECK(isLog(f.log, {"page down START", "handler down START", "page cancel START",
+                        "handler down A", "handler short A", "handler up A",
+                        "handler up START"}));
+}
+
+// The button events of the last up go to the owner. The next gesture has no owner.
+TEST(manager_gesture_ends_after_the_last_up) {
+    ManagerFixture f;
+    f.handler.consumeDownMask = bit(Button::Start);
+    f.down(Button::Start);
+    f.up(Button::Start);
+    f.press(Button::Start);
+    f.log.clear();
+    f.down(Button::B);
+    CHECK(isLog(f.log, {"page down B", "handler down B"}));
+}
+
+// An owner cancels each held button that another listener saw, and that listener gets no up
+TEST(manager_owner_cancels_each_held_button) {
+    ManagerFixture f;
+    f.page.consumeDownMask = bit(Button::B);
+    f.down(Button::A);
+    f.down(Button::B);
+    f.up(Button::A);
+    f.up(Button::B);
+    CHECK(isLog(f.log, {"page down A", "handler down A", "page down B", "handler cancel A",
+                        "page up A", "page up B"}));
+}
+
+TEST(manager_reset_ends_the_gesture_and_reaches_each_listener) {
+    ManagerFixture f;
+    f.handler.consumeDownMask = bit(Button::Start);
+    f.down(Button::Start);
+    f.manager.onRawEvent({0, event::ButtonReset{}});
+    f.log.clear();
+    f.down(Button::A);
+    CHECK(isLog(f.log, {"page down A", "handler down A"}));
+}
+
+TEST(manager_media_goes_to_the_first_consumer_or_to_the_owner) {
+    ManagerFixture f;
+    f.handler.consumeMedia = true;
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.page.consumeDownMask = bit(Button::A);
+    f.down(Button::A);
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    CHECK(isLog(f.log, {"page media", "handler media", "page down A", "page media"}));
+}
+
+// The handler consumes Media while a button is held: the page gets a cancel of that button
+TEST(manager_media_sets_the_owner_of_a_held_button) {
+    ManagerFixture f;
+    f.handler.consumeMedia = true;
+    f.down(Button::DpadDown);
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.press(Button::DpadDown);
+    f.up(Button::DpadDown);
+    CHECK(isLog(f.log, {"page down DOWN", "handler down DOWN", "page media", "handler media",
+                        "page cancel DOWN", "handler short DOWN", "handler up DOWN"}));
+}
+
+// The detector gets each raw event after the input manager, as in the page loop
+TEST(manager_gives_the_repeats_to_the_owner_of_the_short_press) {
+    ManagerFixture f;
+    f.page.consumeButtonMask                 = bit(Button::DpadDown);
+    static constexpr ButtonRequest kRepeat[] = {request::Repeat{Button::DpadDown}};
+    ButtonDetector detector{f.manager, kRepeat};
+    const RawEvent down{0, event::ButtonDown{Button::DpadDown}};
+    f.manager.onRawEvent(down);
+    detector.onRawEvent(down);
+    detector.onTick(ButtonDetector::kRepeatDelayMs);
+    detector.onTick(ButtonDetector::kRepeatDelayMs + ButtonDetector::kRepeatIntervalMs);
+    CHECK(isLog(f.log, {"page down DOWN", "handler down DOWN", "page short DOWN",
+                        "handler cancel DOWN", "page repeat DOWN", "page repeat DOWN"}));
+}
+
 int main(void) {
     printf("input events\n");
     RUN(pad_gives_buttons_in_bit_order_and_down_before_up);
@@ -568,5 +941,25 @@ int main(void) {
     RUN(reset_clears_a_combo);
     RUN(media_gives_nothing);
     RUN(pad_and_detector_together);
+    RUN(start_short_press_asks_for_the_controls_help);
+    RUN(start_with_no_callback_does_nothing);
+    RUN(handler_consumes_start_and_media);
+    RUN(start_long_press_asks_for_the_quit_dialog);
+    RUN(start_with_a_volume_button_asks_for_no_dialog);
+    RUN(handler_consumes_only_the_combos_of_start);
+    RUN(other_buttons_go_to_the_page);
+    RUN(locked_keys_ask_for_no_dialog);
+    RUN(media_key_acts_also_while_locked);
+    RUN(media_keys_give_their_playback_commands);
+    RUN(manager_gives_an_unconsumed_press_to_each_listener);
+    RUN(manager_button_event_sets_the_owner);
+    RUN(manager_intercepted_up_cancels_the_later_listener);
+    RUN(manager_owner_cancels_the_earlier_listener);
+    RUN(manager_gesture_ends_after_the_last_up);
+    RUN(manager_owner_cancels_each_held_button);
+    RUN(manager_reset_ends_the_gesture_and_reaches_each_listener);
+    RUN(manager_media_goes_to_the_first_consumer_or_to_the_owner);
+    RUN(manager_media_sets_the_owner_of_a_held_button);
+    RUN(manager_gives_the_repeats_to_the_owner_of_the_short_press);
     return test_summary();
 }

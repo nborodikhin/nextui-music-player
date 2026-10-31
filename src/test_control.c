@@ -104,6 +104,10 @@ static const ButtonName buttons[] = {
     { "PLUS",   BTN_PLUS,       BTN_ID_PLUS       },
     { "MINUS",  BTN_MINUS,      BTN_ID_MINUS      },
     { "POWER",  BTN_POWER,      BTN_ID_POWER      },
+    { "STICK_UP",    BTN_ANALOG_UP,    BTN_ID_ANALOG_UP    },
+    { "STICK_DOWN",  BTN_ANALOG_DOWN,  BTN_ID_ANALOG_DOWN  },
+    { "STICK_LEFT",  BTN_ANALOG_LEFT,  BTN_ID_ANALOG_LEFT  },
+    { "STICK_RIGHT", BTN_ANALOG_RIGHT, BTN_ID_ANALOG_RIGHT },
 };
 
 static bool active = false;

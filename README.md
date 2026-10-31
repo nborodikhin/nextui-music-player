@@ -375,7 +375,8 @@ command and each argument. A `#` starts a comment.
 | `keep()`           | End the script, do not exit the app                      |
 
 `BTN` is one of `UP`, `DOWN`, `LEFT`, `RIGHT`, `A`, `B`, `X`, `Y`, `START`,
-`SELECT`, `L1`, `R1`, `L2`, `R2`, `MENU`, `PLUS`, `MINUS`, `POWER`.
+`SELECT`, `L1`, `R1`, `L2`, `R2`, `MENU`, `PLUS`, `MINUS`, `POWER`, or a
+direction of the analog stick: `STICK_UP`, `STICK_DOWN`, `STICK_LEFT`, `STICK_RIGHT`.
 
 The app writes `@ok <line>` when a step completes, `@err <line> <message>` for a
 command that it cannot execute, and `@bye` before it stops. A harness waits for
