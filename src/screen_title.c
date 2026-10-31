@@ -3,9 +3,10 @@
 
 #include "screen_title.h"
 
-void ScreenTitle_reset(ScreenTitle* title, bool defer) {
+void ScreenTitle_reset(ScreenTitle* title, bool defer, int speed) {
     memset(title, 0, sizeof(*title));
     title->defer = defer;
+    title->speed = speed;
 }
 
 static void put(ScreenTitleSegment* seg, const char* text, int text_w) {
@@ -24,7 +25,7 @@ static bool tape_is_wide(const ScreenTitle* title) {
 // The distance that the tape moved since its start delay ended.
 static int distance_moved(const ScreenTitle* title, uint32_t now) {
     uint32_t elapsed = now - title->shown_at - SCREEN_TITLE_START_DELAY_MS;
-    return (int)((uint64_t)elapsed * SCREEN_TITLE_SPEED_PX_PER_S / 1000);
+    return (int)((uint64_t)elapsed * (uint64_t)title->speed / 1000);
 }
 
 bool ScreenTitle_moves(const ScreenTitle* title, uint32_t now) {

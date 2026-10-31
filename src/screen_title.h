@@ -29,10 +29,6 @@ extern "C" {
 // How long a new title stays still before it moves.
 #define SCREEN_TITLE_START_DELAY_MS 1000
 
-// The speed of the marquee, in pixels for each second. Two pixels a frame at 60
-// frames a second, which is the speed of the software marquee of a row.
-#define SCREEN_TITLE_SPEED_PX_PER_S 120
-
 typedef struct {
     char text[SCREEN_TITLE_MAX];
     int  text_w;   // the width of the whole text
@@ -49,11 +45,12 @@ typedef struct {
     int      area_w;      // the width of the title area on the last frame
     int      gap;         // the space between two texts on the tape
     int      fade_w;      // the width of the wash at a cut, one em
+    int      speed;       // pixels a second
 } ScreenTitle;
 
 // Pass true in `defer` to let a change scroll in while the tape moves. A title
-// with `defer` false replaces its text at once.
-void ScreenTitle_reset(ScreenTitle* title, bool defer);
+// with `defer` false replaces its text at once. `speed` is in pixels a second.
+void ScreenTitle_reset(ScreenTitle* title, bool defer, int speed);
 
 // Returns true where `text` is the text at the end of the tape, thus a set of
 // it changes nothing. The renderer asks before it measures the text.

@@ -13,7 +13,7 @@
 #include "screen_title.h"
 
 #define DELAY SCREEN_TITLE_START_DELAY_MS
-#define SPEED SCREEN_TITLE_SPEED_PX_PER_S
+#define SPEED 120
 
 // The area is 200 wide, the gap 30 and the fade 20. A text 300 wide loops in 330.
 #define AREA 200
@@ -22,7 +22,7 @@
 
 static ScreenTitle moving_title(bool defer, uint32_t now) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, defer);
+    ScreenTitle_reset(&t, defer, SPEED);
     ScreenTitle_measure(&t, AREA, GAP, FADE, 0);
     ScreenTitle_set(&t, "A long title", 300, now);
     return t;
@@ -35,7 +35,7 @@ static uint32_t at_px(int px) {
 
 TEST(a_title_that_fits_stays_still) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, false);
+    ScreenTitle_reset(&t, false, SPEED);
     ScreenTitle_measure(&t, AREA, GAP, FADE, 0);
     CHECK(ScreenTitle_set(&t, "Settings", 100, 0));
 
@@ -47,7 +47,7 @@ TEST(a_title_that_fits_stays_still) {
 
 TEST(the_same_text_is_no_change) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, false);
+    ScreenTitle_reset(&t, false, SPEED);
     ScreenTitle_measure(&t, AREA, GAP, FADE, 0);
     CHECK(ScreenTitle_set(&t, "Settings", 100, 0));
     CHECK(!ScreenTitle_set(&t, "Settings", 100, 500));
@@ -107,7 +107,7 @@ TEST(a_new_text_replaces_the_title_at_once_without_defer) {
 
 TEST(a_deferred_change_of_a_still_title_is_at_once) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, true);
+    ScreenTitle_reset(&t, true, SPEED);
     ScreenTitle_measure(&t, AREA, GAP, FADE, 0);
     ScreenTitle_set(&t, "/Music", 100, 0);
 
@@ -257,7 +257,7 @@ TEST(a_change_after_a_loop_scrolls_in) {
 // from the start, after its delay, and not from where an old clock says.
 TEST(a_narrower_area_starts_the_marquee_from_the_start) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, false);
+    ScreenTitle_reset(&t, false, SPEED);
     ScreenTitle_measure(&t, 400, GAP, FADE, 0);
     ScreenTitle_set(&t, "A long title", 300, 0);
     CHECK(!ScreenTitle_moves(&t, 100000));
@@ -272,7 +272,7 @@ TEST(a_narrower_area_starts_the_marquee_from_the_start) {
 // leaves, and the text under the edge stays.
 TEST(a_full_tape_keeps_the_text_under_the_edge) {
     ScreenTitle t;
-    ScreenTitle_reset(&t, true);
+    ScreenTitle_reset(&t, true, SPEED);
     ScreenTitle_measure(&t, 600, GAP, FADE, 0);
     ScreenTitle_set(&t, "A very long title", 1200, 0);
 
@@ -324,7 +324,7 @@ TEST(a_title_holds_a_path_of_the_browser) {
     path[sizeof(path) - 1] = '\0';
 
     ScreenTitle t;
-    ScreenTitle_reset(&t, true);
+    ScreenTitle_reset(&t, true, SPEED);
     CHECK(ScreenTitle_set(&t, path, 3000, 0));
     CHECK_EQ_SZ(strlen(t.seg[0].text), SCREEN_TITLE_MAX - 1);
 }

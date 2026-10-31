@@ -217,7 +217,7 @@ TEST(test_screen_title_paint_stays_in_its_area) {
     SDL_FillRect(screen, NULL, 0);
 
     ScreenTitle title;
-    ScreenTitle_reset(&title, false);
+    ScreenTitle_reset(&title, false, SCALE1(MARQUEE_SPEED));
     ScreenTitle_set(&title, text, 4000, 0);
     SDL_Rect area = screen_title_area(screen, 200, TTF_FontHeight(font));
     SDL_Color white = {255, 255, 255, 255};

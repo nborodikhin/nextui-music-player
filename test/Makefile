@@ -24,6 +24,9 @@
 # float arithmetic, with the FFT and the paint left in spectrum.c. It declares
 # itself in spectrum.h, which holds no platform include.
 #
+# stopwatch.c is the same shape as spectrum_ceiling.c: a count of time, with the
+# clock passed in.
+#
 # screen_title.c is the same shape as toast_state.c: the text of a title and
 # where its marquee is, with the clock and the measured widths passed in and the
 # paint left in ui_utils.c.
@@ -75,6 +78,7 @@ BIN      = bin
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
+           $(BIN)/test_stopwatch \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
            $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
            $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
@@ -203,6 +207,9 @@ $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h te
 
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
+
+$(BIN)/test_stopwatch: test_stopwatch.c $(SRC)/stopwatch.c $(SRC)/stopwatch.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_stopwatch.c $(SRC)/stopwatch.c
 
 $(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c

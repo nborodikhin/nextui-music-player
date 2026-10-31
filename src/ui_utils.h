@@ -12,6 +12,10 @@ extern "C" {
 #include "player.h"   // For AudioFormat
 #include "ui_theme.h"
 #include "screen_title.h"
+#include "stopwatch.h"
+
+// The speed of each marquee, in scaled pixels a second. Apply SCALE1().
+#define MARQUEE_SPEED 40
 
 // Format a time as MM:SS, or as H:MM:SS from one hour
 void format_time(char* buf, int ms);
@@ -36,7 +40,7 @@ typedef struct {
     int max_width;          // Maximum display width
     uint32_t start_time;    // Animation start time
     bool needs_scroll;      // True if text is wider than max_width
-    int scroll_offset;      // Current pixel offset for smooth scrolling
+    Stopwatch scroll_time;  // The time where the marquee moved
     bool use_gpu_scroll;    // True where the marquee goes on the animation layer
     int last_x, last_y;     // Last render position (for animate-only mode)
     TTF_Font* last_font;    // Last font used (for animate-only mode)
@@ -66,6 +70,11 @@ bool ScrollText_needsRender(ScrollTextState* state);
 // Activate scrolling after delay (for player screens that bypass ScrollText_render)
 void ScrollText_activateAfterDelay(ScrollTextState* state);
 
+// Pass true in `paused` to stop the marquee, and false to continue it. Call on
+// each frame, also a frame that paints nothing, thus a pause does not count as
+// movement.
+void ScrollText_setPaused(ScrollTextState* state, bool paused);
+
 // Update scroll animation only (for GPU mode, doesn't redraw screen)
 // Call this when dirty=0 but scrolling is active - uses saved position from last render
 void ScrollText_animateOnly(ScrollTextState* state);
@@ -81,8 +90,8 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
                        int max_width, ThemeRole role, bool selected, SDL_Surface* screen,
                        int x, int y, bool use_gpu);
 
-// Draws the marquee of a playing title at its offset on the animation layer,
-// and moves it for the next frame. Does not clear the layer: the painter of
+// Draws the marquee of a playing title at its offset on the animation layer.
+// Does not clear the layer: the painter of
 // the layer of the screen owns the clear and the z order.
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y);
