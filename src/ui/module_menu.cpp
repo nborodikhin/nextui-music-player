@@ -29,9 +29,11 @@ constexpr uint32_t kExitConfirmationWindowMs = 3000;
  */
 constexpr uint32_t kExitToastDelayMs = 100;
 
-constexpr std::array<ButtonRequest, 2> kRequests = {
+constexpr std::array<ButtonRequest, 4> kRequests = {
     request::Repeat{Button::DpadUp},
     request::Repeat{Button::DpadDown},
+    request::Repeat{Button::AnalogUp},
+    request::Repeat{Button::AnalogDown},
 };
 
 /** The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed. */
@@ -52,11 +54,15 @@ MenuSelection getPlayingItem() {
 
 ListNavInput toListNavInput(Button button) {
     switch (button) {
-        case Button::DpadUp:    return LIST_NAV_UP;
-        case Button::DpadDown:  return LIST_NAV_DOWN;
-        case Button::DpadLeft:  return LIST_NAV_LEFT;
-        case Button::DpadRight: return LIST_NAV_RIGHT;
-        default:                return LIST_NAV_NONE;
+        case Button::DpadUp:
+        case Button::AnalogUp:    return LIST_NAV_UP;
+        case Button::DpadDown:
+        case Button::AnalogDown:  return LIST_NAV_DOWN;
+        case Button::DpadLeft:
+        case Button::AnalogLeft:  return LIST_NAV_LEFT;
+        case Button::DpadRight:
+        case Button::AnalogRight: return LIST_NAV_RIGHT;
+        default:                  return LIST_NAV_NONE;
     }
 }
 
