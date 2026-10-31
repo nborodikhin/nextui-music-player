@@ -48,7 +48,7 @@ bool CommonButtonHandler::onRawEvent(const RawEvent& event) {
         runMediaKey(playback, typedEvent->key);
         return true;
     }
-    if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
+    if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
         return typedEvent->button == Button::Start && !InputState::getInstance().isKeyLocked();
     }
     return false;
