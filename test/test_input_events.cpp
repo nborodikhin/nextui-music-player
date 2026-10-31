@@ -635,6 +635,36 @@ TEST(start_long_press_asks_for_the_quit_dialog) {
     CHECK_EQ_INT(requests.help, 0);
 }
 
+// A volume button while START is held, in each order, ends the press of START with no dialog
+TEST(start_with_a_volume_button_asks_for_no_dialog) {
+    const Button volumeButtons[] = {Button::Plus, Button::Minus};
+    for (const Button volume : volumeButtons) {
+        for (const bool startFirst : {true, false}) {
+            FakePlaybackControl playback;
+            CommonButtonHandler handler(playback);
+            Requests requests(handler);
+            ButtonDetector detector(handler, CommonButtonHandler::getButtonRequests());
+            const Button first  = startFirst ? Button::Start : volume;
+            const Button second = startFirst ? volume : Button::Start;
+            detector.onRawEvent({0, event::ButtonDown{first}});
+            detector.onRawEvent({100, event::ButtonDown{second}});
+            for (uint32_t now = 100; now <= 800; now += 16) detector.onTick(now);
+            detector.onRawEvent({800, event::ButtonUp{volume}});
+            for (uint32_t now = 800; now <= 1500; now += 16) detector.onTick(now);
+            detector.onRawEvent({1500, event::ButtonUp{Button::Start}});
+            CHECK_EQ_INT(requests.help + requests.quit, 0);
+        }
+    }
+}
+
+TEST(handler_consumes_only_the_combos_of_start) {
+    FakePlaybackControl playback;
+    CommonButtonHandler handler(playback);
+    CHECK(handler.onButtonEvent({0, event::Combo{Button::Start, Button::Plus}}));
+    CHECK(handler.onButtonEvent({0, event::Combo{Button::Minus, Button::Start}}));
+    CHECK(!handler.onButtonEvent({0, event::Combo{Button::Select, Button::A}}));
+}
+
 TEST(other_buttons_go_to_the_page) {
     FakePlaybackControl playback;
     CommonButtonHandler handler(playback);
@@ -915,6 +945,8 @@ int main(void) {
     RUN(start_with_no_callback_does_nothing);
     RUN(handler_consumes_start_and_media);
     RUN(start_long_press_asks_for_the_quit_dialog);
+    RUN(start_with_a_volume_button_asks_for_no_dialog);
+    RUN(handler_consumes_only_the_combos_of_start);
     RUN(other_buttons_go_to_the_page);
     RUN(locked_keys_ask_for_no_dialog);
     RUN(media_key_acts_also_while_locked);

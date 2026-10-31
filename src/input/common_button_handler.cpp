@@ -8,6 +8,11 @@ namespace {
 
 constexpr ButtonRequest kRequests[] = {
     request::LongPress{Button::Start},
+    // The platform changes the volume. The combo ends the press of START, in each order.
+    request::Combo{Button::Start, Button::Plus},
+    request::Combo{Button::Start, Button::Minus},
+    request::Combo{Button::Plus, Button::Start},
+    request::Combo{Button::Minus, Button::Start},
 };
 
 }  // namespace
@@ -49,6 +54,10 @@ bool CommonButtonHandler::onRawEvent(const RawEvent& event) {
     return false;
 }
 
+static bool isStartCombo(const event::Combo& combo) {
+    return combo.first == Button::Start || combo.second == Button::Start;
+}
+
 bool CommonButtonHandler::onButtonEvent(const ButtonEvent& event) {
     if (InputState::getInstance().isKeyLocked()) return false;
 
@@ -61,6 +70,9 @@ bool CommonButtonHandler::onButtonEvent(const ButtonEvent& event) {
         if (typedEvent->button != Button::Start) return false;
         if (onQuitRequested) onQuitRequested();
         return true;
+    }
+    if (const auto* typedEvent = std::get_if<event::Combo>(&event.kind)) {
+        return isStartCombo(*typedEvent);
     }
     return false;
 }
