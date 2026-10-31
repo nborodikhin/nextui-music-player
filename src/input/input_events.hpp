@@ -55,20 +55,21 @@ enum class MediaKey : uint8_t {
 
 // The raw events: each change of an input source, with no filter.
 namespace event {
-struct ButtonDown {
+struct ButtonPressed {
     Button button;
 };
 
-struct ButtonUp {
+struct ButtonReleased {
     Button button;
 };
 
-// Another listener consumed an event of the gesture. The button is up, with no release.
+// Another listener consumed an event of the gesture. The button is released for this listener,
+// with no released event.
 struct ButtonCancel {
     Button button;
 };
 
-// Each held button is up, with no release. The gesture ends.
+// Each held button is released, with no released event. The gesture ends.
 struct ButtonReset {};
 
 struct Media {
@@ -78,8 +79,8 @@ struct Media {
 
 struct RawEvent {
     uint32_t time;
-    std::variant<event::ButtonDown, event::ButtonUp, event::ButtonReset, event::ButtonCancel,
-                 event::Media>
+    std::variant<event::ButtonPressed, event::ButtonReleased, event::ButtonReset,
+                 event::ButtonCancel, event::Media>
         kind;
 };
 
@@ -97,8 +98,8 @@ struct Repeat {
     Button button;
 };
 
-// The members in the order of the request. The first member went down first, or both
-// went down in one frame.
+// The members in the order of the request. The first member was pressed first, or both
+// were pressed in one frame.
 struct Combo {
     Button first;
     Button second;
@@ -120,7 +121,7 @@ struct Repeat {
     Button button;
 };
 
-// The first member is held, and then the second member goes down.
+// The first member is held, and then the second member is pressed.
 struct Combo {
     Button first;
     Button second;

@@ -8,14 +8,14 @@ InputManager::InputManager(std::vector<InputListener*> chain)
     : listeners(std::move(chain)), seenMasks(listeners.size(), 0) {}
 
 bool InputManager::onRawEvent(const RawEvent& event) {
-    // The last up ended the gesture: the next raw event starts with no owner
+    // The last release ended the gesture: the next raw event starts with no owner
     if (heldMask == 0) owner = kNoOwner;
 
-    if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
-        onButtonDown(event, typedEvent->button);
+    if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
+        onButtonPressed(event, typedEvent->button);
     }
-    if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
-        onButtonUp(event, typedEvent->button);
+    if (const auto* typedEvent = std::get_if<event::ButtonReleased>(&event.kind)) {
+        onButtonReleased(event, typedEvent->button);
     }
     if (std::get_if<event::ButtonReset>(&event.kind)) {
         onReset(event);
@@ -37,7 +37,7 @@ bool InputManager::onButtonEvent(const ButtonEvent& event) {
     return false;
 }
 
-void InputManager::onButtonDown(const RawEvent& event, Button button) {
+void InputManager::onButtonPressed(const RawEvent& event, Button button) {
     const uint32_t bit = getButtonBit(button);
     heldMask |= bit;
     if (owner != kNoOwner) {
@@ -54,14 +54,14 @@ void InputManager::onButtonDown(const RawEvent& event, Button button) {
     }
 }
 
-void InputManager::onButtonUp(const RawEvent& event, Button button) {
+void InputManager::onButtonReleased(const RawEvent& event, Button button) {
     const uint32_t bit = getButtonBit(button);
     heldMask &= ~bit;
     for (size_t index = 0; index < listeners.size(); index++) {
         if (!(seenMasks[index] & bit)) continue;
         seenMasks[index] &= ~bit;
         if (listeners[index]->onRawEvent(event) && owner == kNoOwner) {
-            // The later listeners get a cancel in place of the up
+            // The later listeners get a cancel in place of the released event
             setOwner(index, event.time);
             return;
         }

@@ -25,11 +25,11 @@ ButtonDetector::ButtonDetector(ButtonListener& listener, std::span<const ButtonR
 }
 
 bool ButtonDetector::onRawEvent(const RawEvent& event) {
-    if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
-        onButtonDown(typedEvent->button, event.time);
+    if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
+        onButtonPressed(typedEvent->button, event.time);
     }
-    if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
-        onButtonUp(typedEvent->button, event.time);
+    if (const auto* typedEvent = std::get_if<event::ButtonReleased>(&event.kind)) {
+        onButtonReleased(typedEvent->button, event.time);
     }
     if (std::get_if<event::ButtonReset>(&event.kind)) {
         reset();
@@ -57,7 +57,7 @@ void ButtonDetector::sendDueEvent(Button button, uint32_t now) {
     }
 }
 
-void ButtonDetector::onButtonDown(Button button, uint32_t time) {
+void ButtonDetector::onButtonPressed(Button button, uint32_t time) {
     const uint32_t bit = getButtonBit(button);
     ButtonState& state = getState(button);
     heldMask |= bit;
@@ -82,7 +82,7 @@ void ButtonDetector::onButtonDown(Button button, uint32_t time) {
     }
 }
 
-void ButtonDetector::onButtonUp(Button button, uint32_t time) {
+void ButtonDetector::onButtonReleased(Button button, uint32_t time) {
     // The release comes before the tick of its frame. A long press or a repeat that is due
     // at the release goes out first, as the pad gives a repeat before a release.
     sendDueEvent(button, time);
@@ -111,8 +111,8 @@ void ButtonDetector::reset() {
     comboLatched.fill(false);
 }
 
-// Gives the combo when its second member goes down while the first is held and has given no
-// event yet. The pad gives no order for two downs in one frame, thus they start the combo in
+// Gives the combo when its second member is pressed while the first is held and has given no
+// event yet. The pad gives no order for two presses in one frame, thus they start the combo in
 // each order. Returns true when a combo went out.
 bool ButtonDetector::startCombo(Button button, uint32_t time) {
     for (int index = 0; index < comboCount; index++) {
