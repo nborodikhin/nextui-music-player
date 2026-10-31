@@ -21,7 +21,7 @@ public:
 
     // Copies the requests. A button cannot have a repeat and a long press, and a member of
     // a combo cannot have a repeat. At most kMaxCombos combos. When two combos share the
-    // member that goes down, the first one in the requests wins.
+    // member that is pressed, the first one in the requests wins.
     ButtonDetector(ButtonListener& listener, std::span<const ButtonRequest> requests);
 
     // Returns false: the detector takes no input
@@ -32,15 +32,15 @@ public:
 
 private:
     enum class Mode : uint8_t {
-        // Not held, or held from before the detector saw it go down
+        // Not held, or held from before the detector saw it pressed
         Idle,
-        // The short press went out at the down
+        // The short press went out at the press
         Immediate,
-        // The short press goes out at the up, if no long press or combo went out
+        // The short press goes out at the release, if no long press or combo went out
         Deferred,
-        // The short press went out at the down, and the repeats follow
+        // The short press went out at the press, and the repeats follow
         Repeat,
-        // A long press or a combo went out. No more events until the up
+        // A long press or a combo went out. No more events until the release
         Done,
     };
 
@@ -50,8 +50,8 @@ private:
         uint32_t nextRepeat = 0;
     };
 
-    void onButtonDown(Button button, uint32_t time);
-    void onButtonUp(Button button, uint32_t time);
+    void onButtonPressed(Button button, uint32_t time);
+    void onButtonReleased(Button button, uint32_t time);
     // Gives the long press or the repeat of the button that is due at the time now
     void sendDueEvent(Button button, uint32_t now);
     void reset();
@@ -67,7 +67,7 @@ private:
     uint32_t comboMask     = 0;
     std::array<request::Combo, kMaxCombos> combos{};
     int comboCount = 0;
-    // A combo that went out stays latched until each of its members is up. Its members give
+    // A combo that went out stays latched until each of its members is released. Its members give
     // no event while it is latched.
     std::array<bool, kMaxCombos> comboLatched{};
     uint32_t heldMask = 0;

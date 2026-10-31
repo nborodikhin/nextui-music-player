@@ -6,10 +6,10 @@
 namespace input {
 
 /**
- * A gesture is the input events from a down while no button is held, until no button is held.
+ * A gesture is the input events from a press while no button is held, until no button is held.
  * A listener that consumes an event of the gesture is its owner: it gets each later event of the
  * gesture, and no other listener gets them. Each other listener gets a ButtonCancel for each
- * held button whose down it saw.
+ * held button whose pressed event it saw.
  */
 
 class RawEventListener {

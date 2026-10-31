@@ -29,20 +29,22 @@ public:
 private:
     static constexpr int kNoOwner = -1;
 
-    void onButtonDown(const RawEvent& event, Button button);
-    void onButtonUp(const RawEvent& event, Button button);
+    void onButtonPressed(const RawEvent& event, Button button);
+    void onButtonReleased(const RawEvent& event, Button button);
     void onMedia(const RawEvent& event);
     void onReset(const RawEvent& event);
-    /** Gives a ButtonCancel to each other listener for each held button whose down it saw */
+    /**
+     * Gives a ButtonCancel to each other listener for each held button whose pressed event it saw
+     */
     void setOwner(size_t index, uint32_t time);
 
     std::vector<InputListener*> listeners;
-    /** For each listener: the held buttons whose down it saw */
+    /** For each listener: the held buttons whose pressed event it saw */
     std::vector<uint32_t> seenMasks;
     uint32_t heldMask = 0;
     /**
-     * The gesture ends at the first raw event after the last up, thus the button events of the
-     * last up still go to the owner.
+     * The gesture ends at the first raw event after the last release, thus the button events of
+     * the last release still go to the owner.
      */
     int owner = kNoOwner;
 };

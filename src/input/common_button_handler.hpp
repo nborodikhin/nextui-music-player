@@ -24,8 +24,8 @@ protected:
 };
 
 // The input that is the same on each page: power management, the buttons of USB earphones, and
-// START. It consumes the down of START, each Media event, and START with a volume button, which
-// asks for no dialog.
+// START. It consumes the pressed event of START, each Media event, and START with a volume button,
+// which asks for no dialog.
 class CommonButtonHandler : public InputListener {
 public:
     explicit CommonButtonHandler(PlaybackControl& playback);

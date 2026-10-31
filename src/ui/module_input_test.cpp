@@ -42,13 +42,13 @@ public:
 
     // Consumes each event, thus the global buttons do not act
     bool onRawEvent(const RawEvent& event) override {
-        if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
+        if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
             held |= getButtonBit(typedEvent->button);
-            addEntry(event.time, "raw", "DOWN", getButtonName(typedEvent->button));
+            addEntry(event.time, "raw", "PRESSED", getButtonName(typedEvent->button));
         }
-        if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
+        if (const auto* typedEvent = std::get_if<event::ButtonReleased>(&event.kind)) {
             held &= ~getButtonBit(typedEvent->button);
-            addEntry(event.time, "raw", "UP", getButtonName(typedEvent->button));
+            addEntry(event.time, "raw", "RELEASED", getButtonName(typedEvent->button));
         }
         if (std::get_if<event::ButtonReset>(&event.kind)) {
             held = 0;
@@ -104,7 +104,7 @@ private:
 
     void addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name);
 
-    // The buttons that went down and are not up yet, from the raw events
+    // The buttons that were pressed and are not released yet, from the raw events
     uint32_t held = 0;
     // A ring of the last entries. newest is the index of the newest entry
     std::array<Entry, kEntryCount> entries{};

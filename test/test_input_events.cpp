@@ -21,7 +21,7 @@ using namespace input;
 namespace {
 
 // A raw or a button event as one comparable record.
-enum class Kind { Down, Up, Reset, Cancel, Media, Short, Long, Repeat, Combo };
+enum class Kind { Pressed, Released, Reset, Cancel, Media, Short, Long, Repeat, Combo };
 
 struct Record {
     Kind kind;
@@ -35,14 +35,14 @@ public:
     std::vector<Record> records;
 
     bool onRawEvent(const RawEvent& event) override {
-        if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
-            add(Kind::Down, typedEvent->button, event.time);
+        if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
+            add(Kind::Pressed, typedEvent->button, event.time);
         }
         if (const auto* typedEvent = std::get_if<event::ButtonCancel>(&event.kind)) {
             add(Kind::Cancel, typedEvent->button, event.time);
         }
-        if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
-            add(Kind::Up, typedEvent->button, event.time);
+        if (const auto* typedEvent = std::get_if<event::ButtonReleased>(&event.kind)) {
+            add(Kind::Released, typedEvent->button, event.time);
         }
         if (std::get_if<event::ButtonReset>(&event.kind)) {
             add(Kind::Reset, Button::A, event.time);
@@ -108,11 +108,15 @@ struct Fixture {
     ButtonLog log;
     ButtonDetector detector{log, kRequests};
 
-    void down(Button button, uint32_t time) { detector.onRawEvent({time, event::ButtonDown{button}}); }
-    void up(Button button, uint32_t time) { detector.onRawEvent({time, event::ButtonUp{button}}); }
+    void press(Button button, uint32_t time) {
+        detector.onRawEvent({time, event::ButtonPressed{button}});
+    }
+    void release(Button button, uint32_t time) {
+        detector.onRawEvent({time, event::ButtonReleased{button}});
+    }
     void reset(uint32_t time) { detector.onRawEvent({time, event::ButtonReset{}}); }
 
-    // Ticks each 16 ms from the time from up to the time to
+    // Ticks each 16 ms from the time from to the time to
     void tick(uint32_t from, uint32_t to) {
         for (uint32_t now = from; now <= to; now += 16) detector.onTick(now);
     }
@@ -137,15 +141,15 @@ struct InputDriverTest {
 // ---------------------------------------------------------------------------
 // InputDriver
 
-TEST(pad_gives_buttons_in_bit_order_and_down_before_up) {
+TEST(pad_gives_buttons_in_bit_order_and_presses_before_releases) {
     InputDriver pad;
     RawLog log;
-    // B goes down and up in one frame. A goes down in the same frame.
+    // B is pressed and released in one frame. A is pressed in the same frame.
     InputDriverTest::update(pad, {bit(Button::A), bit(Button::A) | bit(Button::B), bit(Button::B)}, 100, log);
     CHECK_EQ_SZ(log.records.size(), 3);
-    CHECK(isRecord(log.records[0], Kind::Down, Button::A, 100));
-    CHECK(isRecord(log.records[1], Kind::Down, Button::B, 100));
-    CHECK(isRecord(log.records[2], Kind::Up, Button::B, 100));
+    CHECK(isRecord(log.records[0], Kind::Pressed, Button::A, 100));
+    CHECK(isRecord(log.records[1], Kind::Pressed, Button::B, 100));
+    CHECK(isRecord(log.records[2], Kind::Released, Button::B, 100));
 }
 
 TEST(pad_gives_nothing_while_a_button_is_held) {
@@ -155,12 +159,12 @@ TEST(pad_gives_nothing_while_a_button_is_held) {
     InputDriverTest::update(pad, {bit(Button::A), 0, 0}, 16, log);
     InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 32, log);
     CHECK_EQ_SZ(log.records.size(), 2);
-    CHECK(isRecord(log.records[0], Kind::Down, Button::A, 0));
-    CHECK(isRecord(log.records[1], Kind::Up, Button::A, 32));
+    CHECK(isRecord(log.records[0], Kind::Pressed, Button::A, 0));
+    CHECK(isRecord(log.records[1], Kind::Released, Button::A, 32));
 }
 
 // The app cleared the pad, and the hat released LEFT before the next poll: one reset, and no
-// up of LEFT
+// release of LEFT
 TEST(pad_resets_when_the_app_counts_a_reset) {
     InputDriver pad;
     RawLog log;
@@ -170,33 +174,33 @@ TEST(pad_resets_when_the_app_counts_a_reset) {
     InputDriverTest::update(pad, {0, 0, dpad}, 16, log, true);
     InputDriverTest::update(pad, {0, 0, 0}, 32, log);
     CHECK_EQ_SZ(log.records.size(), 2);
-    CHECK(isRecord(log.records[0], Kind::Down, Button::DpadLeft, 0));
+    CHECK(isRecord(log.records[0], Kind::Pressed, Button::DpadLeft, 0));
     CHECK(log.records[1].kind == Kind::Reset && log.records[1].time == 16);
 }
 
-// A button that goes down and up in one frame goes up after each down of the frame
-TEST(pad_gives_the_late_up_after_the_downs) {
+// A button that is pressed and released in one frame is released after each press of the frame
+TEST(pad_gives_the_late_release_after_the_presses) {
     InputDriver pad;
     RawLog log;
-    // A goes down and up, and SELECT goes down. A has the lower bit.
+    // A is pressed and released, and SELECT is pressed. A has the lower bit.
     InputDriverTest::update(pad, {bit(Button::Select), bit(Button::A) | bit(Button::Select), bit(Button::A)}, 0, log);
     CHECK_EQ_SZ(log.records.size(), 3);
-    CHECK(isRecord(log.records[0], Kind::Down, Button::A, 0));
-    CHECK(isRecord(log.records[1], Kind::Down, Button::Select, 0));
-    CHECK(isRecord(log.records[2], Kind::Up, Button::A, 0));
+    CHECK(isRecord(log.records[0], Kind::Pressed, Button::A, 0));
+    CHECK(isRecord(log.records[1], Kind::Pressed, Button::Select, 0));
+    CHECK(isRecord(log.records[2], Kind::Released, Button::A, 0));
 }
 
-// A held button that goes up and down again in one frame stays held
-TEST(pad_gives_the_early_up_before_the_downs) {
+// A held button that is released and pressed again in one frame stays held
+TEST(pad_gives_the_early_release_before_the_presses) {
     InputDriver pad;
     RawLog log;
     InputDriverTest::update(pad, {bit(Button::A), bit(Button::A), 0}, 0, log);
     InputDriverTest::update(pad, {bit(Button::A), bit(Button::A), bit(Button::A)}, 16, log);
     InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 32, log);
     CHECK_EQ_SZ(log.records.size(), 4);
-    CHECK(isRecord(log.records[1], Kind::Up, Button::A, 16));
-    CHECK(isRecord(log.records[2], Kind::Down, Button::A, 16));
-    CHECK(isRecord(log.records[3], Kind::Up, Button::A, 32));
+    CHECK(isRecord(log.records[1], Kind::Released, Button::A, 16));
+    CHECK(isRecord(log.records[2], Kind::Pressed, Button::A, 16));
+    CHECK(isRecord(log.records[3], Kind::Released, Button::A, 32));
 }
 
 // The pressed mask of the state is the set of buttons that the pad holds
@@ -216,8 +220,8 @@ TEST(pad_state_gives_the_held_buttons) {
 }
 
 // A button that was held before the first update gives no
-// down. Its up goes out.
-TEST(pad_gives_only_the_up_of_a_held_button) {
+// pressed event. Its released event goes out.
+TEST(pad_gives_only_the_release_of_a_held_button) {
     InputDriver pad;
     InputDriverTest::setHeld(pad, bit(Button::A));  // held before the first update
     RawLog log;
@@ -225,7 +229,7 @@ TEST(pad_gives_only_the_up_of_a_held_button) {
     CHECK_EQ_SZ(log.records.size(), 0);
     InputDriverTest::update(pad, {0, 0, bit(Button::A)}, 16, log);
     CHECK_EQ_SZ(log.records.size(), 1);
-    CHECK(isRecord(log.records[0], Kind::Up, Button::A, 16));
+    CHECK(isRecord(log.records[0], Kind::Released, Button::A, 16));
 }
 
 // A button that was held before the first update gives no event, but the state shows it
@@ -240,58 +244,58 @@ TEST(pad_state_gives_a_button_held_before_the_first_update) {
     CHECK_EQ_SZ(log.records.size(), 0);
 }
 
-// The dpad releases each direction that it does not hold: LEFT goes down, and UP, DOWN and
-// RIGHT, which were not down, give no up
-TEST(pad_gives_no_up_of_a_button_that_was_not_down) {
+// The dpad releases each direction that it does not hold: LEFT is pressed, and UP, DOWN and
+// RIGHT, which were not pressed, give no released event
+TEST(pad_gives_no_release_of_a_button_that_was_not_pressed) {
     InputDriver pad;
     RawLog log;
     const uint32_t others = bit(Button::DpadUp) | bit(Button::DpadDown) | bit(Button::DpadRight);
     InputDriverTest::update(pad, {bit(Button::DpadLeft), bit(Button::DpadLeft), others}, 0, log);
     InputDriverTest::update(pad, {0, 0, others | bit(Button::DpadLeft)}, 16, log);
     CHECK_EQ_SZ(log.records.size(), 2);
-    CHECK(isRecord(log.records[0], Kind::Down, Button::DpadLeft, 0));
-    CHECK(isRecord(log.records[1], Kind::Up, Button::DpadLeft, 16));
+    CHECK(isRecord(log.records[0], Kind::Pressed, Button::DpadLeft, 0));
+    CHECK(isRecord(log.records[1], Kind::Released, Button::DpadLeft, 16));
 }
 
 // ---------------------------------------------------------------------------
 // ButtonDetector
 
-TEST(immediate_short_press_at_the_down) {
+TEST(immediate_short_press_at_the_press) {
     Fixture f;
-    f.down(Button::B, 10);
+    f.press(Button::B, 10);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::B, 10));
     f.tick(10, 2000);
-    f.up(Button::B, 2000);
+    f.release(Button::B, 2000);
     CHECK_EQ_SZ(f.log.records.size(), 1);
 }
 
-TEST(deferred_short_press_at_the_up) {
+TEST(deferred_short_press_at_the_release) {
     Fixture f;
-    f.down(Button::A, 10);
+    f.press(Button::A, 10);
     f.tick(10, 400);
     CHECK_EQ_SZ(f.log.records.size(), 0);
-    f.up(Button::A, 420);
+    f.release(Button::A, 420);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::A, 420));
 }
 
 TEST(long_press_one_time_and_no_short_press_after_it) {
     Fixture f;
-    f.down(Button::A, 0);
+    f.press(Button::A, 0);
     f.detector.onTick(ButtonDetector::kLongPressMs - 1);
     CHECK_EQ_SZ(f.log.records.size(), 0);
     f.detector.onTick(ButtonDetector::kLongPressMs);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Long, Button::A, ButtonDetector::kLongPressMs));
     f.tick(ButtonDetector::kLongPressMs, 3000);
-    f.up(Button::A, 3000);
+    f.release(Button::A, 3000);
     CHECK_EQ_SZ(f.log.records.size(), 1);
 }
 
 TEST(repeat_after_the_delay_then_at_each_interval) {
     Fixture f;
-    f.down(Button::DpadDown, 0);
+    f.press(Button::DpadDown, 0);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::DpadDown, 0));
     f.detector.onTick(ButtonDetector::kRepeatDelayMs - 1);
@@ -303,7 +307,7 @@ TEST(repeat_after_the_delay_then_at_each_interval) {
     CHECK(isRecord(f.log.records[1], Kind::Repeat, Button::DpadDown, ButtonDetector::kRepeatDelayMs));
     CHECK(isRecord(f.log.records[2], Kind::Repeat, Button::DpadDown,
                    ButtonDetector::kRepeatDelayMs + ButtonDetector::kRepeatIntervalMs));
-    f.up(Button::DpadDown, 450);
+    f.release(Button::DpadDown, 450);
     f.tick(450, 1000);
     CHECK_EQ_SZ(f.log.records.size(), 3);
 }
@@ -311,9 +315,9 @@ TEST(repeat_after_the_delay_then_at_each_interval) {
 // A hold of 450 ms with ticks of 16 ms gives the repeats at 300 and 400 ms
 TEST(repeat_count_of_a_hold) {
     Fixture f;
-    f.down(Button::DpadDown, 0);
+    f.press(Button::DpadDown, 0);
     f.tick(0, 449);
-    f.up(Button::DpadDown, 450);
+    f.release(Button::DpadDown, 450);
     CHECK_EQ_SZ(f.log.records.size(), 3);
 }
 
@@ -321,7 +325,7 @@ TEST(repeat_count_of_a_hold) {
 // is reached again
 TEST(late_tick_catches_up_one_repeat_for_each_tick) {
     Fixture f;
-    f.down(Button::DpadDown, 0);
+    f.press(Button::DpadDown, 0);
     f.detector.onTick(1000);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     for (uint32_t now = 1016; now <= 1160; now += 16) f.detector.onTick(now);
@@ -342,8 +346,8 @@ static bool isSelectACombo(const Record& record, uint32_t time) {
 
 TEST(combo_in_the_order_of_the_request) {
     Fixture f;
-    f.down(Button::Select, 0);
-    f.down(Button::A, 40);
+    f.press(Button::Select, 0);
+    f.press(Button::A, 40);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isSelectACombo(f.log.records[0], 40));
 }
@@ -351,16 +355,16 @@ TEST(combo_in_the_order_of_the_request) {
 // A then SELECT is not the combo: each member gives its own event
 TEST(no_combo_in_the_other_order) {
     Fixture f;
-    f.down(Button::A, 0);
-    f.down(Button::Select, 40);
-    f.up(Button::Select, 100);
-    f.up(Button::A, 200);
+    f.press(Button::A, 0);
+    f.press(Button::Select, 40);
+    f.release(Button::Select, 100);
+    f.release(Button::A, 200);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::Select, 100));
     CHECK(isRecord(f.log.records[1], Kind::Short, Button::A, 200));
 }
 
-// Two downs at one time start the combo in each order
+// Two presses at one time start the combo in each order
 TEST(combo_at_one_time_in_each_order) {
     const Button orders[2][2] = {
         {Button::Select, Button::A},
@@ -368,8 +372,8 @@ TEST(combo_at_one_time_in_each_order) {
     };
     for (const auto& order : orders) {
         Fixture f;
-        f.down(order[0], 40);
-        f.down(order[1], 40);
+        f.press(order[0], 40);
+        f.press(order[1], 40);
         CHECK_EQ_SZ(f.log.records.size(), 1);
         CHECK(isSelectACombo(f.log.records[0], 40));
     }
@@ -384,8 +388,8 @@ TEST(combo_in_one_frame) {
     CHECK(isSelectACombo(f.log.records[0], 0));
 }
 
-// A goes down and up in the frame where SELECT goes down. A has the lower bit.
-TEST(combo_in_one_frame_with_an_up_of_a_member) {
+// A is pressed and released in the frame where SELECT is pressed. A has the lower bit.
+TEST(combo_in_one_frame_with_a_release_of_a_member) {
     InputDriver pad;
     Fixture f;
     const uint32_t both = bit(Button::Select) | bit(Button::A);
@@ -395,30 +399,30 @@ TEST(combo_in_one_frame_with_an_up_of_a_member) {
     CHECK(isSelectACombo(f.log.records[0], 0));
 }
 
-TEST(combo_members_give_no_event_until_both_are_up) {
+TEST(combo_members_give_no_event_until_both_are_released) {
     Fixture f;
-    f.down(Button::Select, 0);
-    f.down(Button::A, 10);
+    f.press(Button::Select, 0);
+    f.press(Button::A, 10);
     f.tick(10, 2000);
-    f.up(Button::A, 2000);
-    f.down(Button::A, 2100);
+    f.release(Button::A, 2000);
+    f.press(Button::A, 2100);
     f.tick(2100, 3000);
-    f.up(Button::A, 3000);
-    f.up(Button::Select, 3100);
+    f.release(Button::A, 3000);
+    f.release(Button::Select, 3100);
     CHECK_EQ_SZ(f.log.records.size(), 1);
 
-    f.down(Button::A, 4000);
-    f.up(Button::A, 4100);
+    f.press(Button::A, 4000);
+    f.release(Button::A, 4100);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     CHECK(isRecord(f.log.records[1], Kind::Short, Button::A, 4100));
 }
 
-// A combo member that is held alone gives its own short press at the up
-TEST(combo_member_alone_gives_a_short_press_at_the_up) {
+// A combo member that is held alone gives its own short press at the release
+TEST(combo_member_alone_gives_a_short_press_at_the_release) {
     Fixture f;
-    f.down(Button::Select, 0);
+    f.press(Button::Select, 0);
     CHECK_EQ_SZ(f.log.records.size(), 0);
-    f.up(Button::Select, 100);
+    f.release(Button::Select, 100);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::Select, 100));
 }
@@ -427,17 +431,17 @@ TEST(combo_member_alone_gives_a_short_press_at_the_up) {
 // goes out, and no short press follows
 TEST(release_after_the_long_press_deadline_gives_the_long_press) {
     Fixture f;
-    f.down(Button::A, 0);
+    f.press(Button::A, 0);
     f.tick(0, 496);  // the last tick is before the deadline
-    f.up(Button::A, 512);
+    f.release(Button::A, 512);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Long, Button::A, 512));
 }
 
 TEST(release_before_the_long_press_deadline_gives_a_short_press) {
     Fixture f;
-    f.down(Button::A, 0);
-    f.up(Button::A, ButtonDetector::kLongPressMs - 1);
+    f.press(Button::A, 0);
+    f.release(Button::A, ButtonDetector::kLongPressMs - 1);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::A, ButtonDetector::kLongPressMs - 1));
 }
@@ -445,9 +449,9 @@ TEST(release_before_the_long_press_deadline_gives_a_short_press) {
 // A repeat that is due at the release goes out before the release, as the pad gives it
 TEST(release_at_the_repeat_deadline_gives_the_repeat) {
     Fixture f;
-    f.down(Button::DpadDown, 0);
+    f.press(Button::DpadDown, 0);
     f.tick(0, 288);
-    f.up(Button::DpadDown, ButtonDetector::kRepeatDelayMs);
+    f.release(Button::DpadDown, ButtonDetector::kRepeatDelayMs);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     CHECK(isRecord(f.log.records[1], Kind::Repeat, Button::DpadDown, ButtonDetector::kRepeatDelayMs));
 }
@@ -460,9 +464,9 @@ TEST(first_matching_combo_wins) {
     };
     ButtonLog log;
     ButtonDetector detector(log, requests);
-    detector.onRawEvent({0, event::ButtonDown{Button::Select}});
-    detector.onRawEvent({10, event::ButtonDown{Button::L1}});
-    detector.onRawEvent({20, event::ButtonDown{Button::A}});
+    detector.onRawEvent({0, event::ButtonPressed{Button::Select}});
+    detector.onRawEvent({10, event::ButtonPressed{Button::L1}});
+    detector.onRawEvent({20, event::ButtonPressed{Button::A}});
     CHECK_EQ_SZ(log.records.size(), 1);
     CHECK(isSelectACombo(log.records[0], 20));
 }
@@ -470,11 +474,11 @@ TEST(first_matching_combo_wins) {
 // After a long press of A, SELECT does not start the combo
 TEST(no_combo_after_a_long_press) {
     Fixture f;
-    f.down(Button::A, 0);
+    f.press(Button::A, 0);
     f.detector.onTick(ButtonDetector::kLongPressMs);
-    f.down(Button::Select, 600);
-    f.up(Button::Select, 700);
-    f.up(Button::A, 800);
+    f.press(Button::Select, 600);
+    f.release(Button::Select, 700);
+    f.release(Button::A, 800);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     CHECK(isRecord(f.log.records[0], Kind::Long, Button::A, ButtonDetector::kLongPressMs));
     CHECK(isRecord(f.log.records[1], Kind::Short, Button::Select, 700));
@@ -488,34 +492,34 @@ TEST(each_combo_blocks_only_its_members) {
     };
     ButtonLog log;
     ButtonDetector detector(log, requests);
-    detector.onRawEvent({0, event::ButtonDown{Button::Select}});
-    detector.onRawEvent({10, event::ButtonDown{Button::A}});      // combo, SELECT stays held
-    detector.onRawEvent({20, event::ButtonDown{Button::L1}});
-    detector.onRawEvent({30, event::ButtonDown{Button::R1}});     // combo
-    detector.onRawEvent({40, event::ButtonUp{Button::L1}});
-    detector.onRawEvent({50, event::ButtonUp{Button::R1}});
-    detector.onRawEvent({60, event::ButtonDown{Button::L1}});
-    detector.onRawEvent({70, event::ButtonUp{Button::L1}});
+    detector.onRawEvent({0, event::ButtonPressed{Button::Select}});
+    detector.onRawEvent({10, event::ButtonPressed{Button::A}});      // combo, SELECT stays held
+    detector.onRawEvent({20, event::ButtonPressed{Button::L1}});
+    detector.onRawEvent({30, event::ButtonPressed{Button::R1}});     // combo
+    detector.onRawEvent({40, event::ButtonReleased{Button::L1}});
+    detector.onRawEvent({50, event::ButtonReleased{Button::R1}});
+    detector.onRawEvent({60, event::ButtonPressed{Button::L1}});
+    detector.onRawEvent({70, event::ButtonReleased{Button::L1}});
     CHECK_EQ_SZ(log.records.size(), 3);
     CHECK(log.records[2].kind == Kind::Short && log.records[2].button == Button::L1);
 }
 
-TEST(up_with_no_down_gives_nothing) {
+TEST(release_with_no_press_gives_nothing) {
     Fixture f;
-    f.up(Button::A, 10);
-    f.up(Button::B, 20);
+    f.release(Button::A, 10);
+    f.release(Button::B, 20);
     CHECK_EQ_SZ(f.log.records.size(), 0);
 }
 
 // A reset ends each held button with no event: no short press, long press or repeat
 TEST(reset_ends_each_held_button_with_no_event) {
     Fixture f;
-    f.down(Button::A, 0);
-    f.down(Button::DpadDown, 0);
+    f.press(Button::A, 0);
+    f.press(Button::DpadDown, 0);
     f.reset(100);
     f.tick(100, 2000);
-    f.up(Button::A, 2000);
-    f.up(Button::DpadDown, 2000);
+    f.release(Button::A, 2000);
+    f.release(Button::DpadDown, 2000);
     CHECK_EQ_SZ(f.log.records.size(), 1);
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::DpadDown, 0));
 }
@@ -523,11 +527,11 @@ TEST(reset_ends_each_held_button_with_no_event) {
 // A reset clears the latch of a combo, thus its members give events again
 TEST(reset_clears_a_combo) {
     Fixture f;
-    f.down(Button::Select, 0);
-    f.down(Button::A, 10);
+    f.press(Button::Select, 0);
+    f.press(Button::A, 10);
     f.reset(100);
-    f.down(Button::A, 200);
-    f.up(Button::A, 300);
+    f.press(Button::A, 200);
+    f.release(Button::A, 300);
     CHECK_EQ_SZ(f.log.records.size(), 2);
     CHECK(isRecord(f.log.records[1], Kind::Short, Button::A, 300));
 }
@@ -609,15 +613,15 @@ TEST(start_with_no_callback_does_nothing) {
     CHECK(handler.onButtonEvent(longPress(Button::Start)));
 }
 
-// The handler consumes the down of START and each Media event, and no other down
+// The handler consumes the pressed event of START and each Media event, and no other pressed event
 TEST(handler_consumes_start_and_media) {
     FakePlaybackControl playback;
     CommonButtonHandler handler(playback);
-    CHECK(handler.onRawEvent({0, event::ButtonDown{Button::Start}}));
-    CHECK(!handler.onRawEvent({0, event::ButtonDown{Button::A}}));
+    CHECK(handler.onRawEvent({0, event::ButtonPressed{Button::Start}}));
+    CHECK(!handler.onRawEvent({0, event::ButtonPressed{Button::A}}));
     CHECK(handler.onRawEvent({0, event::Media{MediaKey::Next}}));
     const KeyLock lock;
-    CHECK(!handler.onRawEvent({0, event::ButtonDown{Button::Start}}));
+    CHECK(!handler.onRawEvent({0, event::ButtonPressed{Button::Start}}));
     CHECK(handler.onRawEvent({0, event::Media{MediaKey::Next}}));
 }
 
@@ -627,10 +631,10 @@ TEST(start_long_press_asks_for_the_quit_dialog) {
     CommonButtonHandler handler(playback);
     Requests requests(handler);
     ButtonDetector detector(handler, CommonButtonHandler::getButtonRequests());
-    detector.onRawEvent({0, event::ButtonDown{Button::Start}});
+    detector.onRawEvent({0, event::ButtonPressed{Button::Start}});
     for (uint32_t now = 0; now <= 600; now += 16) detector.onTick(now);
     CHECK_EQ_INT(requests.quit, 1);
-    detector.onRawEvent({700, event::ButtonUp{Button::Start}});
+    detector.onRawEvent({700, event::ButtonReleased{Button::Start}});
     CHECK_EQ_INT(requests.quit, 1);
     CHECK_EQ_INT(requests.help, 0);
 }
@@ -646,12 +650,12 @@ TEST(start_with_a_volume_button_asks_for_no_dialog) {
             ButtonDetector detector(handler, CommonButtonHandler::getButtonRequests());
             const Button first  = startFirst ? Button::Start : volume;
             const Button second = startFirst ? volume : Button::Start;
-            detector.onRawEvent({0, event::ButtonDown{first}});
-            detector.onRawEvent({100, event::ButtonDown{second}});
+            detector.onRawEvent({0, event::ButtonPressed{first}});
+            detector.onRawEvent({100, event::ButtonPressed{second}});
             for (uint32_t now = 100; now <= 800; now += 16) detector.onTick(now);
-            detector.onRawEvent({800, event::ButtonUp{volume}});
+            detector.onRawEvent({800, event::ButtonReleased{volume}});
             for (uint32_t now = 800; now <= 1500; now += 16) detector.onTick(now);
-            detector.onRawEvent({1500, event::ButtonUp{Button::Start}});
+            detector.onRawEvent({1500, event::ButtonReleased{Button::Start}});
             CHECK_EQ_INT(requests.help + requests.quit, 0);
         }
     }
@@ -692,7 +696,7 @@ TEST(media_key_acts_also_while_locked) {
         const KeyLock lock;
         handler.onRawEvent({16, event::Media{MediaKey::VolumeUp}});
     }
-    handler.onRawEvent({32, event::ButtonDown{Button::A}});
+    handler.onRawEvent({32, event::ButtonPressed{Button::A}});
     CHECK_EQ_SZ(playback.commands.size(), 2);
     CHECK(playback.commands[0] == "toggle");
     CHECK(playback.commands[1] == "volume+");
@@ -718,19 +722,19 @@ class ChainListener : public InputListener {
 public:
     ChainListener(const char* name, std::vector<std::string>& log) : name(name), log(log) {}
 
-    uint32_t consumeDownMask   = 0;
-    uint32_t consumeUpMask     = 0;
-    uint32_t consumeButtonMask = 0;
-    bool consumeMedia          = false;
+    uint32_t consumePressedMask  = 0;
+    uint32_t consumeReleasedMask = 0;
+    uint32_t consumeButtonMask   = 0;
+    bool consumeMedia            = false;
 
     bool onRawEvent(const RawEvent& event) override {
-        if (const auto* typedEvent = std::get_if<event::ButtonDown>(&event.kind)) {
-            add("down", typedEvent->button);
-            return (consumeDownMask & bit(typedEvent->button)) != 0;
+        if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
+            add("pressed", typedEvent->button);
+            return (consumePressedMask & bit(typedEvent->button)) != 0;
         }
-        if (const auto* typedEvent = std::get_if<event::ButtonUp>(&event.kind)) {
-            add("up", typedEvent->button);
-            return (consumeUpMask & bit(typedEvent->button)) != 0;
+        if (const auto* typedEvent = std::get_if<event::ButtonReleased>(&event.kind)) {
+            add("released", typedEvent->button);
+            return (consumeReleasedMask & bit(typedEvent->button)) != 0;
         }
         if (const auto* typedEvent = std::get_if<event::ButtonCancel>(&event.kind)) {
             add("cancel", typedEvent->button);
@@ -773,9 +777,9 @@ struct ManagerFixture {
     ChainListener handler{"handler", log};
     InputManager manager{{&page, &handler}};
 
-    void down(Button button) { manager.onRawEvent({0, event::ButtonDown{button}}); }
-    void up(Button button) { manager.onRawEvent({0, event::ButtonUp{button}}); }
-    void press(Button button) { manager.onButtonEvent({0, event::ShortPress{button}}); }
+    void press(Button button) { manager.onRawEvent({0, event::ButtonPressed{button}}); }
+    void release(Button button) { manager.onRawEvent({0, event::ButtonReleased{button}}); }
+    void shortPress(Button button) { manager.onButtonEvent({0, event::ShortPress{button}}); }
 };
 
 bool isLog(const std::vector<std::string>& log, const std::vector<std::string>& want) {
@@ -788,107 +792,109 @@ bool isLog(const std::vector<std::string>& log, const std::vector<std::string>& 
 
 TEST(manager_gives_an_unconsumed_press_to_each_listener) {
     ManagerFixture f;
-    f.down(Button::A);
     f.press(Button::A);
-    f.up(Button::A);
-    CHECK(isLog(f.log, {"page down A", "handler down A", "page short A", "handler short A",
-                        "page up A", "handler up A"}));
+    f.shortPress(Button::A);
+    f.release(Button::A);
+    CHECK(isLog(f.log, {"page pressed A", "handler pressed A", "page short A", "handler short A",
+                        "page released A", "handler released A"}));
 }
 
-// The page consumes a button event: the handler that saw the down gets a cancel, and the page gets
-// each later event of the gesture
+// The page consumes a button event: the handler that saw the pressed event gets a cancel, and the
+// page gets each later event of the gesture
 TEST(manager_button_event_sets_the_owner) {
     ManagerFixture f;
-    f.page.consumeButtonMask = bit(Button::A);
-    f.handler.consumeDownMask    = bit(Button::Start);
-    f.down(Button::A);
+    f.page.consumeButtonMask     = bit(Button::A);
+    f.handler.consumePressedMask = bit(Button::Start);
     f.press(Button::A);
-    f.down(Button::Start);
-    f.up(Button::Start);
-    f.up(Button::A);
-    CHECK(isLog(f.log, {"page down A", "handler down A", "page short A", "handler cancel A",
-                        "page down START", "page up START", "page up A"}));
+    f.shortPress(Button::A);
+    f.press(Button::Start);
+    f.release(Button::Start);
+    f.release(Button::A);
+    CHECK(isLog(f.log, {"page pressed A", "handler pressed A", "page short A", "handler cancel A",
+                        "page pressed START", "page released START", "page released A"}));
 }
 
-// The page intercepts an up: the handler gets a cancel of the button in place of its up
-TEST(manager_intercepted_up_cancels_the_later_listener) {
+// The page intercepts a released event: the handler gets a cancel of the button in place of it
+TEST(manager_intercepted_release_cancels_the_later_listener) {
     ManagerFixture f;
-    f.page.consumeUpMask = bit(Button::A);
-    f.down(Button::A);
-    f.up(Button::A);
-    CHECK(isLog(f.log, {"page down A", "handler down A", "page up A", "handler cancel A"}));
+    f.page.consumeReleasedMask = bit(Button::A);
+    f.press(Button::A);
+    f.release(Button::A);
+    CHECK(isLog(f.log, {"page pressed A", "handler pressed A", "page released A",
+                        "handler cancel A"}));
 }
 
-// The handler consumes START: the page that saw the down gets a cancel, and the handler gets each
-// event of each button until no button is held
+// The handler consumes START: the page that saw the pressed event gets a cancel, and the handler
+// gets each event of each button until no button is held
 TEST(manager_owner_cancels_the_earlier_listener) {
     ManagerFixture f;
-    f.handler.consumeDownMask    = bit(Button::Start);
-    f.page.consumeButtonMask = bit(Button::A);
-    f.down(Button::Start);
-    f.down(Button::A);
-    f.press(Button::A);
-    f.up(Button::A);
-    f.up(Button::Start);
-    CHECK(isLog(f.log, {"page down START", "handler down START", "page cancel START",
-                        "handler down A", "handler short A", "handler up A",
-                        "handler up START"}));
-}
-
-// The button events of the last up go to the owner. The next gesture has no owner.
-TEST(manager_gesture_ends_after_the_last_up) {
-    ManagerFixture f;
-    f.handler.consumeDownMask = bit(Button::Start);
-    f.down(Button::Start);
-    f.up(Button::Start);
+    f.handler.consumePressedMask = bit(Button::Start);
+    f.page.consumeButtonMask     = bit(Button::A);
     f.press(Button::Start);
-    f.log.clear();
-    f.down(Button::B);
-    CHECK(isLog(f.log, {"page down B", "handler down B"}));
+    f.press(Button::A);
+    f.shortPress(Button::A);
+    f.release(Button::A);
+    f.release(Button::Start);
+    CHECK(isLog(f.log, {"page pressed START", "handler pressed START", "page cancel START",
+                        "handler pressed A", "handler short A", "handler released A",
+                        "handler released START"}));
 }
 
-// An owner cancels each held button that another listener saw, and that listener gets no up
+// The button events of the last release go to the owner. The next gesture has no owner.
+TEST(manager_gesture_ends_after_the_last_release) {
+    ManagerFixture f;
+    f.handler.consumePressedMask = bit(Button::Start);
+    f.press(Button::Start);
+    f.release(Button::Start);
+    f.shortPress(Button::Start);
+    f.log.clear();
+    f.press(Button::B);
+    CHECK(isLog(f.log, {"page pressed B", "handler pressed B"}));
+}
+
+// An owner cancels each held button that another listener saw, and that listener gets no released
+// event
 TEST(manager_owner_cancels_each_held_button) {
     ManagerFixture f;
-    f.page.consumeDownMask = bit(Button::B);
-    f.down(Button::A);
-    f.down(Button::B);
-    f.up(Button::A);
-    f.up(Button::B);
-    CHECK(isLog(f.log, {"page down A", "handler down A", "page down B", "handler cancel A",
-                        "page up A", "page up B"}));
+    f.page.consumePressedMask = bit(Button::B);
+    f.press(Button::A);
+    f.press(Button::B);
+    f.release(Button::A);
+    f.release(Button::B);
+    CHECK(isLog(f.log, {"page pressed A", "handler pressed A", "page pressed B", "handler cancel A",
+                        "page released A", "page released B"}));
 }
 
 TEST(manager_reset_ends_the_gesture_and_reaches_each_listener) {
     ManagerFixture f;
-    f.handler.consumeDownMask = bit(Button::Start);
-    f.down(Button::Start);
+    f.handler.consumePressedMask = bit(Button::Start);
+    f.press(Button::Start);
     f.manager.onRawEvent({0, event::ButtonReset{}});
     f.log.clear();
-    f.down(Button::A);
-    CHECK(isLog(f.log, {"page down A", "handler down A"}));
+    f.press(Button::A);
+    CHECK(isLog(f.log, {"page pressed A", "handler pressed A"}));
 }
 
 TEST(manager_media_goes_to_the_first_consumer_or_to_the_owner) {
     ManagerFixture f;
     f.handler.consumeMedia = true;
     f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
-    f.page.consumeDownMask = bit(Button::A);
-    f.down(Button::A);
+    f.page.consumePressedMask = bit(Button::A);
+    f.press(Button::A);
     f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
-    CHECK(isLog(f.log, {"page media", "handler media", "page down A", "page media"}));
+    CHECK(isLog(f.log, {"page media", "handler media", "page pressed A", "page media"}));
 }
 
 // The handler consumes Media while a button is held: the page gets a cancel of that button
 TEST(manager_media_sets_the_owner_of_a_held_button) {
     ManagerFixture f;
     f.handler.consumeMedia = true;
-    f.down(Button::DpadDown);
-    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
     f.press(Button::DpadDown);
-    f.up(Button::DpadDown);
-    CHECK(isLog(f.log, {"page down DOWN", "handler down DOWN", "page media", "handler media",
-                        "page cancel DOWN", "handler short DOWN", "handler up DOWN"}));
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.shortPress(Button::DpadDown);
+    f.release(Button::DpadDown);
+    CHECK(isLog(f.log, {"page pressed DOWN", "handler pressed DOWN", "page media", "handler media",
+                        "page cancel DOWN", "handler short DOWN", "handler released DOWN"}));
 }
 
 // The detector gets each raw event after the input manager, as in the page loop
@@ -897,28 +903,28 @@ TEST(manager_gives_the_repeats_to_the_owner_of_the_short_press) {
     f.page.consumeButtonMask                 = bit(Button::DpadDown);
     static constexpr ButtonRequest kRepeat[] = {request::Repeat{Button::DpadDown}};
     ButtonDetector detector{f.manager, kRepeat};
-    const RawEvent down{0, event::ButtonDown{Button::DpadDown}};
-    f.manager.onRawEvent(down);
-    detector.onRawEvent(down);
+    const RawEvent pressed{0, event::ButtonPressed{Button::DpadDown}};
+    f.manager.onRawEvent(pressed);
+    detector.onRawEvent(pressed);
     detector.onTick(ButtonDetector::kRepeatDelayMs);
     detector.onTick(ButtonDetector::kRepeatDelayMs + ButtonDetector::kRepeatIntervalMs);
-    CHECK(isLog(f.log, {"page down DOWN", "handler down DOWN", "page short DOWN",
+    CHECK(isLog(f.log, {"page pressed DOWN", "handler pressed DOWN", "page short DOWN",
                         "handler cancel DOWN", "page repeat DOWN", "page repeat DOWN"}));
 }
 
 int main(void) {
     printf("input events\n");
-    RUN(pad_gives_buttons_in_bit_order_and_down_before_up);
+    RUN(pad_gives_buttons_in_bit_order_and_presses_before_releases);
     RUN(pad_gives_nothing_while_a_button_is_held);
     RUN(pad_resets_when_the_app_counts_a_reset);
-    RUN(pad_gives_the_late_up_after_the_downs);
-    RUN(pad_gives_the_early_up_before_the_downs);
+    RUN(pad_gives_the_late_release_after_the_presses);
+    RUN(pad_gives_the_early_release_before_the_presses);
     RUN(pad_state_gives_the_held_buttons);
-    RUN(pad_gives_only_the_up_of_a_held_button);
+    RUN(pad_gives_only_the_release_of_a_held_button);
     RUN(pad_state_gives_a_button_held_before_the_first_update);
-    RUN(pad_gives_no_up_of_a_button_that_was_not_down);
-    RUN(immediate_short_press_at_the_down);
-    RUN(deferred_short_press_at_the_up);
+    RUN(pad_gives_no_release_of_a_button_that_was_not_pressed);
+    RUN(immediate_short_press_at_the_press);
+    RUN(deferred_short_press_at_the_release);
     RUN(long_press_one_time_and_no_short_press_after_it);
     RUN(repeat_after_the_delay_then_at_each_interval);
     RUN(repeat_count_of_a_hold);
@@ -927,16 +933,16 @@ int main(void) {
     RUN(no_combo_in_the_other_order);
     RUN(combo_at_one_time_in_each_order);
     RUN(combo_in_one_frame);
-    RUN(combo_in_one_frame_with_an_up_of_a_member);
-    RUN(combo_members_give_no_event_until_both_are_up);
-    RUN(combo_member_alone_gives_a_short_press_at_the_up);
+    RUN(combo_in_one_frame_with_a_release_of_a_member);
+    RUN(combo_members_give_no_event_until_both_are_released);
+    RUN(combo_member_alone_gives_a_short_press_at_the_release);
     RUN(release_after_the_long_press_deadline_gives_the_long_press);
     RUN(release_before_the_long_press_deadline_gives_a_short_press);
     RUN(release_at_the_repeat_deadline_gives_the_repeat);
     RUN(first_matching_combo_wins);
     RUN(no_combo_after_a_long_press);
     RUN(each_combo_blocks_only_its_members);
-    RUN(up_with_no_down_gives_nothing);
+    RUN(release_with_no_press_gives_nothing);
     RUN(reset_ends_each_held_button_with_no_event);
     RUN(reset_clears_a_combo);
     RUN(media_gives_nothing);
@@ -953,9 +959,9 @@ int main(void) {
     RUN(media_keys_give_their_playback_commands);
     RUN(manager_gives_an_unconsumed_press_to_each_listener);
     RUN(manager_button_event_sets_the_owner);
-    RUN(manager_intercepted_up_cancels_the_later_listener);
+    RUN(manager_intercepted_release_cancels_the_later_listener);
     RUN(manager_owner_cancels_the_earlier_listener);
-    RUN(manager_gesture_ends_after_the_last_up);
+    RUN(manager_gesture_ends_after_the_last_release);
     RUN(manager_owner_cancels_each_held_button);
     RUN(manager_reset_ends_the_gesture_and_reaches_each_listener);
     RUN(manager_media_goes_to_the_first_consumer_or_to_the_owner);
