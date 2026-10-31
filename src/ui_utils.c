@@ -68,7 +68,6 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
     state->role = role;
     state->selected = selected;
     state->start_time = SDL_GetTicks();
-    state->scroll_offset = 0;
     state->use_gpu_scroll = use_gpu;
 
     // Don't enable scrolling yet - delay it so text appears static first
@@ -141,6 +140,16 @@ void ScrollText_activateAfterDelay(ScrollTextState* state) {
     if (!state->needs_scroll && state->text_width > state->max_width &&
         SDL_GetTicks() - state->start_time >= SCROLL_START_DELAY) {
         state->needs_scroll = true;
+        Stopwatch_reset(&state->scroll_time);
+        Stopwatch_start(&state->scroll_time, SDL_GetTicks());
+    }
+}
+
+void ScrollText_setPaused(ScrollTextState* state, bool paused) {
+    if (paused) {
+        Stopwatch_stop(&state->scroll_time, SDL_GetTicks());
+    } else {
+        Stopwatch_start(&state->scroll_time, SDL_GetTicks());
     }
 }
 
@@ -158,9 +167,9 @@ static bool        title_on_surface = false;  // the last render drew the title 
 
 static void paint_title_on_layer(uint32_t now);
 
-// Draws the marquee of `state` at its offset on the animation layer, and moves
-// it `step` pixels for the next frame. Draws nothing where the text fits.
-static void paint_cached_marquee(ScrollTextState* state, int x, int y, int step) {
+// Draws the marquee of `state` on the animation layer, at the place that the
+// time where it moved gives. Draws nothing where the text fits.
+static void paint_cached_marquee(ScrollTextState* state, int x, int y) {
     if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) return;
 
     int padding = SCALE1(SCROLL_GAP);
@@ -173,20 +182,15 @@ static void paint_cached_marquee(ScrollTextState* state, int x, int y, int step)
 
     SDL_SetSurfaceBlendMode(state->cached_scroll_surface, SDL_BLENDMODE_NONE);
     SDL_FillRect(clipped, NULL, 0);
-    SDL_Rect src = {state->scroll_offset, 0, state->max_width, height};
+    uint64_t distance = Stopwatch_accumulated(&state->scroll_time, SDL_GetTicks()) *
+                        SCALE1(MARQUEE_SPEED) / 1000;
+    int offset = (int)(distance % (uint64_t)(state->text_width + padding));
+    SDL_Rect src = {offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
 
     UiLayer_blit(clipped, x, y, UI_LAYER_ANIMATION);
     SDL_FreeSurface(clipped);
-
-    state->scroll_offset += step;
-    if (state->scroll_offset >= state->text_width + padding) {
-        state->scroll_offset = 0;
-    }
 }
-
-// The marquee of a row moves two pixels a frame, as the rows of the platform do.
-#define ROW_MARQUEE_STEP 2
 
 // Paints the animation layer of a list screen: the title of the header where it
 // is not on the surface, then the marquee of the row. One clear serves both.
@@ -195,7 +199,7 @@ static void paint_row_layer(ScrollTextState* state, int x, int y) {
     layer_holds_title = false;
     paint_title_on_layer(SDL_GetTicks());
     layer_painted_this_frame = true;
-    paint_cached_marquee(state, x, y, ROW_MARQUEE_STEP);
+    paint_cached_marquee(state, x, y);
 }
 
 // Update scroll animation only (for GPU mode, doesn't redraw screen)
@@ -257,8 +261,7 @@ void ScrollText_update(ScrollTextState* state, const char* text, TTF_Font* font,
     ScrollText_render(state, font, Theme_getColor(role, selected), screen, x, y);
 }
 
-// The marquee of a playing title, on the layer of the playing screen. It moves
-// one pixel a frame, thus a long title reads at rest.
+// The marquee of a playing title, on the layer of the playing screen.
 void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
                          SDL_Color color, int x, int y) {
     // Save render info
@@ -267,7 +270,7 @@ void ScrollText_paintGPU(ScrollTextState* state, TTF_Font* font,
     state->last_font = font;
     state->last_color = color;
 
-    paint_cached_marquee(state, x, y, 1);
+    paint_cached_marquee(state, x, y);
 }
 
 // The platform draws the status group only where the screen has the room for it.
@@ -451,7 +454,7 @@ static void paint_title_on_layer(uint32_t now) {
 
 bool ScreenTitle_start(bool defer) {
     bool before = title_state.defer;
-    ScreenTitle_reset(&title_state, defer);
+    ScreenTitle_reset(&title_state, defer, SCALE1(MARQUEE_SPEED));
     header_drawn     = false;
     title_on_surface = false;
     return before;

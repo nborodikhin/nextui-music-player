@@ -293,15 +293,12 @@ static bool title_marquee_showing(void) {
     return title_scroll.text[0] && title_scroll.needs_scroll && title_scroll.last_font != NULL;
 }
 
-// Paints the marquee of the title and moves it. The title of a sound that does
-// not play stands still, thus the paint keeps its place on that frame.
+// Paints the marquee of the title. A screen that paints with no frame, as a
+// seek does, stops the title of a sound that does not play here.
 static void paint_title_marquee(void) {
-    int offset = title_scroll.scroll_offset;
+    ScrollText_setPaused(&title_scroll, Player_getState() != PLAYER_STATE_PLAYING);
     ScrollText_paintGPU(&title_scroll, title_scroll.last_font, title_scroll.last_color,
                         title_scroll.last_x, title_scroll.last_y);
-    if (Player_getState() != PLAYER_STATE_PLAYING) {
-        title_scroll.scroll_offset = offset;
-    }
 }
 
 // The animation layer: the spectrum, and the marquee of the title over it.
@@ -385,6 +382,10 @@ bool MusicPlaying_frame(bool surface_renders) {
         if (title_scroll.needs_scroll) needs_surface = true;
     }
 
+    // The title of a sound that does not play stands still, also on a frame that
+    // paints nothing
+    ScrollText_setPaused(&title_scroll, !playing);
+
     // The window follows the current lyric, and it fills when the lyrics arrive
     if (Settings_getBool(&SETTING_LYRICS_ENABLED)) {
         if (Lyrics_currentIndex(shown_position()) != lyrics_shown_current ||
@@ -428,6 +429,8 @@ void MusicPlaying_invalidate(void) {
 }
 
 void MusicPlaying_leave(void) {
+    // The title keeps its place while the screen is away
+    ScrollText_setPaused(&title_scroll, true);
     UiLayer_clear(UI_LAYER_STATUS);
     UiLayer_clear(UI_LAYER_ANIMATION);
     time_position_set = false;
