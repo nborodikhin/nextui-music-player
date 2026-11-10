@@ -208,7 +208,7 @@ ModuleExitReason RadioModule_run(DisplayContext* display) {
     if (state == RADIO_INTERNAL_PLAYING) Spectrum_init();
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         if (state != spectrum_state) {

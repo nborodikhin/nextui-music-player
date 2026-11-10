@@ -210,7 +210,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
     if (state == PODCAST_INTERNAL_PLAYING) Spectrum_init();
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
 
         if (state != spectrum_state) {
             if (state == PODCAST_INTERNAL_PLAYING)          Spectrum_init();

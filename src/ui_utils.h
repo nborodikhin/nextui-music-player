@@ -17,6 +17,12 @@ extern "C" {
 // The speed of each marquee, in scaled pixels a second. Apply SCALE1().
 #define MARQUEE_SPEED 40
 
+// The gap between the end of a scrolling text and its next copy, in scaled pixels. Apply SCALE1().
+#define SCROLL_GAP 30
+
+// The time that a text that does not fit stays at rest before it scrolls, in milliseconds.
+#define SCROLL_START_DELAY 1000
+
 // Format a time as MM:SS, or as H:MM:SS from one hour
 void format_time(char* buf, int ms);
 
@@ -40,7 +46,7 @@ typedef struct {
     int max_width;          // Maximum display width
     uint32_t start_time;    // Animation start time
     bool needs_scroll;      // True if text is wider than max_width
-    Stopwatch scroll_time;  // The time where the marquee moved
+    StopwatchData scroll_time;  // The time where the marquee moved
     bool use_gpu_scroll;    // True where the marquee goes on the animation layer
     int last_x, last_y;     // Last render position (for animate-only mode)
     TTF_Font* last_font;    // Last font used (for animate-only mode)

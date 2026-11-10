@@ -7,7 +7,6 @@
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "ui_icons.h"
-#include "ui_layers.h"
 #include "ui_theme.h"
 #include "selfupdate.h"
 #include "module_common.h"
@@ -26,14 +25,6 @@ static const char* menu_label(MenuSelection selection) {
     }
 }
 
-// Row map for the frame being rendered. render_simple_menu's label and text
-// callbacks take an index and nothing else, so the map has to reach them from
-// file scope.
-static MenuRows current_rows;
-
-// Scroll state for Resume track name
-static ScrollTextState resume_scroll = {0};
-
 // Get label for Now Playing based on background player type
 static const char* get_now_playing_label(void) {
     switch (Background_getActive()) {
@@ -44,82 +35,29 @@ static const char* get_now_playing_label(void) {
     }
 }
 
-// Label callback for first item label and Settings update badge
-static const char* main_menu_get_label(int index, const char* default_label,
-                                        char* buffer, int buffer_size) {
-    switch (MenuRows_selectionAt(&current_rows, index)) {
+void main_menu_get_row_label(MenuSelection selection, char* buffer, int buffer_size) {
+    switch (selection) {
         case MENU_NOW_PLAYING:
             snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
-            return buffer;
+            return;
         case MENU_RESUME: {
             const char* label = Resume_getLabel();
             if (label) {
                 snprintf(buffer, buffer_size, "%s", label);
-                return buffer;
+                return;
             }
             break;
         }
-        case MENU_SETTINGS: {
-            const SelfUpdateStatus status = SelfUpdate_getStatus();
-            if (status.update_available) {
+        case MENU_SETTINGS:
+            if (SelfUpdate_getStatus().update_available) {
                 snprintf(buffer, buffer_size, "Settings (Update available)");
-                return buffer;
+                return;
             }
             break;
-        }
         default:
             break;
     }
-    return NULL;  // Use default label
-}
-
-// Move the whole line of the Resume row and of the Now Playing row, the
-// prefix with the title. The row that the cursor is not on draws by default.
-static bool main_menu_render_text(SDL_Surface* screen, int index, bool selected,
-                                   int text_x, int text_y, int max_text_width) {
-    MenuSelection sel = MenuRows_selectionAt(&current_rows, index);
-    if (sel != MENU_RESUME && sel != MENU_NOW_PLAYING) return false;
-    if (!selected) return false;
-
-    char buffer[MAX_PATH];
-    const char* line = main_menu_get_label(index, NULL, buffer, sizeof(buffer));
-    if (!line) return false;
-
-    render_list_item_text(screen, &resume_scroll, line, Fonts_getLarge(),
-                          text_x, text_y, max_text_width, true);
-    return true;
-}
-
-// Render the main menu
-void render_menu(SDL_Surface* screen, int status_w, int menu_selected, int menu_scroll,
-                 const MenuRows* rows) {
-    current_rows = *rows;
-
-    // Only the playback row has a marquee. A plain row draws no layer, thus the marquee
-    // of the playback row leaves the layer here.
-    if (!MenuRows_isPlayItem(MenuRows_selectionAt(rows, menu_selected)) && resume_scroll.text[0]) {
-        UiLayer_clear(UI_LAYER_ANIMATION);
-        ScrollText_forget(&resume_scroll);
-    }
-
-    const char* items[MENU_ROWS_MAX];
-    for (int i = 0; i < rows->count; i++) {
-        items[i] = menu_label(MenuRows_selectionAt(rows, i));
-    }
-
-    SimpleMenuConfig config = {
-        .title        = "Music Player",
-        .items        = items,
-        .item_count   = rows->count,
-        .btn_b_label  = "EXIT",
-        .get_label    = main_menu_get_label,
-        .render_badge = NULL,
-        .get_icon     = NULL,
-        .render_text  = main_menu_render_text,
-        .title_only   = true,
-        .status_w     = status_w,
-    };
-    render_simple_menu(screen, 0, menu_selected, menu_scroll, &config);
+    snprintf(buffer, buffer_size, "%s", menu_label(selection));
 }
 
 // Controls help text for each page/state
@@ -623,12 +561,6 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
         SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
-}
-
-// Check if Resume scroll needs continuous redraw (software scroll mode)
-bool menu_needs_scroll_redraw(void) {
-    // Needs redraw if scrolling is active OR about to start (delay -> active transition)
-    return ScrollText_isScrolling(&resume_scroll) || ScrollText_needsRender(&resume_scroll);
 }
 
 // Render screen off hint message (shown before screen turns off)

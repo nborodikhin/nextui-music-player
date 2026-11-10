@@ -42,12 +42,6 @@ const char* get_format_name(AudioFormat format) {
     }
 }
 
-// Scroll gap for software scrolling
-#define SCROLL_GAP 30
-
-// Delay before scrolling starts (ms) - show static text first
-#define SCROLL_START_DELAY 1000
-
 // Reset scroll state for new text
 void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
                       int max_width, ThemeRole role, bool selected, bool use_gpu) {

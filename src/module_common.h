@@ -145,8 +145,10 @@ void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id);
 
 
 // Begin one module-loop iteration: start the frame timer, poll input.
-// MUST be the first statement of every module's loop body.
-void ModuleCommon_frameBegin(void);
+// MUST be the first statement of every module's loop body. Pass false in
+// start_frame_clock when the loop started the frame timer itself, before the present
+// of the last frame, thus the wait of GFX_sync() counts the present.
+void ModuleCommon_frameBegin(bool start_frame_clock);
 
 // Records that the frame drew the regular surface, thus ModuleCommon_frameEnd()
 // uploads it. Call it after a render of a screen or of a dialog.
@@ -157,12 +159,15 @@ void ModuleCommon_markSurfaceDrawn(void);
 // painter that draws through them needs no call of its own.
 void ModuleCommon_markLayerDrawn(void);
 
-// The one presentation of the app. Call it once at the end of each pass of a
-// loop, after all drawing of the frame, and before a call that blocks after a
-// draw. A surface change uploads the surface and presents it with the layers.
-// A layer change presents the layers over the surface that the display holds.
-// No change synchronizes to the frame rate and presents nothing. No painter
+// The presentation of the frame. A surface change uploads the surface and
+// presents it with the layers. A layer change presents the layers over the
+// surface that the display holds. No change presents nothing. No painter
 // presents by itself.
+void ModuleCommon_present(SDL_Surface* screen);
+
+// The end of a pass of a legacy loop: the presentation of the frame, then the
+// wait for the frame rate. Call it once at the end of each pass, after all
+// drawing of the frame, and before a call that blocks after a draw.
 void ModuleCommon_frameEnd(SDL_Surface* screen);
 
 #ifdef __cplusplus

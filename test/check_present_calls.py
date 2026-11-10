@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-# One function presents each frame of the app, and two functions write the GPU
-# layers. This scan rejects a source that presents or writes a layer on its own,
-# and a source that gives a layer a name of its own.
+# Two functions present a frame of the app, two functions wait for the next
+# frame, and two functions write the GPU layers. This scan rejects a source that
+# presents, waits or writes a layer on its own, and a source that gives a layer a
+# name of its own.
 
 import re
 import sys
@@ -12,16 +13,22 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SOURCE_DIR = SCRIPT_DIR.parent / "src"
+SOURCE_SUBDIRS = ("ui", "ui/view", "input")
 
-# The one function that presents, and the two that write a layer. A call
-# outside these functions is a finding, whatever file holds it.
-PRESENTER = ("module_common.c", {"ModuleCommon_frameEnd"})
+# The functions that present, the functions that wait for the next frame, and
+# the two that write a layer. A call outside these functions is a finding,
+# whatever file holds it.
+PRESENTERS = (("module_common.c", {"ModuleCommon_frameEnd", "ModuleCommon_present"}),)
+SYNC_OWNERS = (("module_common.c", {"ModuleCommon_frameEnd"}), ("ui_page.cpp", {"runPageLoop"}))
 LAYER_OWNER = ("ui_layers.c", {"UiLayer_clear", "UiLayer_blit"})
+
+# The wait for the next frame. The page loop waits before it presents.
+SYNC_CALL = re.compile(r"\bGFX_sync\s*\(")
 
 # A call that gives the display a frame, or a platform helper that presents
 # inside its draw. Only the presenter of the frame may call one.
 PRESENT_CALL = re.compile(
-    r"\b(?:GFX_flip|GFX_flip_fixed_rate|GFX_flipHidden|GFX_sync|GFX_GL_Swap"
+    r"\b(?:GFX_flip|GFX_flip_fixed_rate|GFX_flipHidden|GFX_GL_Swap"
     r"|PLAT_flip|PLAT_flipHidden|PLAT_GPU_Flip|PLAT_GL_Swap"
     r"|GFX_scrollTextTexture|PLAT_scrollTextTexture|GFX_resetScrollText|PLAT_resetScrollText"
     r"|GFX_animateSurface|PLAT_animateSurface|GFX_animateSurfaceOpacity|PLAT_animateSurfaceOpacity"
@@ -63,6 +70,16 @@ PASS_FIXTURES = {
     GFX_sync();
 }
 """,
+    "ui_page.cpp": """ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
+    while (true) {
+        GFX_sync();
+        ModuleCommon_present();
+    }
+}
+""",
+    "module_common_present.c": """void ModuleCommon_present(void) {
+}
+""",
     "ui_layers.c": """void UiLayer_clear(UiLayer layer) {
     PLAT_clearLayers(layer);
 }
@@ -92,6 +109,14 @@ FAIL_FIXTURES = {
     "sync.c": """GFX_sync();
 """,
     "gpu_flip.c": """PLAT_GPU_Flip();
+""",
+    "ui_page.cpp": """ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
+    GFX_flip(screen);
+}
+""",
+    "painter.cpp": """void Painter::draw() {
+    GFX_sync();
+}
 """,
     "scroll_text.c": """GFX_scrollTextTexture(font, text, x, y, w, h, color, 1.0f, NULL);
 """,
@@ -147,20 +172,23 @@ def function_at(code, offset):
     return name
 
 
-def call_is_allowed(name, code, offset, owner):
-    file_name, functions = owner
-    return name == file_name and function_at(code, offset) in functions
+def call_is_allowed(name, code, offset, owners):
+    return any(name == file_name and function_at(code, offset) in functions for file_name, functions in owners)
 
 
 def collect_findings(name, source):
     code = strip_comments_and_strings(source)
     findings = []
     for match in PRESENT_CALL.finditer(code):
-        if call_is_allowed(name, code, match.start(), PRESENTER):
+        if call_is_allowed(name, code, match.start(), PRESENTERS):
             continue
-        findings.append((line_number(code, match.start()), "a present outside ModuleCommon_frameEnd()"))
+        findings.append((line_number(code, match.start()), "a present outside ModuleCommon_frameEnd() and ModuleCommon_present()"))
+    for match in SYNC_CALL.finditer(code):
+        if call_is_allowed(name, code, match.start(), SYNC_OWNERS):
+            continue
+        findings.append((line_number(code, match.start()), "a wait outside ModuleCommon_frameEnd() and runPageLoop()"))
     for match in LAYER_CALL.finditer(code):
-        if call_is_allowed(name, code, match.start(), LAYER_OWNER):
+        if call_is_allowed(name, code, match.start(), (LAYER_OWNER,)):
             continue
         findings.append((line_number(code, match.start()), "a layer write outside UiLayer_clear() and UiLayer_blit()"))
     for match in LAYER_NAME.finditer(code):
@@ -218,11 +246,16 @@ def main(argv):
     if not check_fixtures():
         return 1
 
+    directories = (SOURCE_DIR, *(SOURCE_DIR / subdir for subdir in SOURCE_SUBDIRS))
     paths = sorted(
-        path for pattern in ("*.c", "*.cpp", "*.h", "*.hpp") for path in SOURCE_DIR.glob(pattern)
+        path
+        for directory in directories
+        for pattern in ("*.c", "*.cpp", "*.h", "*.hpp")
+        for path in directory.glob(pattern)
     )
     if not scan_paths(paths):
-        print("Only ModuleCommon_frameEnd() presents, and only ui_layers.c writes a layer.", file=sys.stderr)
+        print("Only ModuleCommon_frameEnd() and ModuleCommon_present() present, only they and "
+              "runPageLoop() wait, and only ui_layers.c writes a layer.", file=sys.stderr)
         return 1
     print("Present call check passed")
     return 0

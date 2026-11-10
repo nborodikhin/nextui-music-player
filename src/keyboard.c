@@ -241,7 +241,7 @@ char *Keyboard_open(const char *prompt, size_t max_bytes) {
     bool force_render = false;
 
     while (!done) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface *const screen = DisplayHelper_getSurface(display);
 
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, &state.show_setting,

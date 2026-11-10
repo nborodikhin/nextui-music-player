@@ -30,7 +30,7 @@ extern "C" {
 
 // Module architecture
 #include "module_common.h"
-#include "ui/module_menu.h"
+#include "ui/module_main_menu.h"
 #include "module_library.h"
 #include "module_player.h"
 #include "module_radio.h"

@@ -12,10 +12,8 @@ extern "C" {
 #include "help_screen.h"
 #include "menu_rows.h"
 
-// Render the main menu with no status group: the caller draws it, and gives its width in
-// status_w.
-void render_menu(SDL_Surface* screen, int status_w, int menu_selected, int menu_scroll,
-                 const MenuRows* rows);
+// Writes the label of a row of the main menu to buffer.
+void main_menu_get_row_label(MenuSelection selection, char* buffer, int buffer_size);
 
 // Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title);
@@ -25,9 +23,6 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id);
 
 // Render screen off hint message
 void render_screen_off_hint(SDL_Surface* screen);
-
-// Check if Resume scroll needs continuous redraw (software scroll mode)
-bool menu_needs_scroll_redraw(void);
 
 #ifdef __cplusplus
 }

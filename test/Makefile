@@ -24,8 +24,8 @@
 # float arithmetic, with the FFT and the paint left in spectrum.c. It declares
 # itself in spectrum.h, which holds no platform include.
 #
-# stopwatch.c is the same shape as spectrum_ceiling.c: a count of time, with the
-# clock passed in.
+# stopwatch.cpp is the same shape as spectrum_ceiling.c: a count of time, with the
+# clock passed in. It holds the C functions and the C++ class of stopwatch.h.
 #
 # screen_title.c is the same shape as toast_state.c: the text of a title and
 # where its marquee is, with the clock and the measured widths passed in and the
@@ -54,6 +54,10 @@
 # events and the clock come in, and the events go out to a listener. The pad read stays in
 # input/input_driver_nextui.cpp, and power management in
 # input/common_button_handler_nextui.cpp.
+#
+# ui/view/ui_compositor.cpp and ui/view/ui_view.cpp compose bitmaps on SDL surfaces and call
+# ui_layers.c for the layer. The test links SDL for the surfaces only, and gives a test double
+# of ui_layers.c, thus it needs no platform.
 #
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
@@ -90,6 +94,7 @@ TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
 TESTS   += $(BIN)/test_playlist
 TESTS   += $(BIN)/test_input_events
+TESTS   += $(BIN)/test_ui_compositor
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
 # the rule above. The test compiles ui_utils.c itself, thus it always runs the
@@ -113,6 +118,10 @@ TESTS   += $(BIN)/test_ui_fonts
 # desktop build as the two above do.
 TESTS   += $(BIN)/test_ui_music_playing
 
+# The views draw with SDL_ttf and the assets of the platform, thus their test links the
+# objects of the desktop build as the three above do. It gives a test double of ui_layers.c.
+TESTS   += $(BIN)/test_ui_views
+
 TESTS   += $(BIN)/test_version
 
 # selfupdate_install.c deletes files, thus its test works in directories of its own under
@@ -135,7 +144,7 @@ check: headers
 # forces into NextUI's config.c is not an interface, thus it is not checked. A
 # check runs again only after a change of a file that the header includes.
 HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h $(SRC)/ui/*.h))
-CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp)
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/view/*.hpp)
 HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
                 $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
 HEADER_INC    = $(INC) $(DESKTOP_INC) \
@@ -199,6 +208,14 @@ $(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input
                           $(SRC)/help_screen.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
 
+UI_COMPOSITOR_SRC = $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
+                    $(SRC)/ui/view/ui_compositor.cpp
+
+$(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui/view/ui_view.hpp \
+                           $(SRC)/ui/view/ui_layout_context.hpp $(SRC)/ui/view/ui_compositor.hpp $(SRC)/ui_layers.h test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) \
+	  $(shell pkg-config --libs sdl2)
+
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c
 
@@ -208,8 +225,8 @@ $(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h te
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
 
-$(BIN)/test_stopwatch: test_stopwatch.c $(SRC)/stopwatch.c $(SRC)/stopwatch.h test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_stopwatch.c $(SRC)/stopwatch.c
+$(BIN)/test_stopwatch: test_stopwatch.cpp $(SRC)/stopwatch.cpp $(SRC)/stopwatch.h test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_stopwatch.cpp $(SRC)/stopwatch.cpp
 
 $(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c
@@ -380,7 +397,7 @@ DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/pla
               -DUSE_SDL2 -DUSE_GL
 # Every object of the desktop build except the two that this test replaces: its
 # own main, and ui_utils.o, which the test compiles from the source instead.
-DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
+DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
                         $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
                       | grep -v -e musicplayer.o -e ui_utils.o)
 # The objects come from the desktop build, thus they must be as new as the sources.
@@ -405,16 +422,24 @@ $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_fonts.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_music_playing.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_ui_views: test_ui_views.cpp $(SRC)/ui/view/ui_view.hpp $(SRC)/ui/view/ui_compositor.hpp \
+                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp test.h | $(BIN) desktop-objs
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_views.cpp
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o -e ui_layers.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
