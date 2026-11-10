@@ -42,8 +42,8 @@ void TextView::updateScrolling(uint32_t elapsedMs) {
         }
         return;
     }
-    const uint64_t distance   = static_cast<uint64_t>(elapsedMs) * SCALE1(MARQUEE_SPEED) / 1000;
-    const int newOffset       = static_cast<int>(distance % static_cast<uint64_t>(textWidth + SCALE1(SCROLL_GAP)));
+    const uint64_t distance   = static_cast<uint64_t>(elapsedMs) * SCALE1(SCROLLING_SPEED_SP) / 1000;
+    const int newOffset       = static_cast<int>(distance % static_cast<uint64_t>(textWidth + SCALE1(SCROLL_GAP_SP)));
     const bool newScrolling   = elapsedMs > 0;
     if (newOffset == offset && newScrolling == scrolling) return;
     offset    = newOffset;
@@ -114,7 +114,7 @@ void TextView::draw(UiDrawContext& context) {
     SDL_Rect to   = {0, textTop, 0, 0};
     SDL_BlitSurface(bitmap, &from, target, &to);
     // The text loops: its next copy follows the gap
-    const int next = bitmap->w + SCALE1(SCROLL_GAP) - offset;
+    const int next = bitmap->w + SCALE1(SCROLL_GAP_SP) - offset;
     if (offset > 0 && next < target->w) {
         SDL_Rect whole = {0, 0, bitmap->w, bitmap->h};
         SDL_Rect at    = {next, textTop, 0, 0};

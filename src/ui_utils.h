@@ -14,11 +14,11 @@ extern "C" {
 #include "screen_title.h"
 #include "stopwatch.h"
 
-// The speed of each marquee, in scaled pixels a second. Apply SCALE1().
-#define MARQUEE_SPEED 40
+// The speed of each scrolling text, in scaled pixels a second. Apply SCALE1().
+#define SCROLLING_SPEED_SP 40
 
 // The gap between the end of a scrolling text and its next copy, in scaled pixels. Apply SCALE1().
-#define SCROLL_GAP 30
+#define SCROLL_GAP_SP 30
 
 // The time that a text that does not fit stays at rest before it scrolls, in milliseconds.
 #define SCROLL_START_DELAY 1000

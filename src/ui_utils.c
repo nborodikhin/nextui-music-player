@@ -70,7 +70,7 @@ void ScrollText_reset(ScrollTextState* state, const char* text, TTF_Font* font,
 
     // Pre-create cached scroll surface for GPU scroll without background
     if ((state->text_width > max_width) && use_gpu) {
-        int padding = SCALE1(SCROLL_GAP);
+        int padding = SCALE1(SCROLL_GAP_SP);
         int total_width = state->text_width * 2 + padding;
         int height = TTF_FontHeight(font);
 
@@ -166,7 +166,7 @@ static void paint_title_on_layer(uint32_t now);
 static void paint_cached_marquee(ScrollTextState* state, int x, int y) {
     if (!state->text[0] || !state->needs_scroll || !state->cached_scroll_surface) return;
 
-    int padding = SCALE1(SCROLL_GAP);
+    int padding = SCALE1(SCROLL_GAP_SP);
     int height = state->cached_scroll_surface->h;
 
     // Create clipped view at current scroll offset (only this is created per-frame)
@@ -177,7 +177,7 @@ static void paint_cached_marquee(ScrollTextState* state, int x, int y) {
     SDL_SetSurfaceBlendMode(state->cached_scroll_surface, SDL_BLENDMODE_NONE);
     SDL_FillRect(clipped, NULL, 0);
     uint64_t distance = Stopwatch_accumulated(&state->scroll_time, SDL_GetTicks()) *
-                        SCALE1(MARQUEE_SPEED) / 1000;
+                        SCALE1(SCROLLING_SPEED_SP) / 1000;
     int offset = (int)(distance % (uint64_t)(state->text_width + padding));
     SDL_Rect src = {offset, 0, state->max_width, height};
     SDL_BlitSurface(state->cached_scroll_surface, &src, clipped, NULL);
@@ -448,7 +448,7 @@ static void paint_title_on_layer(uint32_t now) {
 
 bool ScreenTitle_start(bool defer) {
     bool before = title_state.defer;
-    ScreenTitle_reset(&title_state, defer, SCALE1(MARQUEE_SPEED));
+    ScreenTitle_reset(&title_state, defer, SCALE1(SCROLLING_SPEED_SP));
     header_drawn     = false;
     title_on_surface = false;
     return before;
