@@ -310,7 +310,7 @@ static void tick_dialog_frame(void) {
     }
 }
 
-// The dialog covers the screen, thus the layers of the screen go
+// A layer shows above the dialog and the screen under it, thus the layers of the screen go
 static void clear_screen_layers(void) {
     UiLayer_clear(UI_LAYER_STATUS);
     UiLayer_clear(UI_LAYER_ANIMATION);
@@ -328,7 +328,7 @@ bool ModuleCommon_runQuitDialog(DisplayContext* display) {
         if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_START)) return false;
 
         SDL_Surface* screen = DisplayHelper_getSurface(display);
-        render_confirmation_dialog(screen, NULL, "Quit Music Player?");
+        render_confirmation_dialog_over(screen, NULL, "Quit Music Player?");
         ModuleCommon_markSurfaceDrawn();
         ModuleCommon_frameEnd(screen);
     }
@@ -349,7 +349,7 @@ void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id) {
         }
 
         SDL_Surface* screen = DisplayHelper_getSurface(display);
-        render_controls_help(screen, help_id);
+        render_controls_help_over(screen, help_id);
         ModuleCommon_markSurfaceDrawn();
         ModuleCommon_frameEnd(screen);
     }

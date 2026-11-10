@@ -18,8 +18,14 @@ void main_menu_get_row_label(MenuSelection selection, char* buffer, int buffer_s
 // Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
 void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title);
 
+// Draws the confirmation dialog over the screen as it is. Draws nothing outside its box.
+void render_confirmation_dialog_over(SDL_Surface* screen, const char* content, const char* title);
+
 // Render controls help dialog overlay
 void render_controls_help(SDL_Surface* screen, HelpId help_id);
+
+// Draws Controls Help over the screen as it is. Draws nothing outside its box.
+void render_controls_help_over(SDL_Surface* screen, HelpId help_id);
 
 // Render screen off hint message
 void render_screen_off_hint(SDL_Surface* screen);

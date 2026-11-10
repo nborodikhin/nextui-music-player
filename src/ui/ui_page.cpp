@@ -9,6 +9,7 @@
 #include "input/input_state.hpp"
 #include "pad_reset.h"
 #include "ui/view/ui_compositor.hpp"
+#include "ui_theme.h"
 
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
@@ -61,6 +62,15 @@ void runDialog(Dialog dialog, HelpId helpId, DisplayContext* display) {
         case Dialog::ControlsHelp: ModuleCommon_runControlsHelp(display, helpId); break;
     }
     PadReset_run();
+}
+
+// The opacity of the page background over a screen that a dialog covers
+constexpr uint32_t kDimAlpha = 160;
+
+// Returns the dim of a covered screen, as an ARGB value with straight alpha
+uint32_t getDimColor() {
+    const SDL_Color color = Theme_getColor(THEME_ROLE_PAGE_BACKGROUND, false);
+    return kDimAlpha << 24 | uint32_t{color.r} << 16 | uint32_t{color.g} << 8 | color.b;
 }
 
 // Lays out the page in the whole screen, and draws what changed
@@ -132,11 +142,12 @@ ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
         detector.onTick(now);
 
         if (pendingDialog != Dialog::None) {
-            // The page shows on the regular surface only under the dialog, with each scrolling
-            // text stopped where it is
+            // The page shows dimmed on the regular surface only under the dialog, with each
+            // scrolling text stopped where it is
             page.pause(now);
             compositor.setSurfaceOnly(true);
             composeFrame(page, compositor);
+            compositor.dimSurface(getDimColor());
             runDialog(pendingDialog, page.getHelpId(), display);
             pendingDialog = Dialog::None;
             if (ModuleCommon_isQuitRequested()) {

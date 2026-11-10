@@ -399,6 +399,10 @@ typedef struct {
 // Returns box dimensions for the caller to render content inside
 DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h);
 
+// Draws the box of a dialog over the screen as it is, and returns its layout.
+// Draws nothing outside the box and on no layer.
+DialogBox render_dialog_box_over(SDL_Surface* screen, int box_w, int box_h);
+
 // ============================================
 // Empty State
 // ============================================

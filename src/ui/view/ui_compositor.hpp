@@ -44,6 +44,12 @@ public:
     /** Clears each layer that the compositor wrote since the last clear. */
     void clearUsedLayers();
 
+    /**
+     * Blends `color`, an ARGB value with straight alpha, over the whole regular surface, and
+     * composes everything on the next frame.
+     */
+    void dimSurface(uint32_t color);
+
     /** Pass true in surfaceOnly to put each entry on the regular surface. */
     void setSurfaceOnly(bool surfaceOnly);
     bool isSurfaceOnly() const { return surfaceOnly; }

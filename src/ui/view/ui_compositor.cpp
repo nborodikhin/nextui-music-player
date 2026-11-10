@@ -314,6 +314,15 @@ uint32_t toStraightAlpha(uint32_t pixel) {
     return result;
 }
 
+uint32_t toPremultipliedAlpha(uint32_t pixel) {
+    const uint32_t alpha = pixel >> 24;
+    uint32_t result      = alpha << 24;
+    for (int shift = 0; shift < 24; shift += 8) {
+        result |= ((((pixel >> shift) & 0xFF) * alpha + 127) / 255) << shift;
+    }
+    return result;
+}
+
 void convertToStraightAlpha(SDL_Surface* surface) {
     for (int y = 0; y < surface->h; y++) {
         uint32_t* row = pixelAt(surface, 0, y);
@@ -361,6 +370,17 @@ void UiCompositor::compose(UiTargetLayer target, const SDL_Rect& damaged) {
         surfaceChanged = true;
     }
     SDL_FreeSurface(buffer);
+}
+
+void UiCompositor::dimSurface(uint32_t color) {
+    if (!screen) return;
+    const uint32_t dim = toPremultipliedAlpha(color);
+    for (int y = 0; y < screen->h; y++) {
+        uint32_t* row = pixelAt(screen, 0, y);
+        for (int x = 0; x < screen->w; x++) row[x] = blendOver(dim, row[x]);
+    }
+    surfaceChanged = true;
+    invalidateAll();
 }
 
 void UiCompositor::dropBitmaps() {

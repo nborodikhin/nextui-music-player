@@ -1235,12 +1235,16 @@ void render_simple_menu(SDL_Surface* screen, int show_setting, int menu_selected
 // Dialog Box
 // ============================================
 
-DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
-    // The marquee under the dialog leaves the layer. The title of the header
-    // under the dialog leaves it too, until the header draws again.
-    UiLayer_clear(UI_LAYER_ANIMATION);
-    header_drawn = false;
-    layer_holds_title = false;
+// Draws the box of a dialog. Pass true in cover_screen to also take the marquee
+// and the title off the layer and fill the area around the box.
+static DialogBox draw_dialog_box(SDL_Surface* screen, int box_w, int box_h, bool cover_screen) {
+    if (cover_screen) {
+        // The marquee under the dialog leaves the layer. The title of the header
+        // under the dialog leaves it too, until the header draws again.
+        UiLayer_clear(UI_LAYER_ANIMATION);
+        header_drawn = false;
+        layer_holds_title = false;
+    }
 
     int hw = screen->w;
     int hh = screen->h;
@@ -1253,15 +1257,17 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
     db.content_x = db.box_x + SCALE1(15);
     db.content_w = box_w - SCALE1(30);
 
-    // Paint the page background around the dialog.
-    SDL_Rect top_area = {0, 0, hw, db.box_y};
-    SDL_Rect bot_area = {0, db.box_y + box_h, hw, hh - db.box_y - box_h};
-    SDL_Rect left_area = {0, db.box_y, db.box_x, box_h};
-    SDL_Rect right_area = {db.box_x + box_w, db.box_y, hw - db.box_x - box_w, box_h};
-    SDL_FillRect(screen, &top_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
-    SDL_FillRect(screen, &bot_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
-    SDL_FillRect(screen, &left_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
-    SDL_FillRect(screen, &right_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+    if (cover_screen) {
+        // Paint the page background around the dialog.
+        SDL_Rect top_area = {0, 0, hw, db.box_y};
+        SDL_Rect bot_area = {0, db.box_y + box_h, hw, hh - db.box_y - box_h};
+        SDL_Rect left_area = {0, db.box_y, db.box_x, box_h};
+        SDL_Rect right_area = {db.box_x + box_w, db.box_y, hw - db.box_x - box_w, box_h};
+        SDL_FillRect(screen, &top_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+        SDL_FillRect(screen, &bot_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+        SDL_FillRect(screen, &left_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+        SDL_FillRect(screen, &right_area, Theme_getPackedColor(THEME_ROLE_PAGE_BACKGROUND, false));
+    }
 
     // Box background
     SDL_Rect fill_rect = {
@@ -1308,6 +1314,14 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
                  Theme_getPackedColor(THEME_ROLE_PRIMARY, false));
 
     return db;
+}
+
+DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h) {
+    return draw_dialog_box(screen, box_w, box_h, true);
+}
+
+DialogBox render_dialog_box_over(SDL_Surface* screen, int box_w, int box_h) {
+    return draw_dialog_box(screen, box_w, box_h, false);
 }
 
 void render_empty_state(SDL_Surface* screen, const char* message,

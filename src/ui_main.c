@@ -318,8 +318,8 @@ static const ControlHelp about_controls[] = {
     {NULL, NULL}
 };
 
-// Render controls help dialog overlay
-void render_controls_help(SDL_Surface* screen, HelpId help_id) {
+// Draws Controls Help. Pass true in cover_screen to fill the area around the box.
+static void draw_controls_help(SDL_Surface* screen, HelpId help_id, bool cover_screen) {
     int hw = screen->w;
     int hh = screen->h;
 
@@ -451,7 +451,17 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
     int line_height = SCALE1(18);
     int hint_gap = SCALE1(15);
     int box_h = SCALE1(60) + (control_count * line_height) + hint_gap;
-    DialogBox db = render_dialog_box(screen, SCALE1(240), box_h);
+    DialogBox db = cover_screen ? render_dialog_box(screen, SCALE1(240), box_h)
+                                : render_dialog_box_over(screen, SCALE1(240), box_h);
+    SDL_Rect clip_before;
+    SDL_GetClipRect(screen, &clip_before);
+    SDL_Rect box = {
+        .x = db.box_x,
+        .y = db.box_y,
+        .w = db.box_w,
+        .h = db.box_h,
+    };
+    if (!cover_screen) SDL_SetClipRect(screen, &box);
 
     // Title text (left aligned)
     SDL_Surface* title_surf = TTF_RenderUTF8_Blended(
@@ -509,13 +519,33 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
+    SDL_SetClipRect(screen, &clip_before);
 }
 
-// Render confirmation dialog overlay (title + optional content + "A: Yes  B: No")
-void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title) {
+void render_controls_help(SDL_Surface* screen, HelpId help_id) {
+    draw_controls_help(screen, help_id, true);
+}
+
+void render_controls_help_over(SDL_Surface* screen, HelpId help_id) {
+    draw_controls_help(screen, help_id, false);
+}
+
+// Draws a confirmation dialog. Pass true in cover_screen to fill the area around the box.
+static void draw_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title,
+                                     bool cover_screen) {
     bool has_content = content && content[0];
     int box_h = has_content ? SCALE1(110) : SCALE1(90);
-    DialogBox db = render_dialog_box(screen, SCALE1(280), box_h);
+    DialogBox db = cover_screen ? render_dialog_box(screen, SCALE1(280), box_h)
+                                : render_dialog_box_over(screen, SCALE1(280), box_h);
+    SDL_Rect clip_before;
+    SDL_GetClipRect(screen, &clip_before);
+    SDL_Rect box = {
+        .x = db.box_x,
+        .y = db.box_y,
+        .w = db.box_w,
+        .h = db.box_h,
+    };
+    if (!cover_screen) SDL_SetClipRect(screen, &box);
     int hw = screen->w;
 
     // Title text
@@ -561,6 +591,15 @@ void render_confirmation_dialog(SDL_Surface* screen, const char* content, const 
         SDL_BlitSurface(hint_surf, NULL, screen, &hint_at);
         SDL_FreeSurface(hint_surf);
     }
+    SDL_SetClipRect(screen, &clip_before);
+}
+
+void render_confirmation_dialog(SDL_Surface* screen, const char* content, const char* title) {
+    draw_confirmation_dialog(screen, content, title, true);
+}
+
+void render_confirmation_dialog_over(SDL_Surface* screen, const char* content, const char* title) {
+    draw_confirmation_dialog(screen, content, title, false);
 }
 
 // Render screen off hint message (shown before screen turns off)

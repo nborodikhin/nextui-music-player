@@ -423,6 +423,41 @@ TEST(test_invalidate_all_clears_each_layer_that_was_used) {
 
 }  // namespace
 
+// Gray 0x80 at half alpha, straight
+constexpr uint32_t kStraightHalfGray = 0x80808080;
+
+TEST(test_dim_gives_a_transparent_pixel_the_premultiplied_color) {
+    Fixture f;
+    SDL_FillRect(f.screen, nullptr, 0);
+    f.compositor.dimSurface(kStraightHalfGray);
+    CHECK(f.compositor.hasSurfaceChanged());
+    CHECK_EQ_SZ(f.surfaceAt(1, 1), 0x80404040);
+}
+
+TEST(test_dim_blends_over_opaque_and_semi_transparent_pixels) {
+    Fixture f;
+    SDL_FillRect(f.screen, nullptr, kRed);
+    // Red at half alpha, premultiplied
+    SDL_Rect half = {0, 0, 2, 2};
+    SDL_FillRect(f.screen, &half, 0x80400000);
+    f.compositor.dimSurface(kStraightHalfGray);
+    CHECK_EQ_SZ(f.surfaceAt(5, 5), 0xFFBF4040);
+    CHECK_EQ_SZ(f.surfaceAt(1, 1), 0xC0604040);
+}
+
+TEST(test_frame_after_dim_composes_everything_with_no_draw) {
+    Fixture f;
+    TestView view(kRed);
+    f.compositor.beginLayout().layoutChild(view, SDL_Rect{0, 0, 4, 4});
+    f.compositor.drawFrame();
+    f.compositor.dimSurface(kStraightHalfGray);
+    f.compositor.beginLayout().layoutChild(view, SDL_Rect{0, 0, 4, 4});
+    f.compositor.drawFrame();
+    CHECK_EQ_INT(view.draws, 1);
+    CHECK_EQ_SZ(f.surfaceAt(1, 1), kRed);
+    CHECK_EQ_SZ(f.surfaceAt(20, 10), 0);
+}
+
 int main() {
     SDL_Init(0);
     RUN(test_new_view_draws_and_composes);
@@ -446,5 +481,8 @@ int main() {
     RUN(test_partial_alpha_is_straight_on_status_and_toast_layers);
     RUN(test_partial_alpha_is_premultiplied_on_background_and_selection_layers);
     RUN(test_invalidate_all_clears_each_layer_that_was_used);
+    RUN(test_dim_gives_a_transparent_pixel_the_premultiplied_color);
+    RUN(test_dim_blends_over_opaque_and_semi_transparent_pixels);
+    RUN(test_frame_after_dim_composes_everything_with_no_draw);
     return test_summary();
 }
