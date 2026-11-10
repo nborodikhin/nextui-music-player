@@ -319,7 +319,7 @@ static void clear_screen_layers(void) {
 bool ModuleCommon_runQuitDialog(DisplayContext* display) {
     clear_screen_layers();
     while (!ModuleCommon_isQuitRequested()) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         tick_dialog_frame();
         if (PAD_justPressed(BTN_A)) {
             quit_requested = true;
@@ -338,7 +338,7 @@ bool ModuleCommon_runQuitDialog(DisplayContext* display) {
 void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id) {
     clear_screen_layers();
     while (!ModuleCommon_isQuitRequested()) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         tick_dialog_frame();
         if (PAD_justPressed(BTN_A) || PAD_justPressed(BTN_B) || PAD_justPressed(BTN_X) ||
             PAD_justPressed(BTN_Y) || PAD_justPressed(BTN_START) || PAD_justPressed(BTN_SELECT) ||
@@ -544,7 +544,7 @@ bool ModuleCommon_isQuitRequested(void) {
     return quit_requested || stop_signalled != 0;
 }
 
-void ModuleCommon_frameBegin(void) {
+void ModuleCommon_frameBegin(bool start_frame_clock) {
     if (DisplayHelper_outputChanged()) {
         DisplayHelper_moveToOutput();
         output_switched = true;
@@ -553,7 +553,7 @@ void ModuleCommon_frameBegin(void) {
         ModuleCommon_resetScreenOffHint();
         ModuleCommon_recordInputTime();
     }
-    GFX_startFrame();
+    if (start_frame_clock) GFX_startFrame();
     ScreenTitle_frameBegin();
     PAD_poll();
     TestControl_tick();
@@ -575,7 +575,7 @@ void ModuleCommon_markLayerDrawn(void) {
     FrameState_markLayerDrawn(&frame);
 }
 
-void ModuleCommon_frameEnd(SDL_Surface* screen) {
+void ModuleCommon_present(SDL_Surface* screen) {
     // A new audio sink (Bluetooth, USB DAC) moves the audio on the main thread
     Player_handleAudioSinkChange();
 
@@ -584,6 +584,10 @@ void ModuleCommon_frameEnd(SDL_Surface* screen) {
         case FRAME_CHANGED_LAYERS:  PLAT_GPU_Flip();   break;
         case FRAME_CHANGED_NOTHING:                    break;
     }
+}
+
+void ModuleCommon_frameEnd(SDL_Surface* screen) {
+    ModuleCommon_present(screen);
     // A present that the platform does not hold to the display rate, such as
     // one with no window, would let the loop run free
     GFX_sync();

@@ -52,7 +52,7 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
     ScreenTitle_start(false);
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input

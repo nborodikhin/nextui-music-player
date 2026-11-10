@@ -652,7 +652,7 @@ ModuleExitReason PlayerModule_run(DisplayContext* display, bool now_playing_entr
     }
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         if (state == PLAYER_INTERNAL_BROWSER) {
@@ -861,7 +861,7 @@ ModuleExitReason PlayerModule_runWithPlaylist(DisplayContext* display,
     ModuleCommon_recordInputTime();
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle add-to-playlist dialog overlay
@@ -1119,7 +1119,7 @@ ModuleExitReason PlayerModule_runResume(DisplayContext* display, const ResumeSta
         PlayerInternalState state = PLAYER_INTERNAL_PLAYING;
 
         while (1) {
-            ModuleCommon_frameBegin();
+            ModuleCommon_frameBegin(true);
             SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
             // Handle add-to-playlist dialog overlay

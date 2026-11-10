@@ -6,11 +6,15 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
-#include <optional>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "input/input_state.hpp"
-#include "ui_page.hpp"
+#include "ui/view/status_group_view.hpp"
+#include "ui/view/text_view.hpp"
+#include "ui/view/title_text_view.hpp"
+#include "ui/ui_page.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
 #include "ui_utils.h"
@@ -85,14 +89,14 @@ public:
         return true;
     }
 
-    void draw(SDL_Surface* screen, bool useLayers) override;
-
-protected:
-    void onInvalidateAll() override {
-        drawnStatusGroupWidth.reset();
-        drawnHeld.reset();
-        drawnLogVersion.reset();
+    InputTestPage() {
+        for (int index = 0; index < kEntryCount; index++) {
+            logLines.push_back(std::make_unique<TextView>(Fonts_getSmall(), true));
+        }
     }
+
+    void setContext(UiContext& context) override;
+    void layout(UiLayoutContext& context) override;
 
 private:
     static constexpr int kEntryCount = 32;
@@ -111,14 +115,13 @@ private:
     int newest     = -1;
     int entryCount = 0;
     uint32_t lastTime = 0;
-    // Goes up by one for each entry, thus a draw finds a change of the log
-    uint32_t logVersion = 0;
 
-    // The state that the screen shows. An empty value matches no state, thus the next draw
-    // paints that part.
-    std::optional<int> drawnStatusGroupWidth;
-    std::optional<uint32_t> drawnHeld;
-    std::optional<uint32_t> drawnLogVersion;
+    TitleTextView title{Fonts_getLarge()};
+    StatusGroupView statusGroup;
+    TextView heldLine{Fonts_getSmall(), true};
+    TextView hintLine{Fonts_getSmall(), true};
+    // One view for each line of the log. A line that does not fit on the screen is not laid out.
+    std::vector<std::unique_ptr<TextView>> logLines;
 };
 
 void InputTestPage::addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name) {
@@ -131,83 +134,67 @@ void InputTestPage::addEntry(uint32_t time, const std::string &stream, const std
     snprintf(text, sizeof(text), "%-6s  %-6s  %-12s  +%u ms", stream.c_str(), type.c_str(),
              name.c_str(), delta);
     entries[newest].text = text;
-    logVersion++;
-    invalidate();
 }
 
-// Draws one line of text at the left edge. Returns the height of the line.
-int drawTextLine(SDL_Surface* screen, TTF_Font* font, const char* text, SDL_Color color, int y) {
-    SDL_Surface* rendered = TTF_RenderUTF8_Blended(font, text, color);
-    if (!rendered) return TTF_FontLineSkip(font);
-    SDL_Rect at = {
-        .x = SCALE1(PADDING * 2),
-        .y = y,
-        .w = 0,
-        .h = 0,
-    };
-    SDL_BlitSurface(rendered, nullptr, screen, &at);
-    SDL_FreeSurface(rendered);
-    return TTF_FontLineSkip(font);
+void InputTestPage::setContext(UiContext& context) {
+    title.setContext(context);
+    statusGroup.setContext(context);
+    heldLine.setContext(context);
+    hintLine.setContext(context);
+    for (auto& line : logLines) line->setContext(context);
+
+    title.setText("Input test");
+    title.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+    hintLine.setText("MENU + SELECT: back");
+    hintLine.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+    heldLine.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+    for (auto& line : logLines) line->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
 
-// Fills the rows from top to bottom with the clear color of the screen.
-void clearRows(SDL_Surface* screen, int top, int bottom) {
-    SDL_Rect rows = {
-        .x = 0,
-        .y = top,
-        .w = screen->w,
-        .h = bottom - top,
-    };
-    // Transparent black is the clear color of the platform, as GFX_clear() uses it
-    SDL_FillRect(screen, &rows, 0);
-}
+// Each line is a view that draws only when its text changes. The page draws no layer.
+void InputTestPage::layout(UiLayoutContext& context) {
+    const UiSize screen  = context.getMaxSize();
+    const int padding    = SCALE1(PADDING);
+    const int pillHeight = SCALE1(PILL_SIZE);
 
-// The page draws no layer of its own, thus useLayers changes nothing. Each part draws only
-// when its state differs from the state that the screen shows.
-void InputTestPage::draw(SDL_Surface* screen, bool) {
-    TTF_Font* font             = Fonts_getSmall();
-    const SDL_Color primary    = Theme_getColor(THEME_ROLE_PRIMARY, false);
-    const SDL_Color secondary  = Theme_getColor(THEME_ROLE_SECONDARY, false);
-    const int lineHeight       = TTF_FontLineSkip(font);
-    const int heldTop          = SCALE1(PADDING + PILL_SIZE + PADDING);
-    const int hintTop          = heldTop + lineHeight;
-    const int logTop           = hintTop + lineHeight + SCALE1(PADDING);
-    const int bottom           = screen->h - SCALE1(PADDING);
+    // The status group and the title share the top pill row, as on a list screen
+    UiLayoutContext measuring = context.createMeasuringContext();
+    const int statusWidth = measuring.layoutChild(statusGroup, SDL_Rect{0, 0, screen.w, padding + pillHeight}).getSize().w;
+    context.layoutChild(statusGroup, SDL_Rect{screen.w - padding - statusWidth, padding, statusWidth, pillHeight});
+    const int titleX      = padding + SCALE1(BUTTON_PADDING);
+    const int titleWidth  = screen.w - padding - SCALE1(BUTTON_PADDING) - statusWidth - titleX;
+    const int titleHeight = measuring.layoutChild(title, SDL_Rect{0, 0, titleWidth, pillHeight}).getSize().h;
+    context.layoutChild(title, SDL_Rect{titleX, padding + (pillHeight - titleHeight) / 2, titleWidth, titleHeight});
 
-    // The coordinator clears the screen before a draw after a change of the status group,
-    // thus the header draws on a clear screen
-    const int statusGroupWidth = InputState::getInstance().getStatusGroupWidth();
-    if (drawnStatusGroupWidth != statusGroupWidth) {
-        render_screen_title(screen, "Input test", statusGroupWidth);
-        drawTextLine(screen, font, "MENU + SELECT: back", secondary, hintTop);
-        drawnStatusGroupWidth = statusGroupWidth;
-    }
-
-    if (drawnHeld != held) {
-        char heldText[256] = "Held:";
-        for (int index = 0; index < kButtonCount; index++) {
-            const Button button = static_cast<Button>(index);
-            if (held & getButtonBit(button)) {
-                const size_t used = strlen(heldText);
-                snprintf(heldText + used, sizeof(heldText) - used, " %s", getButtonName(button));
-            }
+    char heldText[256] = "Held:";
+    for (int index = 0; index < kButtonCount; index++) {
+        const Button button = static_cast<Button>(index);
+        if (held & getButtonBit(button)) {
+            const size_t used = strlen(heldText);
+            snprintf(heldText + used, sizeof(heldText) - used, " %s", getButtonName(button));
         }
-        clearRows(screen, heldTop, hintTop);
-        drawTextLine(screen, font, heldText, primary, heldTop);
-        drawnHeld = held;
     }
+    heldLine.setText(heldText);
 
-    if (drawnLogVersion != logVersion) {
-        clearRows(screen, logTop, bottom);
-        // The newest entry is at the bottom, as in a log
-        const int fit   = std::max(0, (bottom - logTop) / lineHeight);
-        const int shown = std::min(entryCount, fit);
-        int y           = logTop;
-        for (int age = shown - 1; age >= 0; age--) {
-            const int index = (newest - age + kEntryCount) % kEntryCount;
-            y += drawTextLine(screen, font, entries[index].text.c_str(), primary, y);
-        }
-        drawnLogVersion = logVersion;
+    const int lineX      = SCALE1(PADDING * 2);
+    const int lineWidth  = screen.w - lineX - padding;
+    // Each line has one font, thus the held line gives the height of each line
+    const int lineHeight = measuring.layoutChild(heldLine, SDL_Rect{0, 0, lineWidth, screen.h}).getSize().h;
+    const int heldTop    = padding + pillHeight + padding;
+    const int hintTop    = heldTop + lineHeight;
+    const int logTop     = hintTop + lineHeight + padding;
+    const int bottom     = screen.h - padding;
+    context.layoutChild(heldLine, SDL_Rect{lineX, heldTop, lineWidth, lineHeight});
+    context.layoutChild(hintLine, SDL_Rect{lineX, hintTop, lineWidth, lineHeight});
+
+    // The newest entry is at the bottom, as in a log
+    const int fit   = std::max(0, (bottom - logTop) / lineHeight);
+    const int shown = std::min({entryCount, fit, kEntryCount});
+    for (int age = shown - 1, row = 0; age >= 0; age--, row++) {
+        const int index = (newest - age + kEntryCount) % kEntryCount;
+        TextView& line  = *logLines[static_cast<size_t>(row)];
+        line.setText(entries[static_cast<size_t>(index)].text.c_str());
+        context.layoutChild(line, SDL_Rect{lineX, logTop + row * lineHeight, lineWidth, lineHeight});
     }
 }
 

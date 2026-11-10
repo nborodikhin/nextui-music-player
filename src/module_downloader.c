@@ -67,7 +67,7 @@ YtdlpInstallResult DownloaderModule_runInstall(DisplayContext* display, int* sho
     // the layout only gains a progress bar on the way. A dialog on top would
     // have covered the versions the user is being asked to decide about.
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         GlobalInputResult global = ModuleCommon_handleGlobalInput(screen, show_setting,
@@ -177,7 +177,7 @@ ModuleExitReason DownloaderModule_run(DisplayContext* display) {
     }
 
     while (1) {
-        ModuleCommon_frameBegin();
+        ModuleCommon_frameBegin(true);
         SDL_Surface* const screen = DisplayHelper_getSurface(display);
 
         // Handle global input

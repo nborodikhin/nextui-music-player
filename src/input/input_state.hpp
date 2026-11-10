@@ -44,10 +44,9 @@ public:
     // hardware setting shows it, and it stays for a time after the last press.
     HardwareBar getHardwareBar() const { return hardwareBar; }
 
-    // Returns the width of the status group, or of the hardware bar in its place. The title of
-    // a page takes the room that is left. It changes with the hardware bar, the clock, Wi-Fi
-    // and Bluetooth.
-    int getStatusGroupWidth() const { return statusGroupWidth; }
+    // Returns true when the status group must draw again: the volume or the brightness changed,
+    // or the power management asked for a draw. The status group clears it when it draws.
+    bool isStatusChanged() const { return statusChanged; }
 
     // Returns the time of the current frame in milliseconds.
     uint32_t getTime() const { return time; }
@@ -65,8 +64,11 @@ public:
     // Records the hardware bar. Only the common button handler calls it.
     void setHardwareBar(HardwareBar bar) { hardwareBar = bar; }
 
-    // Records the width of the status group. Only the coordinator of a page calls it.
-    void setStatusGroupWidth(int width) { statusGroupWidth = width; }
+    // Records that the status group must draw again. Only the page loop calls it.
+    void setStatusChanged() { statusChanged = true; }
+
+    // Records that the status group drew. Only the status group calls it.
+    void clearStatusChanged() { statusChanged = false; }
 
     // Records the key lock of the frame. Only the coordinator of a page calls it.
     void setKeyLocked(bool locked) { keyLocked = locked; }
@@ -77,7 +79,7 @@ private:
     PadState padState{};
     uint32_t time = 0;
     HardwareBar hardwareBar = HardwareBar::None;
-    int statusGroupWidth    = 0;
+    bool statusChanged      = false;
     bool keyLocked          = false;
 };
 
