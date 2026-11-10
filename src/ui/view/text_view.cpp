@@ -90,8 +90,11 @@ void TextView::layout(UiLayoutContext& context) {
         render();
         dirty = true;
     }
-    const int width  = std::min(useEllipsis && bitmap ? bitmap->w : textWidth, maxWidth);
-    const int height = getFontHeight();
+    const int width      = std::min(useEllipsis && bitmap ? bitmap->w : textWidth, maxWidth);
+    const int fontHeight = getFontHeight();
+    const int lineHeight = std::max(TTF_FontLineSkip(font), fontHeight);
+    const int height     = std::max(fontHeight, std::min(lineHeight, context.getMaxSize().h));
+    textTop              = (height - fontHeight) / 2;
     context.setSize(UiSize{width, height});
     context.setTargetLayer(scrolling && isClipped() ? UiTargetLayer::AnimationLayer
                                                     : UiTargetLayer::MainSurface);
@@ -105,14 +108,16 @@ void TextView::draw(UiDrawContext& context) {
     // The text is opaque, as a text that TTF renders in a role color is
     SDL_SetSurfaceColorMod(bitmap, color.r, color.g, color.b);
 
+    if (!target) return;
+    context.setContentRect(SDL_Rect{0, textTop, target->w, bitmap->h});
     SDL_Rect from = {offset, 0, bitmap->w - offset, bitmap->h};
-    SDL_Rect to   = {0, 0, 0, 0};
+    SDL_Rect to   = {0, textTop, 0, 0};
     SDL_BlitSurface(bitmap, &from, target, &to);
     // The text loops: its next copy follows the gap
     const int next = bitmap->w + SCALE1(SCROLL_GAP) - offset;
     if (offset > 0 && next < target->w) {
         SDL_Rect whole = {0, 0, bitmap->w, bitmap->h};
-        SDL_Rect at    = {next, 0, 0, 0};
+        SDL_Rect at    = {next, textTop, 0, 0};
         SDL_BlitSurface(bitmap, &whole, target, &at);
     }
     finishDraw(target);

@@ -30,7 +30,6 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
-    TTF_Font* font;
     TextView shortText;
     TextView longText;
     bool selected  = false;

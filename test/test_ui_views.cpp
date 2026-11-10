@@ -114,6 +114,27 @@ TEST(test_text_that_fits_is_not_clipped_and_does_not_scroll) {
     CHECK(f.surfaceHasPixels(kRow));
 }
 
+TEST(test_text_is_as_high_as_a_line_with_the_text_in_the_middle) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setText("short");
+    f.frame(view, kRow);
+    const int fontHeight = TTF_FontHeight(testFont);
+    const int lineHeight = std::max(TTF_FontLineSkip(testFont), fontHeight);
+    CHECK_EQ_INT(view.getSize().h, lineHeight);
+    const int top = (lineHeight - fontHeight) / 2;
+    CHECK(f.surfaceHasPixels(SDL_Rect{0, top, kRow.w, fontHeight}));
+    if (top > 0) CHECK(!f.surfaceHasPixels(SDL_Rect{0, 0, kRow.w, top}));
+}
+
+TEST(test_text_takes_no_less_than_the_font_height) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setText("short");
+    f.frame(view, SDL_Rect{0, 0, 200, 1});
+    CHECK_EQ_INT(view.getSize().h, TTF_FontHeight(testFont));
+}
+
 TEST(test_long_text_with_ellipsis_keeps_one_width) {
     Fixture f;
     TextView view(testFont, true);
@@ -733,6 +754,8 @@ int main() {
     SDL_Surface* themeScreen = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_ARGB8888);
     Theme_init(themeScreen);
     RUN(test_text_that_fits_is_not_clipped_and_does_not_scroll);
+    RUN(test_text_is_as_high_as_a_line_with_the_text_in_the_middle);
+    RUN(test_text_takes_no_less_than_the_font_height);
     RUN(test_long_text_with_ellipsis_keeps_one_width);
     RUN(test_color_change_draws_the_view_again);
     RUN(test_scrolling_text_moves_to_the_layer_and_back);

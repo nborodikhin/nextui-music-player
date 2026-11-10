@@ -12,6 +12,8 @@
 /**
  * One line of text. A text that does not fit ends in "..." when the view uses the ellipsis.
  * Without it, the text is cut at the edge at rest, and scrolls on the animation layer.
+ * The view is as high as the line spacing of the font, and less where its parent gives less
+ * height, but not less than the height of the font. The text is in the middle of that height.
  */
 class TextView : public UiView {
 public:
@@ -58,6 +60,8 @@ private:
     int renderedMaxWidth = -1;
     int textWidth        = 0;
     int maxWidth         = 0;
+    // The top of the text in the view
+    int textTop          = 0;
     int offset           = 0;
     bool scrolling       = false;
     bool dirty           = true;

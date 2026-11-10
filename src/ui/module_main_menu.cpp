@@ -77,7 +77,7 @@ struct ScrollTimers {
 };
 
 /** The rows of the main menu, and the view of each row. */
-class MainMenuItems final : public ListAdapter {
+class MainMenuListAdapter final : public ListAdapter {
 public:
     /** Row map as last built. count -1 so the first build always differs. */
     MenuRows rows = {
@@ -299,7 +299,7 @@ private:
         }
     }
 
-    MainMenuItems items;
+    MainMenuListAdapter items;
     MenuSelection selection = MENU_NONE;
     bool exiting            = false;
 

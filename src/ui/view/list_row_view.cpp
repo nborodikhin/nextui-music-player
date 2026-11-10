@@ -10,7 +10,7 @@ extern "C" {
 #include "api.h"
 }
 
-ListRowView::ListRowView(TTF_Font* font) : font(font), shortText(font, true), longText(font, false) {
+ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font, false) {
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
@@ -41,14 +41,15 @@ void ListRowView::setContext(UiContext& context) {
 void ListRowView::layout(UiLayoutContext& context) {
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
-    const int padding       = SCALE1(BUTTON_PADDING);
-    const int textHeight    = TTF_FontHeight(font);
-    const SDL_Rect textRect = {padding, (size.h - textHeight) / 2, size.w - padding * 2, textHeight};
+    const int padding = SCALE1(BUTTON_PADDING);
+    SDL_Rect textRect = {padding, 0, size.w - padding * 2, size.h};
 
     // Both texts know their space, thus the long text can start to scroll when the row is selected
     UiLayoutContext measuring = context.createMeasuringContext();
-    measuring.layoutChild(shortText, textRect);
+    const int textHeight      = measuring.layoutChild(shortText, textRect).getSize().h;
     measuring.layoutChild(longText, textRect);
+    textRect.y = (size.h - textHeight) / 2;
+    textRect.h = textHeight;
     const bool clipped = shortText.isClipped();
     TextView& shown    = selected && clipped ? longText : shortText;
     context.setSize(size);

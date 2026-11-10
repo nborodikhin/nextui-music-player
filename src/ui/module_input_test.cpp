@@ -95,14 +95,6 @@ public:
         }
     }
 
-    // The clock and the battery level of the status group send no event
-    void onTick(uint32_t now) override {
-        if (now - statusRefreshedAt >= 1000) {
-            statusGroup.refresh();
-            statusRefreshedAt = now;
-        }
-    }
-
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
@@ -130,7 +122,6 @@ private:
     TextView hintLine{Fonts_getSmall(), true};
     // One view for each line of the log. A line that does not fit on the screen is not laid out.
     std::vector<std::unique_ptr<TextView>> logLines;
-    uint32_t statusRefreshedAt = 0;
 };
 
 void InputTestPage::addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name) {
@@ -185,10 +176,10 @@ void InputTestPage::layout(UiLayoutContext& context) {
     }
     heldLine.setText(heldText);
 
-    TTF_Font* font       = Fonts_getSmall();
-    const int lineHeight = TTF_FontLineSkip(font);
     const int lineX      = SCALE1(PADDING * 2);
     const int lineWidth  = screen.w - lineX - padding;
+    // Each line has one font, thus the held line gives the height of each line
+    const int lineHeight = measuring.layoutChild(heldLine, SDL_Rect{0, 0, lineWidth, screen.h}).getSize().h;
     const int heldTop    = padding + pillHeight + padding;
     const int hintTop    = heldTop + lineHeight;
     const int logTop     = hintTop + lineHeight + padding;
