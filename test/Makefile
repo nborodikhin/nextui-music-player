@@ -247,32 +247,44 @@ $(BIN)/test_spectrum_ceiling: test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c 
                               $(SRC)/spectrum.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_spectrum_ceiling.c $(SRC)/spectrum_ceiling.c -lm
 
-DB_INC = $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
+# The database tests compile and link the SQLite version of the devices, not the
+# library of the host, thus SQL that the devices do not have fails here too.
+SQLITE_DIR  = ../deps/sqlite
+SQLITE_OBJ  = $(BIN)/sqlite3.o
+SQLITE_LIBS = $(SQLITE_OBJ) -ldl -lpthread
+
+$(SQLITE_DIR)/sqlite3.c:
+	@echo "deps/sqlite is missing - run ./dev deps fetch" >&2; exit 1
+
+$(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(BIN)
+	$(CC) $(CFLAGS) -O1 -w -c -o $@ $<
+
+DB_INC = -I$(SQLITE_DIR) $(INC) -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/platform \
          -I../NextUI/workspace/desktop/libmsettings -DPLATFORM='"desktop"' -DUSE_SDL2
 TEST_TEMP_DIR ?= $(abspath ../.codex_tmp/tests/data)
 
 $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                 $(SRC)/db_statement.c $(SRC)/db_statement.h \
-                $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+                $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/db-music"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
-	  -lsqlite3 -lpthread -lzip
+	  $(SQLITE_LIBS) -lzip
 
 $(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
                       $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                       $(SRC)/db_statement.c $(SRC)/db_statement.h \
-                      $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+                      $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/settings-music"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
-	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
+	  $(SRC)/db_statement.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
 
 M3U_TEST_MUSIC = $(TEST_TEMP_DIR)/playlist-music
 M3U_TEST_DB = $(TEST_TEMP_DIR)/playlist-m3u.db
@@ -284,7 +296,7 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
                           $(SRC)/db_schema.c $(SRC)/db_schema.h \
                           $(SRC)/db_statement.c $(SRC)/db_statement.h \
                           $(SRC)/file_utils.c $(SRC)/file_utils.h \
-                          $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+                          $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DMUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
@@ -296,7 +308,7 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
 	  -o $@ test_playlist_m3u.c $(SRC)/playlist_m3u.c $(SRC)/filedb.c $(SRC)/db.c \
 	  $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  $(SRC)/utf8.c \
-	  -lsqlite3 -lpthread -lzip
+	  $(SQLITE_LIBS) -lzip
 
 $(BIN)/test_icy: test_icy.c $(SRC)/icy.c $(SRC)/icy.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_icy.c $(SRC)/icy.c $(SRC)/utf8.c
@@ -318,7 +330,7 @@ $(BIN)/test_resume: test_resume.c $(SRC)/resume.c $(SRC)/resume.h \
                      $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                      $(SRC)/db_statement.c $(SRC)/db_statement.h \
                      $(SRC)/file_utils.c $(SRC)/file_utils.h \
-                     $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
+                     $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DMUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
@@ -329,7 +341,7 @@ $(BIN)/test_resume: test_resume.c $(SRC)/resume.c $(SRC)/resume.h \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_resume.c $(SRC)/resume.c $(SRC)/filedb.c $(SRC)/playlist_m3u.c \
 	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c \
-	  $(SRC)/file_utils.c $(SRC)/utf8.c -lsqlite3 -lpthread -lzip
+	  $(SRC)/file_utils.c $(SRC)/utf8.c $(SQLITE_LIBS) -lzip
 
 FILEDB_TEST_MUSIC = $(TEST_TEMP_DIR)/filedb-music
 FILEDB_TEST_DB = $(TEST_TEMP_DIR)/filedb.db
@@ -338,7 +350,7 @@ $(BIN)/test_filedb: test_filedb.c $(SRC)/filedb.c $(SRC)/filedb.h \
                      $(SRC)/browser.c $(SRC)/browser.h \
                      $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                      $(SRC)/db_statement.c $(SRC)/db_statement.h \
-                     $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+                     $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/filedb-userdata"' \
@@ -347,7 +359,7 @@ $(BIN)/test_filedb: test_filedb.c $(SRC)/filedb.c $(SRC)/filedb.h \
 	  -DFILEDB_MUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
 	  -DFILEDB_DATABASE_PATH='"$(FILEDB_TEST_DB)"' \
 	  -o $@ test_filedb.c $(SRC)/filedb.c $(SRC)/browser.c $(SRC)/db.c $(SRC)/db_schema.c \
-	  $(SRC)/db_statement.c $(SRC)/file_utils.c -lsqlite3 -lpthread -lzip
+	  $(SRC)/db_statement.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
 
 PLAYLIST_TEST_MUSIC = $(TEST_TEMP_DIR)/queue-music
 PLAYLIST_TEST_DB = $(TEST_TEMP_DIR)/queue.db
@@ -357,7 +369,7 @@ $(BIN)/test_playlist: test_playlist.c $(SRC)/playlist.c $(SRC)/playlist.h \
                        $(SRC)/browser.c $(SRC)/browser.h \
                        $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
                        $(SRC)/db_statement.c $(SRC)/db_statement.h \
-                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h | $(BIN)
+                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/queue-userdata"' \
@@ -367,7 +379,7 @@ $(BIN)/test_playlist: test_playlist.c $(SRC)/playlist.c $(SRC)/playlist.h \
 	  -DPLAYLIST_DATABASE_PATH='"$(PLAYLIST_TEST_DB)"' \
 	  -o $@ test_playlist.c $(SRC)/playlist.c $(SRC)/filedb.c $(SRC)/browser.c \
 	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
-	  -lsqlite3 -lpthread -lzip
+	  $(SQLITE_LIBS) -lzip
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
                 -Wl,-rpath,/var/tmp/nextui/lib
