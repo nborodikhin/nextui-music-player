@@ -725,7 +725,7 @@ def main_worktree(checkout):
 
 
 def checkout_origin():
-    """The checkout whose NextUI clones and Zig archives this checkout takes, or
+    """The checkout whose NextUI clones and archives this checkout takes, or
     None when this checkout clones and downloads its own. Without --origin, a
     linked git worktree takes the main worktree."""
     if REQUESTED_ORIGIN == ORIGIN_NONE:
@@ -1058,9 +1058,9 @@ ZIG_HOST_CPUS = {
     "arm64": "aarch64",
 }
 ZIG_DEVICE_SYSTEM = "linux"
-# The Zig archives that ./dev downloaded, kept for a fetch again and for the
+# The archives that ./dev downloaded, kept for a fetch again and for the
 # checkouts that take this checkout as their origin.
-ZIG_DOWNLOADS = "deps/downloads"
+DOWNLOADS = "deps/downloads"
 ZIG_HOST_SYSTEM = "macos" if os.uname().sysname == "Darwin" else "linux"
 
 
@@ -1088,11 +1088,6 @@ class Zig:
     @property
     def marker(self):
         return self.root / ".music-player-zig"
-
-    @property
-    def archive_file(self):
-        return PurePosixPath(urllib.parse.urlparse(self.url).path).name
-
 
 def load_zig(system):
     """Read the Zig pin for the CPU of the host and `system`, linux or macos."""
@@ -1187,40 +1182,61 @@ def zig_systems():
     return sorted({ZIG_DEVICE_SYSTEM, ZIG_HOST_SYSTEM})
 
 
-def kept_zig_archive(checkout, zig):
-    """The archive of `zig` that `checkout` keeps, when its sha256 agrees with the
-    pin. The minisign check ran when the archive was downloaded."""
-    path = checkout / ZIG_DOWNLOADS / zig.archive_file
+def url_file_name(url):
+    return PurePosixPath(urllib.parse.urlparse(url).path).name
+
+
+def kept_archive(checkout, name, sha256):
+    """The archive `name` that `checkout` keeps, when its sha256 agrees with the
+    pin. The other checks ran when the archive was downloaded."""
+    path = checkout / DOWNLOADS / name
     if not path.is_file():
         return None
-    if sha256_of(path) != zig.sha256:
+    if sha256_of(path) != sha256:
         print("{}: the sha256 does not agree with {}".format(path, DEPS_MANIFEST.name),
               flush=True)
         return None
     return path
 
 
-def download_zig(zig, store):
-    """Download and verify the archive of `zig`, and keep it in `store`."""
-    print("Downloading Zig {} ({}) into {}".format(zig.version, zig.archive, store),
-          flush=True)
+def download_archive(label, url, sha256, store, verify):
+    """Download and verify the archive at `url`, and keep it in `store`. `verify`
+    is None, or a function that raises DevError for an archive that it rejects."""
+    print("Downloading {} into {}".format(label, store), flush=True)
     store.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=store, prefix=".zig-") as work:
-        archive = Path(work) / zig.archive_file
-        download(zig.url, archive)
+    name = url_file_name(url)
+    with tempfile.TemporaryDirectory(dir=store, prefix=".download-") as work:
+        archive = Path(work) / name
+        download(url, archive)
         digest = sha256_of(archive)
-        if digest != zig.sha256:
+        if digest != sha256:
             raise DevError(
                 "{}: sha256 is {}, {} pins {}".format(
-                    archive.name, digest, DEPS_MANIFEST.name, zig.sha256
+                    archive.name, digest, DEPS_MANIFEST.name, sha256
                 )
             )
-        verify_zig_signature(zig, archive)
+        if verify:
+            verify(archive)
         # A rename in one directory, thus a fetch at the same time never reads
         # a part of the file.
-        kept = store / zig.archive_file
+        kept = store / name
         os.replace(archive, kept)
     return kept
+
+
+def fetch_archive(label, url, sha256, verify=None):
+    """Returns the path of the pinned archive at `url`. It takes the archive that
+    this checkout or its origin keeps, and downloads it only when neither keeps
+    it."""
+    name = url_file_name(url)
+    origin = checkout_origin()
+    store = (origin or ROOT) / DOWNLOADS
+    with file_lock(store / ".lock", "downloads into " + str(store)):
+        for checkout in (ROOT, origin) if origin else (ROOT,):
+            archive = kept_archive(checkout, name, sha256)
+            if archive:
+                return archive
+        return download_archive(label, url, sha256, store, verify)
 
 
 def fetch_zig(system):
@@ -1237,16 +1253,12 @@ def fetch_zig(system):
     if old_marker.is_file():
         shutil.rmtree(ROOT / zig.path)
 
-    origin = checkout_origin()
-    store = (origin or ROOT) / ZIG_DOWNLOADS
-    with file_lock(store / ".lock", "downloads into " + str(store)):
-        archive = None
-        for checkout in (ROOT, origin) if origin else (ROOT,):
-            archive = kept_zig_archive(checkout, zig)
-            if archive:
-                break
-        if archive is None:
-            archive = download_zig(zig, store)
+    archive = fetch_archive(
+        "Zig {} ({})".format(zig.version, zig.archive),
+        zig.url,
+        zig.sha256,
+        lambda archive: verify_zig_signature(zig, archive),
+    )
 
     print("Unpacking Zig {} ({}) from {} into {}".format(
         zig.version, zig.archive, archive, zig.path), flush=True)
@@ -1270,9 +1282,107 @@ def fetch_zig(system):
     return True
 
 
+SQLITE_NAME = "sqlite"
+# The files of the amalgamation that the tests compile.
+SQLITE_FILES = ("sqlite3.c", "sqlite3.h")
+
+
+@dataclass(frozen=True)
+class Sqlite:
+    """The SQLite amalgamation that the host tests of the database code compile in
+    place of the library of the host, thus SQL that the devices do not have fails
+    on the host too. `marker` holds the sha256 of the archive that the tree came
+    from."""
+
+    version: str
+    path: str
+    url: str
+    sha256: str
+
+    @property
+    def root(self):
+        return ROOT / self.path
+
+    @property
+    def marker(self):
+        return self.root / ".music-player-sqlite"
+
+    @property
+    def lock(self):
+        # Outside the tree, because a fetch replaces the tree.
+        return self.root.parent / ".sqlite.lock"
+
+
+def load_sqlite():
+    entry = read_deps_manifest().get(SQLITE_NAME)
+    if not entry:
+        raise DevError("{} pins no {}".format(DEPS_MANIFEST.name, SQLITE_NAME))
+    return Sqlite(
+        version = entry["version"],
+        path    = entry["path"],
+        url     = entry["url"],
+        sha256  = entry["sha256"],
+    )
+
+
+def sqlite_installed(sqlite):
+    if not all((sqlite.root / name).is_file() for name in SQLITE_FILES):
+        return False
+    if not sqlite.marker.is_file():
+        return False
+    return sqlite.marker.read_text(encoding="utf-8").strip() == sqlite.sha256
+
+
+def describe_sqlite(sqlite):
+    state = "pinned" if sqlite_installed(sqlite) else "missing"
+    return "{} at {}/ - {}, {}".format(
+        SQLITE_NAME, sqlite.root.relative_to(ROOT), state, sqlite.version
+    )
+
+
+def fetch_sqlite():
+    """Make the pinned SQLite amalgamation exist, without touching the network
+    when it already does or when this checkout or its origin keeps the archive.
+    Returns True when it unpacked an archive."""
+    sqlite = load_sqlite()
+    if sqlite_installed(sqlite):
+        return False
+
+    with file_lock(sqlite.lock, "unpacks SQLite into " + str(sqlite.root)):
+        # Another ./dev can finish the tree while this one waits for the lock.
+        if sqlite_installed(sqlite):
+            return False
+        archive = fetch_archive("SQLite " + sqlite.version, sqlite.url, sqlite.sha256)
+
+        print("Unpacking SQLite {} from {} into {}".format(
+            sqlite.version, archive, sqlite.path), flush=True)
+        with tempfile.TemporaryDirectory(dir=sqlite.root.parent, prefix=".sqlite-") as work:
+            tree = Path(work) / "tree"
+            tree.mkdir()
+            with zipfile.ZipFile(archive) as source:
+                members = {PurePosixPath(name): name for name in source.namelist()}
+                for name in SQLITE_FILES:
+                    found = [path for path in members
+                             if len(path.parts) == 2 and path.name == name]
+                    if len(found) != 1:
+                        raise DevError(
+                            "{} does not hold one {} in one top directory".format(
+                                archive.name, name))
+                    with source.open(members[found[0]]) as data, \
+                            (tree / name).open("wb") as out:
+                        shutil.copyfileobj(data, out)
+            (tree / sqlite.marker.name).write_text(sqlite.sha256 + "\n", encoding="utf-8")
+
+            if sqlite.root.exists():
+                shutil.rmtree(sqlite.root)
+            tree.rename(sqlite.root)
+    return True
+
+
 def selected_dependencies(name):
-    """The git checkouts that a deps command names. Zig is not one of them."""
-    if name == ZIG_NAME:
+    """The git checkouts that a deps command names. Zig and SQLite are not
+    among them."""
+    if name in (ZIG_NAME, SQLITE_NAME):
         return []
     dependencies = load_dependencies()
     if name in (None, "all"):
@@ -1282,6 +1392,10 @@ def selected_dependencies(name):
 
 def zig_selected(name):
     return name in (None, "all", ZIG_NAME)
+
+
+def sqlite_selected(name):
+    return name in (None, "all", SQLITE_NAME)
 
 
 def command_deps_list(args):
@@ -1295,6 +1409,8 @@ def command_deps_list(args):
     if zig_selected(args.dependency):
         for system in zig_systems():
             print(describe_zig(load_zig(system)))
+    if sqlite_selected(args.dependency):
+        print(describe_sqlite(load_sqlite()))
     return 0
 
 
@@ -1307,6 +1423,9 @@ def command_deps_fetch(args):
         for system in zig_systems():
             if not fetch_zig(system):
                 print(describe_zig(load_zig(system)))
+    if sqlite_selected(args.dependency):
+        if not fetch_sqlite():
+            print(describe_sqlite(load_sqlite()))
     unpinned = []
     with dependency_lock():
         for dependency in selected_dependencies(args.dependency):
@@ -1384,10 +1503,12 @@ def restore_dependency(dependency):
 
 
 def command_deps_update(args):
-    # A Zig pin names one archive, thus an update of Zig is a fetch.
+    # A Zig or SQLite pin names one archive, thus an update of it is a fetch.
     if zig_selected(args.dependency):
         for system in zig_systems():
             fetch_zig(system)
+    if sqlite_selected(args.dependency):
+        fetch_sqlite()
     with dependency_lock():
         for dependency in selected_dependencies(args.dependency):
             update_dependency(dependency)
@@ -2828,6 +2949,7 @@ def command_test(_args):
         env = os.environ.copy()
         env["TEST_TEMP_DIR"] = str(test_tmp_dir)
         fetch_zig(ZIG_HOST_SYSTEM)
+        fetch_sqlite()
         run_command(["make", "-C", str(ROOT / "test")], env=env)
         return 0
     finally:

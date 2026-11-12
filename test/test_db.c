@@ -271,6 +271,27 @@ static bool sqlite_setting_is(const char* path, const char* name,
     return matches;
 }
 
+// The SQLite version of the devices. A newer header or library hides SQL that
+// the devices do not have.
+#define DEVICE_SQLITE_VERSION "3.12.2"
+
+TEST(sqlite_is_the_device_version) {
+    sqlite3* database = NULL;
+    sqlite3_stmt* statement = NULL;
+
+    CHECK(strcmp(SQLITE_VERSION, DEVICE_SQLITE_VERSION) == 0);
+    CHECK(strcmp(sqlite3_libversion(), DEVICE_SQLITE_VERSION) == 0);
+    CHECK(sqlite3_open(":memory:", &database) == SQLITE_OK);
+    CHECK(sqlite3_prepare_v2(database, "SELECT sqlite_version()", -1, &statement, NULL) ==
+          SQLITE_OK);
+    const char* version = sqlite3_step(statement) == SQLITE_ROW
+                              ? (const char*)sqlite3_column_text(statement, 0)
+                              : NULL;
+    CHECK(version && strcmp(version, DEVICE_SQLITE_VERSION) == 0);
+    sqlite3_finalize(statement);
+    sqlite3_close(database);
+}
+
 TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
@@ -1216,6 +1237,7 @@ TEST(thread_connection_shares_settings) {
 }
 
 int main(void) {
+    RUN(sqlite_is_the_device_version);
     RUN(fresh_database_gets_schema);
     RUN(settings_file_migration_runs_ordered_actions);
     RUN(failed_settings_migration_keeps_no_partial_rows);
