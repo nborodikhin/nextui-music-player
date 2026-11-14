@@ -1851,6 +1851,11 @@ def build_desktop(kind):
         raise DevError("Unsupported host OS: " + system)
     env["PREFIX_LOCAL"] = str(prefix_local)
     env["UNION_PLATFORM"] = "desktop"
+    # A make that runs ./dev gives its flags to the make of the app only. Thus a
+    # dry run, as an IDE starts it to read the compile commands, still prepares
+    # the NextUI tree and still prints the commands of the app.
+    setup_env = {key: value for key, value in env.items()
+                 if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")}
 
     # Each checkout writes the shared prefix and reads it to compile and link,
     # thus one desktop build at a time runs this part.
@@ -1860,12 +1865,12 @@ def build_desktop(kind):
             if system == "Darwin" and not os.access("/usr/local/bin/gcc", os.X_OK):
                 run_command(
                     ["sudo", str(desktop_root / "macos_create_gcc_symlinks.sh")],
-                    env=env,
+                    env=setup_env,
                 )
-            run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=env)
+            run_command([str(desktop_root / "prepare_fake_sd_root.sh")], env=setup_env)
             run_command(
                 ["make", "-C", str(nextui_root), "build", "PLATFORM=desktop"],
-                env=env,
+                env=setup_env,
             )
             prefix_local.mkdir(parents=True, exist_ok=True)
             setup_marker.touch()
@@ -1874,7 +1879,7 @@ def build_desktop(kind):
         installed_header = prefix_local / "include/msettings.h"
         previous_header = installed_header.read_bytes() if installed_header.exists() else None
         previous_stat = installed_header.stat() if previous_header is not None else None
-        run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=env)
+        run_command(["make", "-C", str(desktop_root / "libmsettings"), "build"], env=setup_env)
         if previous_header is not None and installed_header.read_bytes() == previous_header:
             os.utime(installed_header, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
         run_command(

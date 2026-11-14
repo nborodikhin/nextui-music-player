@@ -81,19 +81,17 @@ CLion knows a compiler by the name of the program that runs, and it does not
 know `zig`. Thus the Makefiles compile C++ with `zig-c++`, a script that
 `./dev deps fetch` puts beside `zig` and that runs `zig c++`.
 
-1. Run `./dev deps fetch` and `./dev build desktop` once. Run
-   `./dev deps fetch` again if `deps/zig/` has no `zig-c++` script.
-2. **Settings | Build, Execution, Deployment | Makefile**: set
+The default goal runs `./dev build desktop`, also in a dry run. Thus the
+reload of the project fetches the dependencies and prepares the NextUI tree
+when necessary. The first reload on a fresh clone takes some minutes.
+
+1. **Settings | Build, Execution, Deployment | Makefile**: set
    **Build target** to `ide`, and set **Arguments** to `--always-make`.
    After a build, a dry run of make shows no commands for the files that
    are up to date. Then CLion reports "This file does not belong to any
    project target" for those files. `--always-make` makes the dry run show
    all compile commands.
-3. **Tools | Makefile | Reload Makefile Project**. Do not use
-   **Clean and Reload Makefile Project**. The `clean` goal deletes
-   `src/build/`, which removes the `version_string.c` that `./dev` makes.
-   Then the reload stops with "No .../version_string.c - build through
-   ./dev". If this occurs, run `./dev build desktop` again.
+2. **Tools | Makefile | Reload Makefile Project**.
 
 ### Build Commands and Tools
 
