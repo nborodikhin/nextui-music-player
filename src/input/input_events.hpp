@@ -84,6 +84,11 @@ struct RawEvent {
         kind;
 };
 
+/** Returns: true for a raw event of a button of the pad, false for a media key */
+inline bool isButtonEvent(const RawEvent& event) {
+    return std::get_if<event::Media>(&event.kind) == nullptr;
+}
+
 // The button events: what the input means.
 namespace event {
 struct ShortPress {
@@ -109,6 +114,14 @@ struct Combo {
 struct ButtonEvent {
     uint32_t time;
     std::variant<event::ShortPress, event::LongPress, event::Repeat, event::Combo> kind;
+
+    /** Returns: true for a short press, a long press or a repeat of button, false for a combo */
+    bool isSingleButton(Button button) const {
+        if (const auto* typedEvent = std::get_if<event::ShortPress>(&kind)) return typedEvent->button == button;
+        if (const auto* typedEvent = std::get_if<event::LongPress>(&kind)) return typedEvent->button == button;
+        if (const auto* typedEvent = std::get_if<event::Repeat>(&kind)) return typedEvent->button == button;
+        return false;
+    }
 };
 
 // What a listener asks the detector for. The short press is always on.

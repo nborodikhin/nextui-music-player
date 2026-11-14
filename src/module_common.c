@@ -300,61 +300,6 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
     return result;
 }
 
-// The work of each frame of a dialog loop that does not depend on the dialog: the track
-// advancement and the resume saving, and the earphone buttons
-static void tick_dialog_frame(void) {
-    Background_tick();
-    USBHIDEvent hid_event;
-    while ((hid_event = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {
-        ModuleCommon_handleMediaKey(hid_event);
-    }
-}
-
-// The dialog covers the screen, thus the layers of the screen go
-static void clear_screen_layers(void) {
-    UiLayer_clear(UI_LAYER_STATUS);
-    UiLayer_clear(UI_LAYER_ANIMATION);
-}
-
-bool ModuleCommon_runQuitDialog(DisplayContext* display) {
-    clear_screen_layers();
-    while (!ModuleCommon_isQuitRequested()) {
-        ModuleCommon_frameBegin(true);
-        tick_dialog_frame();
-        if (PAD_justPressed(BTN_A)) {
-            quit_requested = true;
-            return true;
-        }
-        if (PAD_justPressed(BTN_B) || PAD_justPressed(BTN_START)) return false;
-
-        SDL_Surface* screen = DisplayHelper_getSurface(display);
-        render_confirmation_dialog(screen, NULL, "Quit Music Player?");
-        ModuleCommon_markSurfaceDrawn();
-        ModuleCommon_frameEnd(screen);
-    }
-    return true;
-}
-
-void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id) {
-    clear_screen_layers();
-    while (!ModuleCommon_isQuitRequested()) {
-        ModuleCommon_frameBegin(true);
-        tick_dialog_frame();
-        if (PAD_justPressed(BTN_A) || PAD_justPressed(BTN_B) || PAD_justPressed(BTN_X) ||
-            PAD_justPressed(BTN_Y) || PAD_justPressed(BTN_START) || PAD_justPressed(BTN_SELECT) ||
-            PAD_justPressed(BTN_UP) || PAD_justPressed(BTN_DOWN) ||
-            PAD_justPressed(BTN_LEFT) || PAD_justPressed(BTN_RIGHT) ||
-            PAD_justPressed(BTN_L1) || PAD_justPressed(BTN_R1) || PAD_justPressed(BTN_MENU)) {
-            return;
-        }
-
-        SDL_Surface* screen = DisplayHelper_getSurface(display);
-        render_controls_help(screen, help_id);
-        ModuleCommon_markSurfaceDrawn();
-        ModuleCommon_frameEnd(screen);
-    }
-}
-
 void ModuleCommon_setAutosleepDisabled(bool disabled) {
     if (disabled && !autosleep_disabled) {
         PWR_disableAutosleep();

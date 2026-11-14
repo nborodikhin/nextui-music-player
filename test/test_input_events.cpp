@@ -912,6 +912,80 @@ TEST(manager_gives_the_repeats_to_the_owner_of_the_short_press) {
                         "handler cancel DOWN", "page repeat DOWN", "page repeat DOWN"}));
 }
 
+// A discard cancels each held button and gives the rest of the gesture to no listener, also to
+// the owner
+TEST(manager_discard_gives_the_gesture_to_no_listener) {
+    ManagerFixture f;
+    f.handler.consumePressedMask = bit(Button::Start);
+    f.press(Button::Start);
+    f.log.clear();
+    f.manager.discardGesture(0);
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.shortPress(Button::Start);
+    f.release(Button::Start);
+    CHECK(isLog(f.log, {"handler cancel START"}));
+}
+
+// A press that starts in the same poll after the gesture ended goes to no listener. A press in the
+// next poll goes to the chain.
+TEST(manager_discard_lasts_to_the_end_of_the_poll) {
+    ManagerFixture f;
+    f.press(Button::Start);
+    f.manager.discardGesture(0);
+    f.release(Button::Start);
+    f.press(Button::X);
+    f.shortPress(Button::X);
+    f.release(Button::X);
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.log.clear();
+    f.manager.beginPoll();
+    f.press(Button::B);
+    CHECK(isLog(f.log, {"page pressed B", "handler pressed B"}));
+}
+
+// After a new chain, the gesture that started before it reaches no listener, also a second button
+// and Media. The next gesture reaches the new chain.
+TEST(manager_new_chain_gets_no_event_of_the_old_gesture) {
+    ManagerFixture f;
+    std::vector<std::string> newLog;
+    ChainListener dialog{"dialog", newLog};
+    f.press(Button::Start);
+    f.manager.setChain({&dialog, &f.handler});
+    f.manager.beginPoll();
+    f.press(Button::A);
+    f.shortPress(Button::A);
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.release(Button::Start);
+    f.release(Button::A);
+    CHECK(isLog(newLog, {}));
+    f.manager.beginPoll();
+    f.manager.onRawEvent({0, event::Media{MediaKey::PlayPause}});
+    f.press(Button::A);
+    CHECK(isLog(newLog, {"dialog media", "dialog pressed A"}));
+}
+
+TEST(manager_new_chain_with_no_held_button_gets_the_next_press) {
+    ManagerFixture f;
+    std::vector<std::string> newLog;
+    ChainListener dialog{"dialog", newLog};
+    f.manager.setChain({&dialog});
+    f.press(Button::B);
+    CHECK(isLog(newLog, {"dialog pressed B"}));
+}
+
+TEST(manager_reset_reaches_each_listener_of_the_new_chain) {
+    ManagerFixture f;
+    std::vector<std::string> newLog;
+    ChainListener dialog{"dialog", newLog};
+    ChainListener other{"other", newLog};
+    f.press(Button::Start);
+    f.manager.setChain({&dialog, &other});
+    // The reset ends the gesture, thus the next press reaches the new chain
+    f.manager.onRawEvent({0, event::ButtonReset{}});
+    f.press(Button::A);
+    CHECK(isLog(newLog, {"dialog reset", "other reset", "dialog pressed A", "other pressed A"}));
+}
+
 int main(void) {
     printf("input events\n");
     RUN(pad_gives_buttons_in_bit_order_and_presses_before_releases);
@@ -967,5 +1041,10 @@ int main(void) {
     RUN(manager_media_goes_to_the_first_consumer_or_to_the_owner);
     RUN(manager_media_sets_the_owner_of_a_held_button);
     RUN(manager_gives_the_repeats_to_the_owner_of_the_short_press);
+    RUN(manager_discard_gives_the_gesture_to_no_listener);
+    RUN(manager_discard_lasts_to_the_end_of_the_poll);
+    RUN(manager_new_chain_gets_no_event_of_the_old_gesture);
+    RUN(manager_new_chain_with_no_held_button_gets_the_next_press);
+    RUN(manager_reset_reaches_each_listener_of_the_new_chain);
     return test_summary();
 }

@@ -21,7 +21,8 @@ public:
     TextView(TTF_Font* font, bool useEllipsis);
     ~TextView() override;
 
-    void setText(const char* text);
+    /** Returns: true when the text changed */
+    bool setText(const std::string& text);
     void setColor(SDL_Color color);
 
     /** Returns true when the text is wider than the space of the last layout. */

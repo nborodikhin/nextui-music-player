@@ -15,12 +15,12 @@ TextView::TextView(TTF_Font* font, bool useEllipsis) : font(font), useEllipsis(u
 
 TextView::~TextView() { freeRender(); }
 
-void TextView::setText(const char* newText) {
-    const char* value = newText ? newText : "";
-    if (text == value) return;
-    text        = value;
+bool TextView::setText(const std::string& newText) {
+    if (text == newText) return false;
+    text        = newText;
     renderStale = true;
     dirty       = true;
+    return true;
 }
 
 void TextView::setColor(SDL_Color newColor) {

@@ -11,8 +11,9 @@ extern "C" {
 #include "module_common.h"
 
 // Runs the input test screen of the debug kind: it shows the held buttons and the last raw
-// events and button events. MENU + SELECT returns MODULE_EXIT_BACK.
-ModuleExitReason InputTestModule_run(DisplayContext* display);
+// events and button events. MENU + SELECT returns. A quit in the test sets the quit flag of
+// ModuleCommon_isQuitRequested().
+void InputTestModule_run(DisplayContext* display);
 
 #endif
 

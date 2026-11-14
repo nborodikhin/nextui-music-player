@@ -10,7 +10,7 @@ class ListAdapter {
 public:
     virtual int getCount() const = 0;
 
-    /** Returns an id that stays with the item when the data changes. */
+    /** Returns the stable id of the row. */
     virtual long getItemId(int index) const = 0;
 
     /** Returns the view of the item. The adapter can make it, or return a view that it keeps. */

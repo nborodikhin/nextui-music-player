@@ -36,6 +36,13 @@ public:
     void drawFrame();
 
     /**
+     * Draws the views of the last layout, and returns them composed over the whole screen in one
+     * new surface with premultiplied alpha. The caller frees the surface. The screen and the
+     * layers do not change, and the next frame composes the whole screen. Returns null on an error.
+     */
+    SDL_Surface* drawSnapshot();
+
+    /**
      * Composes the whole screen on the next frame, and clears each layer that the compositor
      * wrote. Call it when the screen no longer holds the last frame.
      */
@@ -82,6 +89,12 @@ private:
     };
 
     void collectEntries(const UiLayoutContext& context, bool parentShown);
+    /** Collects the entries of the last layout, and draws each view that needs it. */
+    void prepareEntries();
+    /** Finds the part of each entry that shows, and hides an entry that shows nothing. */
+    void updateVisibleRects();
+    /** Puts the bitmaps of the shown entries of target over buffer, which covers region. */
+    void composeEntries(UiTargetLayer target, const SDL_Rect& region, SDL_Surface* buffer);
     void addDamage(UiTargetLayer target, const SDL_Rect& rect);
     void drawViews();
     void addEntryDamage();

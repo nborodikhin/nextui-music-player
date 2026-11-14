@@ -228,6 +228,25 @@ TEST(test_dirty_view_draws_and_composes) {
     CHECK_EQ_SZ(f.surfaceAt(1, 1), kGreen);
 }
 
+// The snapshot draws the view that changed, and the next frame still shows the change
+TEST(test_frame_after_a_snapshot_composes_the_change) {
+    Fixture f;
+    TestView view(kRed);
+    f.compositor.beginLayout().layoutChild(view, SDL_Rect{0, 0, 4, 4});
+    f.compositor.drawFrame();
+    view.color = kGreen;
+    view.dirty = true;
+    f.compositor.beginLayout().layoutChild(view, SDL_Rect{0, 0, 4, 4});
+    SDL_Surface* snapshot = f.compositor.drawSnapshot();
+    CHECK(snapshot != nullptr);
+    SDL_FreeSurface(snapshot);
+    CHECK_EQ_SZ(f.surfaceAt(1, 1), kRed);
+    f.compositor.beginLayout().layoutChild(view, SDL_Rect{0, 0, 4, 4});
+    f.compositor.drawFrame();
+    CHECK_EQ_INT(view.draws, 2);
+    CHECK_EQ_SZ(f.surfaceAt(1, 1), kGreen);
+}
+
 TEST(test_overlap_composes_in_z_order_with_no_draw) {
     Fixture f;
     TestView under(kGreen);
@@ -434,6 +453,7 @@ int main() {
     RUN(test_resized_view_draws_again);
     RUN(test_view_moved_to_layer_composes_both_targets);
     RUN(test_dirty_view_draws_and_composes);
+    RUN(test_frame_after_a_snapshot_composes_the_change);
     RUN(test_overlap_composes_in_z_order_with_no_draw);
     RUN(test_hidden_views_compose_as_removed);
     RUN(test_entry_outside_its_clip_composes_nothing);

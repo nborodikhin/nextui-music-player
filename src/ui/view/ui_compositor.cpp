@@ -190,25 +190,14 @@ void UiCompositor::drawFrame() {
     layersChanged  = false;
     if (!screen || !root) return;
 
-    entries.clear();
     for (std::vector<SDL_Rect>& damage : damageByTarget) damage.clear();
-    collectEntries(*root, true);
+    prepareEntries();
 
     if (clearLayersPending) clearUsedLayers();
     if (composeAll) {
         addDamage(UiTargetLayer::MainSurface, SDL_Rect{0, 0, screen->w, screen->h});
         composeAll = false;
     }
-
-    // The first pass picks the views to draw. The draw can change the content rectangle, thus
-    // the damage comes after it.
-    for (Entry& entry : entries) {
-        if (!entry.shown) continue;
-        const auto bitmap = bitmaps.find(entry.viewId);
-        entry.needsDraw   = entry.view->isDirty() || bitmap == bitmaps.end() || !bitmap->second.drawn ||
-                          bitmap->second.drawnSize != UiSize{entry.screenRect.w, entry.screenRect.h};
-    }
-    drawViews();
     addEntryDamage();
     for (const TargetInfo& info : kTargets) {
         for (const SDL_Rect& region : damageByTarget[toIndex(info.target)]) compose(info.target, region);
@@ -231,6 +220,33 @@ void UiCompositor::drawFrame() {
     }
 }
 
+SDL_Surface* UiCompositor::drawSnapshot() {
+    if (!screen || !root) return nullptr;
+    prepareEntries();
+    updateVisibleRects();
+    // The draw cleared the dirty flags, thus the next frame cannot find the views that changed
+    composeAll = true;
+    SDL_Surface* snapshot = SDL_CreateRGBSurfaceWithFormat(0, screen->w, screen->h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!snapshot) return nullptr;
+    SDL_FillRect(snapshot, nullptr, 0);
+    const SDL_Rect whole = {0, 0, screen->w, screen->h};
+    for (const TargetInfo& info : kTargets) composeEntries(info.target, whole, snapshot);
+    return snapshot;
+}
+
+void UiCompositor::prepareEntries() {
+    entries.clear();
+    collectEntries(*root, true);
+    // The draw can change the content rectangle, thus the visible part comes after it
+    for (Entry& entry : entries) {
+        if (!entry.shown) continue;
+        const auto bitmap = bitmaps.find(entry.viewId);
+        entry.needsDraw   = entry.view->isDirty() || bitmap == bitmaps.end() || !bitmap->second.drawn ||
+                          bitmap->second.drawnSize != UiSize{entry.screenRect.w, entry.screenRect.h};
+    }
+    drawViews();
+}
+
 void UiCompositor::drawViews() {
     for (const Entry& entry : entries) {
         if (!entry.needsDraw) continue;
@@ -247,8 +263,7 @@ void UiCompositor::drawViews() {
     }
 }
 
-void UiCompositor::addEntryDamage() {
-    std::unordered_set<int> shownIds;
+void UiCompositor::updateVisibleRects() {
     for (Entry& entry : entries) {
         if (!entry.shown) continue;
         const auto bitmap = bitmaps.find(entry.viewId);
@@ -260,10 +275,15 @@ void UiCompositor::addEntryDamage() {
         const SDL_Rect onScreen = {entry.screenRect.x + content.x, entry.screenRect.y + content.y, content.w,
                                    content.h};
         entry.visibleRect       = intersect(intersect(onScreen, entry.screenRect), entry.clipRect);
-        if (isEmpty(entry.visibleRect)) {
-            entry.shown = false;
-            continue;
-        }
+        if (isEmpty(entry.visibleRect)) entry.shown = false;
+    }
+}
+
+void UiCompositor::addEntryDamage() {
+    updateVisibleRects();
+    std::unordered_set<int> shownIds;
+    for (Entry& entry : entries) {
+        if (!entry.shown) continue;
         shownIds.insert(entry.viewId);
 
         const auto last = lastShown.find(entry.viewId);
@@ -323,14 +343,7 @@ void convertToStraightAlpha(SDL_Surface* surface) {
 
 }  // namespace
 
-void UiCompositor::compose(UiTargetLayer target, const SDL_Rect& damaged) {
-    const SDL_Rect region = intersect(damaged, SDL_Rect{0, 0, screen->w, screen->h});
-    if (isEmpty(region)) return;
-
-    SDL_Surface* buffer = SDL_CreateRGBSurfaceWithFormat(0, region.w, region.h, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!buffer) return;
-    SDL_FillRect(buffer, nullptr, 0);
-
+void UiCompositor::composeEntries(UiTargetLayer target, const SDL_Rect& region, SDL_Surface* buffer) {
     for (const Entry& entry : entries) {
         if (!entry.shown || entry.target != target) continue;
         const auto bitmap = bitmaps.find(entry.viewId);
@@ -344,6 +357,16 @@ void UiCompositor::compose(UiTargetLayer target, const SDL_Rect& damaged) {
             for (int x = 0; x < area.w; x++) to[x] = blendOver(from[x], to[x]);
         }
     }
+}
+
+void UiCompositor::compose(UiTargetLayer target, const SDL_Rect& damaged) {
+    const SDL_Rect region = intersect(damaged, SDL_Rect{0, 0, screen->w, screen->h});
+    if (isEmpty(region)) return;
+
+    SDL_Surface* buffer = SDL_CreateRGBSurfaceWithFormat(0, region.w, region.h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!buffer) return;
+    SDL_FillRect(buffer, nullptr, 0);
+    composeEntries(target, region, buffer);
 
     // The buffer is premultiplied. A replace shows an opaque pixel the same in each form.
     const TargetInfo& info = getTargetInfo(target);

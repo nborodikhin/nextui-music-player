@@ -278,9 +278,8 @@ ModuleExitReason SettingsModule_run(DisplayContext* display) {
                             break;
 #ifdef DEBUG
                         case SETTINGS_ITEM_INPUT_TEST:
-                            if (InputTestModule_run(display) == MODULE_EXIT_QUIT) {
-                                return MODULE_EXIT_QUIT;
-                            }
+                            InputTestModule_run(display);
+                            if (ModuleCommon_isQuitRequested()) return MODULE_EXIT_QUIT;
                             // Start a fresh frame: the test screen can recreate the display,
                             // which frees the surface of this frame
                             ScreenTitle_start(false);

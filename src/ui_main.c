@@ -8,63 +8,7 @@
 #include "ui_utils.h"
 #include "ui_icons.h"
 #include "ui_theme.h"
-#include "selfupdate.h"
 #include "module_common.h"
-#include "resume.h"
-#include "background.h"
-
-static const char* menu_label(MenuSelection selection) {
-    switch (selection) {
-        case MENU_RESUME:      return "Resume";
-        case MENU_NOW_PLAYING: return "Now Playing";
-        case MENU_LIBRARY:     return "Library";
-        case MENU_RADIO:       return "Online Radio";
-        case MENU_PODCAST:     return "Podcasts";
-        case MENU_SETTINGS:    return "Settings";
-        default:               return "";
-    }
-}
-
-// Get label for Now Playing based on background player type
-static const char* get_now_playing_label(void) {
-    switch (Background_getActive()) {
-        case BG_MUSIC:  return "Music";
-        case BG_RADIO:  return "Radio";
-        case BG_PODCAST: return "Podcast";
-        default: return "Audio";
-    }
-}
-
-void main_menu_get_row_label(MenuSelection selection, char* buffer, int buffer_size) {
-    switch (selection) {
-        case MENU_NOW_PLAYING:
-            snprintf(buffer, buffer_size, "Now Playing: %s", get_now_playing_label());
-            return;
-        case MENU_RESUME: {
-            const char* label = Resume_getLabel();
-            if (label) {
-                snprintf(buffer, buffer_size, "%s", label);
-                return;
-            }
-            break;
-        }
-        case MENU_SETTINGS:
-            if (SelfUpdate_getStatus().update_available) {
-                snprintf(buffer, buffer_size, "Settings (Update available)");
-                return;
-            }
-            break;
-        default:
-            break;
-    }
-    snprintf(buffer, buffer_size, "%s", menu_label(selection));
-}
-
-// Controls help text for each page/state
-typedef struct {
-    const char* button;
-    const char* action;
-} ControlHelp;
 
 // Blocks follow HelpId order.
 // Fallback bindings (HELP_DEFAULT)
@@ -318,12 +262,8 @@ static const ControlHelp about_controls[] = {
     {NULL, NULL}
 };
 
-// Render controls help dialog overlay
-void render_controls_help(SDL_Surface* screen, HelpId help_id) {
-    int hw = screen->w;
-    int hh = screen->h;
-
-    // Keep the frame sane if the switch below ever stops covering every HelpId.
+const ControlHelp* get_controls_help(HelpId help_id, const char** title) {
+    // Keep the result sane if the switch below ever stops covering every HelpId.
     const ControlHelp* controls = default_controls;
     const char* page_title = "Controls";
 
@@ -440,6 +380,18 @@ void render_controls_help(SDL_Surface* screen, HelpId help_id) {
         // No default arm on purpose: compiler with -Werror=switch
         // forces to have all enum cases to be explicitly handled.
     }
+
+    if (title) *title = page_title;
+    return controls;
+}
+
+// Render controls help dialog overlay
+void render_controls_help(SDL_Surface* screen, HelpId help_id) {
+    int hw = screen->w;
+    int hh = screen->h;
+
+    const char* page_title = NULL;
+    const ControlHelp* controls = get_controls_help(help_id, &page_title);
 
     // Count controls
     int control_count = 0;

@@ -79,7 +79,7 @@ INC      = -I../src $(shell pkg-config --cflags sdl2)
 SRC      = ../src
 BIN      = bin
 
-TESTS    = $(BIN)/test_list_nav $(BIN)/test_menu_rows $(BIN)/test_toast_state \
+TESTS    = $(BIN)/test_list_nav $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
            $(BIN)/test_stopwatch \
@@ -94,6 +94,7 @@ TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
 TESTS   += $(BIN)/test_playlist
 TESTS   += $(BIN)/test_input_events
+TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
 
 # ui_utils.c draws, thus it includes the platform and this target cannot follow
@@ -208,6 +209,16 @@ $(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input
                           $(SRC)/help_screen.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
 
+PAGE_STACK_SRC = $(SRC)/ui/page_stack.cpp $(SRC)/ui/legacy_module_page.cpp $(INPUT_EVENTS_SRC) \
+                 $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
+                 $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/view/snapshot_view.cpp
+
+$(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page_stack.hpp \
+                        $(SRC)/ui/ui_page.hpp $(SRC)/ui/legacy_module_page.hpp \
+                        $(SRC)/input/input_manager.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_page_stack.cpp $(PAGE_STACK_SRC) \
+	  $(shell pkg-config --libs sdl2)
+
 UI_COMPOSITOR_SRC = $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
                     $(SRC)/ui/view/ui_compositor.cpp
 
@@ -218,9 +229,6 @@ $(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui
 
 $(BIN)/test_list_nav: test_list_nav.c $(SRC)/list_nav.c $(SRC)/list_nav.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_list_nav.c $(SRC)/list_nav.c
-
-$(BIN)/test_menu_rows: test_menu_rows.c $(SRC)/menu_rows.c $(SRC)/menu_rows.h test.h | $(BIN)
-	$(CC) $(CFLAGS) $(INC) -o $@ test_menu_rows.c $(SRC)/menu_rows.c
 
 $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_state.h $(SRC)/toast_types.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_toast_state.c $(SRC)/toast_state.c
@@ -446,7 +454,7 @@ $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h 
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_views: test_ui_views.cpp $(SRC)/ui/view/ui_view.hpp $(SRC)/ui/view/ui_compositor.hpp \
-                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp test.h | $(BIN) desktop-objs
+                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp $(SRC)/ui/view/dialog_view.hpp test.h | $(BIN) desktop-objs
 	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_views.cpp
 	$(CXX) -o $@ $@.o \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \

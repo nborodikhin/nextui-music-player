@@ -134,16 +134,6 @@ bool ModuleCommon_skipTrack(bool next);
 // radio or on the player that is active. Returns true when it acted.
 bool ModuleCommon_handleMediaKey(USBHIDEvent hid_event);
 
-// Shows the Quit dialog until the user closes it, in a frame loop of its own. Returns true when
-// the user confirmed the quit, or when the app must quit for another reason. The caller then
-// draws its whole screen again, and resets the pad when it reads input as events.
-bool ModuleCommon_runQuitDialog(DisplayContext* display);
-
-// Shows the controls help of help_id until the user pushes a button, in a frame loop of its own.
-// The caller then draws its whole screen again, and resets the pad when it reads input as events.
-void ModuleCommon_runControlsHelp(DisplayContext* display, HelpId help_id);
-
-
 // Begin one module-loop iteration: start the frame timer, poll input.
 // MUST be the first statement of every module's loop body. Pass false in
 // start_frame_clock when the loop started the frame timer itself, before the present

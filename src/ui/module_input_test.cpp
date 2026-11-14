@@ -14,6 +14,7 @@
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
+#include "ui/page_stack.hpp"
 #include "ui/ui_page.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
@@ -40,7 +41,12 @@ constexpr std::array<ButtonRequest, 6> kRequests = {
     request::Combo{Button::Select, Button::A},
 };
 
-class InputTestPage final : public UiPage {
+struct InputTestPage final : public UiPage {
+    using Result = std::monostate;
+    std::unique_ptr<UiPageImplBase> createPageImpl() const override;
+};
+
+class InputTestPageImpl final : public UiPageImpl<InputTestPage> {
 public:
     std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
 
@@ -66,9 +72,7 @@ public:
             addEntry(event.time, "raw", "Media", getMediaKeyName(typedEvent->key));
         }
 
-        if ((held & kExitButtons) == kExitButtons) {
-            exitTo(MODULE_EXIT_BACK);
-        }
+        if ((held & kExitButtons) == kExitButtons) close();
         return true;
     }
 
@@ -89,7 +93,7 @@ public:
         return true;
     }
 
-    InputTestPage() {
+    InputTestPageImpl() : UiPageImpl(PageKind::FullScreen) {
         for (int index = 0; index < kEntryCount; index++) {
             logLines.push_back(std::make_unique<TextView>(Fonts_getSmall(), true));
         }
@@ -124,7 +128,7 @@ private:
     std::vector<std::unique_ptr<TextView>> logLines;
 };
 
-void InputTestPage::addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name) {
+void InputTestPageImpl::addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name) {
 
     const uint32_t delta = entryCount == 0 ? 0 : time - lastTime;
     lastTime = time;
@@ -136,7 +140,7 @@ void InputTestPage::addEntry(uint32_t time, const std::string &stream, const std
     entries[newest].text = text;
 }
 
-void InputTestPage::setContext(UiContext& context) {
+void InputTestPageImpl::setContext(UiContext& context) {
     title.setContext(context);
     statusGroup.setContext(context);
     heldLine.setContext(context);
@@ -152,7 +156,7 @@ void InputTestPage::setContext(UiContext& context) {
 }
 
 // Each line is a view that draws only when its text changes. The page draws no layer.
-void InputTestPage::layout(UiLayoutContext& context) {
+void InputTestPageImpl::layout(UiLayoutContext& context) {
     const UiSize screen  = context.getMaxSize();
     const int padding    = SCALE1(PADDING);
     const int pillHeight = SCALE1(PILL_SIZE);
@@ -193,17 +197,20 @@ void InputTestPage::layout(UiLayoutContext& context) {
     for (int age = shown - 1, row = 0; age >= 0; age--, row++) {
         const int index = (newest - age + kEntryCount) % kEntryCount;
         TextView& line  = *logLines[static_cast<size_t>(row)];
-        line.setText(entries[static_cast<size_t>(index)].text.c_str());
+        line.setText(entries[static_cast<size_t>(index)].text);
         context.layoutChild(line, SDL_Rect{lineX, logTop + row * lineHeight, lineWidth, lineHeight});
     }
+}
+
+std::unique_ptr<UiPageImplBase> InputTestPage::createPageImpl() const {
+    return std::make_unique<InputTestPageImpl>();
 }
 
 }  // namespace
 }  // namespace ui
 
-ModuleExitReason InputTestModule_run(DisplayContext* display) {
-    ui::InputTestPage page;
-    return runPageLoop(page, display);
+void InputTestModule_run(DisplayContext* display) {
+    PageStack::run(ui::InputTestPage{}, display);
 }
 
 #endif

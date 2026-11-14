@@ -15,9 +15,9 @@ ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font,
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
 
-void ListRowView::setText(const char* text) {
+bool ListRowView::setText(const std::string& text) {
     shortText.setText(text);
-    longText.setText(text);
+    return longText.setText(text);
 }
 
 void ListRowView::setSelected(bool newSelected) {
