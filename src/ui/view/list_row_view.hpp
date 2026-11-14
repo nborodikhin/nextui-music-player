@@ -2,6 +2,7 @@
 #define __UI_VIEW_LIST_ROW_VIEW_HPP__
 
 #include <cstdint>
+#include <string>
 
 #include <SDL2/SDL_ttf.h>
 
@@ -17,7 +18,8 @@ class ListRowView : public UiView {
 public:
     explicit ListRowView(TTF_Font* font);
 
-    void setText(const char* text);
+    /** Returns: true when the text changed */
+    bool setText(const std::string& text);
     void setSelected(bool selected);
     bool isSelected() const { return selected; }
 

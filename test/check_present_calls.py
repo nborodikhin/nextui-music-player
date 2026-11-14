@@ -19,7 +19,10 @@ SOURCE_SUBDIRS = ("ui", "ui/view", "input")
 # the two that write a layer. A call outside these functions is a finding,
 # whatever file holds it.
 PRESENTERS = (("module_common.c", {"ModuleCommon_frameEnd", "ModuleCommon_present"}),)
-SYNC_OWNERS = (("module_common.c", {"ModuleCommon_frameEnd"}), ("ui_page.cpp", {"runPageLoop"}))
+SYNC_OWNERS = (
+    ("module_common.c", {"ModuleCommon_frameEnd"}),
+    ("page_stack_loop.cpp", {"runFrameLoop"}),
+)
 LAYER_OWNER = ("ui_layers.c", {"UiLayer_clear", "UiLayer_blit"})
 
 # The wait for the next frame. The page loop waits before it presents.
@@ -70,7 +73,7 @@ PASS_FIXTURES = {
     GFX_sync();
 }
 """,
-    "ui_page.cpp": """ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
+    "page_stack_loop.cpp": """void runFrameLoop(PageStack& stack, DisplayContext* display) {
     while (true) {
         GFX_sync();
         ModuleCommon_present();
@@ -110,8 +113,12 @@ FAIL_FIXTURES = {
 """,
     "gpu_flip.c": """PLAT_GPU_Flip();
 """,
-    "ui_page.cpp": """ModuleExitReason runPageLoop(UiPage& page, DisplayContext* display) {
-    GFX_flip(screen);
+    "page_stack_loop.cpp": """static void drawPage(PageStack& stack) {
+    GFX_sync();
+}
+
+void runFrameLoop(PageStack& stack, DisplayContext* display) {
+    drawPage(stack);
 }
 """,
     "painter.cpp": """void Painter::draw() {
@@ -186,7 +193,7 @@ def collect_findings(name, source):
     for match in SYNC_CALL.finditer(code):
         if call_is_allowed(name, code, match.start(), SYNC_OWNERS):
             continue
-        findings.append((line_number(code, match.start()), "a wait outside ModuleCommon_frameEnd() and runPageLoop()"))
+        findings.append((line_number(code, match.start()), "a wait outside ModuleCommon_frameEnd() and runFrameLoop()"))
     for match in LAYER_CALL.finditer(code):
         if call_is_allowed(name, code, match.start(), (LAYER_OWNER,)):
             continue
@@ -255,7 +262,7 @@ def main(argv):
     )
     if not scan_paths(paths):
         print("Only ModuleCommon_frameEnd() and ModuleCommon_present() present, only they and "
-              "runPageLoop() wait, and only ui_layers.c writes a layer.", file=sys.stderr)
+              "runFrameLoop() wait, and only ui_layers.c writes a layer.", file=sys.stderr)
         return 1
     print("Present call check passed")
     return 0

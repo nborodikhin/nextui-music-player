@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "test.h"
@@ -17,6 +18,11 @@
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
+#include "input/common_button_handler.hpp"
+#include "ui/controls_help_page.hpp"
+#include "ui/quit_dialog_page.hpp"
+#include "ui/page_stack.hpp"
+#include "ui/view/dialog_view.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui_layers.h"
 #include "ui_theme.h"
@@ -740,6 +746,107 @@ TEST(test_new_status_width_moves_the_title) {
 
 }  // namespace
 
+// A new title draws the dialog again. A dialog with the same content draws nothing in the next
+// frame.
+TEST(test_dialog_draws_again_only_for_a_change) {
+    Fixture f(kScreenW, kScreenH);
+    DialogView dialog(200, DialogView::Alignment::Center, testFont, testFont);
+    dialog.setContext(f.compositor);
+    dialog.setTitle("Quit?");
+    dialog.setHint("A: Yes");
+    const SDL_Rect screen = {0, 0, kScreenW, kScreenH};
+    f.frame(dialog, screen);
+    CHECK(f.compositor.hasSurfaceChanged());
+    f.frame(dialog, screen);
+    CHECK(!f.compositor.hasSurfaceChanged());
+    dialog.setTitle("Quit now?");
+    f.frame(dialog, screen);
+    CHECK(f.compositor.hasSurfaceChanged());
+    // The surface of the dialog is in the middle of the space, and the space around it is clear
+    CHECK(f.surfaceHasPixels(SDL_Rect{kScreenW / 2 - 4, kScreenH / 2 - 4, 8, 8}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{0, 0, 40, 4}));
+}
+
+namespace {
+
+class RecordingPlayback : public input::PlaybackControl {
+public:
+    std::vector<std::string> commands;
+
+    void togglePlayback() override { commands.push_back("toggle"); }
+    void skipTrack(bool next) override { commands.push_back(next ? "next" : "previous"); }
+    void changeVolume(int step) override { commands.push_back(step > 0 ? "volume+" : "volume-"); }
+};
+
+/** Runs page on a stack, and returns the playback commands of an earphone button */
+std::vector<std::string> pressEarphoneButtonOn(const UiPage& page) {
+    Fixture f;
+    RecordingPlayback playback;
+    PageStack stack(playback);
+    stack.start(page.createPageImpl(), f.compositor);
+    stack.getRawInput().onRawEvent({0, input::event::Media{input::MediaKey::PlayPause}});
+    stack.closeAll();
+    return playback.commands;
+}
+
+/**
+ * Runs dialog on a stack, presses the buttons in order and releases them. Returns true when the
+ * dialog closed.
+ */
+bool pressClosesDialog(const UiPage& dialog, std::initializer_list<input::Button> buttons) {
+    Fixture f;
+    RecordingPlayback playback;
+    PageStack stack(playback);
+    stack.start(dialog.createPageImpl(), f.compositor);
+    uint32_t now = 0;
+    auto endFrame = [&] {
+        stack.tickInput(now);
+        stack.tickTop(now);
+        stack.endFrame(now);
+        stack.beginPoll();
+        now += 16;
+    };
+    for (input::Button button : buttons) {
+        stack.getRawInput().onRawEvent({now, input::event::ButtonPressed{button}});
+        endFrame();
+    }
+    for (input::Button button : buttons) {
+        stack.getRawInput().onRawEvent({now, input::event::ButtonReleased{button}});
+        endFrame();
+    }
+    const bool closed = stack.isDone();
+    stack.closeAll();
+    return closed;
+}
+
+}  // namespace
+
+// START closes Controls Help, and START with a volume button is a volume gesture
+TEST(test_controls_help_ignores_start_with_a_volume_button) {
+    using input::Button;
+    const ControlsHelpPage help(HELP_MAIN_MENU);
+    CHECK(pressClosesDialog(help, {Button::Start}));
+    CHECK(pressClosesDialog(help, {Button::A}));
+    CHECK(!pressClosesDialog(help, {Button::Plus, Button::Start}));
+    CHECK(!pressClosesDialog(help, {Button::Start, Button::Minus}));
+}
+
+TEST(test_quit_dialog_ignores_start_with_a_volume_button) {
+    using input::Button;
+    CHECK(pressClosesDialog(QuitDialogPage{}, {Button::Start}));
+    CHECK(pressClosesDialog(QuitDialogPage{}, {Button::B}));
+    CHECK(!pressClosesDialog(QuitDialogPage{}, {Button::Plus, Button::Start}));
+    CHECK(!pressClosesDialog(QuitDialogPage{}, {Button::Start, Button::Minus}));
+}
+
+// A dialog page gives the buttons of the earphones to the global handler when no pad button is
+// held
+TEST(test_dialog_pages_give_the_earphone_buttons_to_the_playback) {
+    const std::vector<std::string> want = {"toggle"};
+    CHECK(pressEarphoneButtonOn(QuitDialogPage{}) == want);
+    CHECK(pressEarphoneButtonOn(ControlsHelpPage(HELP_MAIN_MENU)) == want);
+}
+
 int main() {
     SDL_Init(0);
     if (TTF_Init() != 0) {
@@ -775,6 +882,10 @@ int main() {
     RUN(test_move_past_an_end_wraps_to_the_other_end);
     RUN(test_single_item_does_not_move);
     RUN(test_empty_list_gives_minus_one);
+    RUN(test_dialog_draws_again_only_for_a_change);
+    RUN(test_dialog_pages_give_the_earphone_buttons_to_the_playback);
+    RUN(test_controls_help_ignores_start_with_a_volume_button);
+    RUN(test_quit_dialog_ignores_start_with_a_volume_button);
     RUN(test_status_group_refresh_with_the_same_pixels_changes_nothing);
     RUN(test_status_group_refresh_gives_the_same_pixels);
     RUN(test_status_group_renders_when_a_value_settles);

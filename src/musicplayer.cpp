@@ -30,7 +30,8 @@ extern "C" {
 
 // Module architecture
 #include "module_common.h"
-#include "ui/module_main_menu.h"
+#include "ui/main_menu_page.hpp"
+#include "ui/page_stack.hpp"
 #include "module_library.h"
 #include "module_player.h"
 #include "module_radio.h"
@@ -46,8 +47,6 @@ extern "C" {
 #include "test_control.h"
 #include "filedb.h"
 
-// Global quit flag
-static bool quit = false;
 static DisplayContext* display;
 
 // A handler must call nothing that is not async-signal-safe, thus it only
@@ -221,66 +220,8 @@ int main(int argc, char* argv[]) {
     // Initialize YouTube downloader (loads queue, auto-resumes pending downloads)
     Downloader_init();
 
-    // Main application loop
-    while (!quit && !ModuleCommon_stopSignalled()) {
-        Toast_screenChanged();
-        MenuSelection selection = MenuModule_run(display);
-
-        if (selection == MENU_QUIT) {
-            quit = true;
-            continue;
-        }
-
-        // Run the selected module
-        Toast_screenChanged();
-        ModuleExitReason reason = MODULE_EXIT_TO_MENU;
-
-        switch (selection) {
-            case MENU_NOW_PLAYING:
-                switch (Background_getActive()) {
-                    case BG_MUSIC:
-                        reason = PlayerModule_run(display, true);  // Now Playing entry
-                        break;
-                    case BG_RADIO:
-                        reason = RadioModule_run(display);
-                        break;
-                    case BG_PODCAST:
-                        reason = PodcastModule_run(display);
-                        break;
-                    default:
-                        break;
-                }
-                break;
-
-            case MENU_RESUME: {
-                const ResumeState* rs = Resume_getState();
-                if (rs) {
-                    reason = PlayerModule_runResume(display, rs);
-                }
-                break;
-            }
-            case MENU_LIBRARY:
-                reason = LibraryModule_run(display);
-                break;
-            case MENU_RADIO:
-                reason = RadioModule_run(display);
-                break;
-            case MENU_PODCAST:
-                reason = PodcastModule_run(display);
-                break;
-            case MENU_SETTINGS:
-                reason = SettingsModule_run(display);
-                break;
-
-            case MENU_NONE:
-            case MENU_QUIT:
-                break;
-        }
-
-        if (reason == MODULE_EXIT_QUIT) {
-            quit = true;
-        }
-    }
+    // The app runs one page stack, with Main at the bottom, until the user quits
+    PageStack::run(MainMenuPage{}, display);
 
 cleanup:
     Background_stopAll();

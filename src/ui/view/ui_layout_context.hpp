@@ -34,6 +34,8 @@ public:
     UiLayoutContext createMeasuringContext() const;
 
     UiSize getMaxSize() const { return maxSize; }
+    /** Returns the max size as a rectangle in the coordinates of this view. */
+    SDL_Rect getMaxRect() const { return SDL_Rect{0, 0, maxSize.w, maxSize.h}; }
 
     /** Sets the size of the view and of its bitmap. The default is the max size. */
     void setSize(UiSize newSize) { size = newSize; }

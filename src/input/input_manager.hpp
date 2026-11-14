@@ -26,6 +26,22 @@ public:
     /** Returns: true when a listener consumed the event */
     bool onButtonEvent(const ButtonEvent& event) override;
 
+    /**
+     * Gives the rest of this poll and the rest of the gesture to no listener, also to the owner.
+     * Each listener gets a cancel of each held button whose pressed event it saw. The gesture part
+     * ends when no button is held. The poll part ends at beginPoll().
+     */
+    void discardGesture(uint32_t time);
+
+    /** Ends the poll part of discardGesture(). Call it before each poll. */
+    void beginPoll();
+
+    /**
+     * Replaces the listeners. When a button is held, the rest of the gesture goes to no listener,
+     * thus the new chain gets no event of a gesture that started before it.
+     */
+    void setChain(std::vector<InputListener*> chain);
+
 private:
     static constexpr int kNoOwner = -1;
 
@@ -37,6 +53,8 @@ private:
      * Gives a ButtonCancel to each other listener for each held button whose pressed event it saw
      */
     void setOwner(size_t index, uint32_t time);
+    /** Gives the listener a ButtonCancel for each held button whose pressed event it saw */
+    void cancelSeen(size_t index, uint32_t time);
 
     std::vector<InputListener*> listeners;
     /** For each listener: the held buttons whose pressed event it saw */
@@ -47,6 +65,10 @@ private:
      * the last release still go to the owner.
      */
     int owner = kNoOwner;
+    /** The rest of the gesture goes to no listener */
+    bool discardingGesture = false;
+    /** The rest of the poll goes to no listener */
+    bool discardingPoll = false;
 };
 
 }  // namespace input
