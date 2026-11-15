@@ -41,13 +41,20 @@ void shell_escape(const char* src, char* dst, int dst_size) {
     dst[j] = '\0';
 }
 
-static bool directory_exists(const char* path) {
+// Makes one directory of mkdir_p(). Returns 0, or the error of the step that failed.
+static int make_one_directory(const char* path) {
+    if (mkdir(path, 0755) != 0 && errno != EEXIST) return errno;
+    // A file with the same name also gives EEXIST
     struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    if (stat(path, &st) != 0) return errno;
+    return S_ISDIR(st.st_mode) ? 0 : ENOTDIR;
 }
 
 bool mkdir_p(const char* path) {
-    if (!path || !path[0]) return false;
+    if (!path || !path[0]) {
+        errno = EINVAL;
+        return false;
+    }
 
     char* work = strdup(path);
     if (!work) return false;
@@ -55,20 +62,18 @@ bool mkdir_p(const char* path) {
     size_t length = strlen(work);
     while (length > 1 && work[length - 1] == '/') work[--length] = '\0';
 
-    bool ok = true;
-    for (char* slash = work + 1; ok && *slash; slash++) {
+    int error = 0;
+    for (char* slash = work + 1; !error && *slash; slash++) {
         if (*slash != '/') continue;
         *slash = '\0';
-        if (mkdir(work, 0755) != 0 && errno != EEXIST) ok = false;
-        if (ok && !directory_exists(work)) ok = false;
+        error = make_one_directory(work);
         *slash = '/';
     }
-
-    if (ok && mkdir(work, 0755) != 0 && errno != EEXIST) ok = false;
-    if (ok && !directory_exists(work)) ok = false;
+    if (!error) error = make_one_directory(work);
 
     free(work);
-    return ok;
+    if (error) errno = error;
+    return !error;
 }
 
 const char* get_music_path(void) {

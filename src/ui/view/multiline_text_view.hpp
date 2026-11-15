@@ -1,0 +1,55 @@
+#ifndef __UI_VIEW_MULTILINE_TEXT_VIEW_HPP__
+#define __UI_VIEW_MULTILINE_TEXT_VIEW_HPP__
+
+#include <string>
+#include <vector>
+
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+
+#include "ui/view/spanned_text.hpp"
+#include "ui/view/ui_view.hpp"
+
+/**
+ * A text on one or more lines, as wide as the space that the parent gives. A line breaks at a
+ * space, and a word that is wider than a line breaks at a character. A line break in the text
+ * starts a new line. The view is as high as its lines.
+ */
+class MultilineTextView : public UiView {
+public:
+    explicit MultilineTextView(TTF_Font* font);
+    ~MultilineTextView() override;
+
+    /** Shows text in the primary role. Returns: true when the text changed */
+    bool setText(const std::string& text);
+    /** Returns: true when the text changed */
+    bool setText(const SpannedText& text);
+
+    void setContext(UiContext& context) override;
+    void layout(UiLayoutContext& context) override;
+    bool isDirty() const override { return dirty; }
+    void draw(UiDrawContext& context) override;
+
+private:
+    /** A part of one line in one role, rendered in white */
+    struct Run {
+        SDL_Surface* bitmap;
+        ThemeRole role;
+        int x;
+        int line;
+    };
+
+    void wrap(int width);
+    void freeRuns();
+    int getLineHeight() const;
+
+    TTF_Font* font;
+    SpannedText text;
+    std::vector<Run> runs;
+    int lineCount    = 0;
+    int wrappedWidth = -1;
+    bool wrapStale   = true;
+    bool dirty       = true;
+};
+
+#endif

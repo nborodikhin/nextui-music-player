@@ -12,6 +12,7 @@
 // writing fails with ETXTBSY, and a plain copy silently broke every self-update
 // until that was found.
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,6 +120,41 @@ TEST(userdata_mkdir_accepts_an_existing_directory) {
 
     CHECK(userdata_mkdir("podcast/downloads"));
     CHECK(file_says(kept, "keep"));
+
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+}
+
+TEST(mkdir_p_keeps_the_error_below_a_regular_file) {
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+    CHECK(userdata_mkdir(""));
+
+    char file[512];
+    snprintf(file, sizeof(file), "%s/file", FILE_UTILS_USERDATA_DIR);
+    write_file(file, "data");
+
+    char below[600];
+    snprintf(below, sizeof(below), "%s/below/dir", file);
+    errno = 0;
+    CHECK(!mkdir_p(below));
+    CHECK_EQ_INT(errno, ENOTDIR);
+
+    errno = 0;
+    CHECK(!mkdir_p(file));
+    CHECK_EQ_INT(errno, ENOTDIR);
+
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+}
+
+TEST(mkdir_p_keeps_the_error_of_a_failed_stat) {
+    rm_rf(FILE_UTILS_USERDATA_DIR);
+    CHECK(userdata_mkdir(""));
+
+    char loop[512];
+    snprintf(loop, sizeof(loop), "%s/loop", FILE_UTILS_USERDATA_DIR);
+    CHECK_EQ_INT(symlink("loop", loop), 0);
+    errno = 0;
+    CHECK(!mkdir_p(loop));
+    CHECK_EQ_INT(errno, ELOOP);
 
     rm_rf(FILE_UTILS_USERDATA_DIR);
 }
@@ -537,6 +573,8 @@ int main(int argc, char** argv) {
     RUN(userdata_path_reports_a_small_buffer);
     RUN(userdata_mkdir_creates_two_levels);
     RUN(userdata_mkdir_accepts_an_existing_directory);
+    RUN(mkdir_p_keeps_the_error_below_a_regular_file);
+    RUN(mkdir_p_keeps_the_error_of_a_failed_stat);
     RUN(mk_tempdir_creates_a_fresh_directory_each_time);
     RUN(mk_tempdir_reports_failure_and_clears_the_path);
     RUN(find_file_walks_the_tree);

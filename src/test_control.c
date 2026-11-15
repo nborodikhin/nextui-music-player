@@ -332,6 +332,7 @@ bool TestControl_init(const char* value) {
 
 void TestControl_quit(void) {
     if (!active) return;
+    if (!quit_asked) reply("bye");
     if (close_in) close(in_fd);
     if (close_out) close(out_fd);
     active = false;

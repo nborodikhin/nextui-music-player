@@ -1,5 +1,6 @@
 #include "db.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <sqlite3.h>
@@ -20,7 +21,9 @@ static pthread_once_t connection_key_once = PTHREAD_ONCE_INIT;
 static bool connection_key_ready;
 static char* database_path;
 
-static volatile int database_available;
+// Stops a new connection after Db_quit(). Each thread that uses the database stops before
+// Db_quit(), thus no call of connection() is in progress at that time.
+static volatile int database_open;
 static volatile int data_version;
 static volatile int open_connection_count;
 
@@ -83,7 +86,7 @@ static bool ensure_connection_key(void) {
 }
 
 static sqlite3* connection(void) {
-    if (!atomic_load(&database_available)) return NULL;
+    if (!atomic_load(&database_open)) return NULL;
     if (!ensure_connection_key()) return NULL;
 
     sqlite3* database = (sqlite3*)pthread_getspecific(connection_key);
@@ -99,7 +102,8 @@ static sqlite3* connection(void) {
 
     result = sqlite3_busy_handler(database, wait_for_database_lock, NULL);
     if (result != SQLITE_OK) {
-        LOG_error("[Db] failed to set busy handler: %s\n", sqlite3_errmsg(database));
+        LOG_error("[Db] failed to set up the connection to %s: busy handler: %s\n",
+                  database_path, sqlite3_errmsg(database));
         sqlite3_close(database);
         return NULL;
     }
@@ -115,22 +119,24 @@ static sqlite3* connection(void) {
     DbStatement_close(&statement);
 
     if (!journal_ok || !statement.ok) {
-        LOG_error("[Db] failed to enable WAL: %s\n", sqlite3_errmsg(database));
+        LOG_error("[Db] failed to set up the connection to %s: WAL: %s\n", database_path,
+                  statement.ok ? "the journal mode did not change" : statement.errmsg);
         sqlite3_close(database);
         return NULL;
     }
 
     DbStatement_exec(&statement, database, "PRAGMA wal_autocheckpoint=0");
     if (!statement.ok) {
-        LOG_error("[Db] failed to disable automatic checkpoints: %s\n",
-                  statement.errmsg);
+        LOG_error("[Db] failed to set up the connection to %s: automatic checkpoints: %s\n",
+                  database_path, statement.errmsg);
         sqlite3_close(database);
         return NULL;
     }
 
     DbStatement_exec(&statement, database, "PRAGMA foreign_keys=ON");
     if (!statement.ok) {
-        LOG_error("[Db] failed to enable foreign keys: %s\n", statement.errmsg);
+        LOG_error("[Db] failed to set up the connection to %s: foreign keys: %s\n",
+                  database_path, statement.errmsg);
         sqlite3_close(database);
         return NULL;
     }
@@ -153,11 +159,6 @@ static void close_current_connection(void) {
 
     pthread_setspecific(connection_key, NULL);
     connection_destroy(database);
-}
-
-static void disable_database(void) {
-    atomic_store(&database_available, 0);
-    close_current_connection();
 }
 
 static bool execute(sqlite3* database, const char* sql) {
@@ -248,7 +249,10 @@ static bool migrate(sqlite3* database) {
     int version = 0;
     if (!read_schema_version(database, &version)) return false;
     DbMigrationStep* steps = DbSchema_getSteps();
-    if (!steps) return false;
+    if (!steps) {
+        LOG_error("[Db] failed to allocate the migration steps\n");
+        return false;
+    }
     size_t step_count = 0;
     int schema_version = 0;
     if (!validate_steps(steps, &step_count, &schema_version)) {
@@ -274,20 +278,24 @@ static bool migrate(sqlite3* database) {
 }
 
 bool Db_init(void) {
-    if (!userdata_mkdir("")) {
-        LOG_error("[Db] failed to create the app data directory\n");
+    // The paths are on the stack, thus the log gives them also when no memory is free
+    char path[MAX_PATH];
+    char directory[MAX_PATH];
+    int path_length      = userdata_snpath("music-player.db", path, sizeof(path));
+    int directory_length = userdata_snpath("", directory, sizeof(directory));
+    if (path_length < 0 || (size_t)path_length >= sizeof(path) || directory_length < 0 ||
+        (size_t)directory_length >= sizeof(directory)) {
+        LOG_error("[Db] the database path is too long\n");
         return false;
     }
 
-    char* path = userdata_path("music-player.db");
-    if (!path) {
-        LOG_error("[Db] failed to allocate the database path\n");
+    LOG_info("[Db] opening %s\n", path);
+    if (!mkdir_p(directory)) {
+        LOG_error("[Db] failed to create the app data directory %s: %s\n", directory,
+                  strerror(errno));
         return false;
     }
-
-    bool result = Db_initInternal(path);
-    free(path);
-    return result;
+    return Db_initInternal(path);
 }
 
 bool Db_initInternal(const char* path) {
@@ -306,27 +314,22 @@ bool Db_initInternal(const char* path) {
     }
 
     atomic_store(&data_version, 0);
-    atomic_store(&database_available, 1);
+    atomic_store(&database_open, 1);
     if (!connection()) {
-        LOG_error("[Db] database is unavailable\n");
-        disable_database();
-        free(database_path);
-        database_path = NULL;
+        Db_quit();
         return false;
     }
 
     sqlite3* database = (sqlite3*)pthread_getspecific(connection_key);
     if (!migrate(database)) {
-        disable_database();
-        free(database_path);
-        database_path = NULL;
+        Db_quit();
         return false;
     }
     return true;
 }
 
 void Db_quit(void) {
-    atomic_store(&database_available, 0);
+    atomic_store(&database_open, 0);
     close_current_connection();
 
     int count = atomic_load(&open_connection_count);
@@ -336,10 +339,6 @@ void Db_quit(void) {
 
     free(database_path);
     database_path = NULL;
-}
-
-bool Db_isAvailable(void) {
-    return atomic_load(&database_available) != 0;
 }
 
 bool Db_begin(void) {

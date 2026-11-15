@@ -28,6 +28,7 @@ bool TestControl_init(const char* value);
 // Call one time in each frame, immediately after PAD_poll().
 void TestControl_tick(void);
 
+// Closes the channel. Writes @bye first when the script did not stop the app.
 void TestControl_quit(void);
 
 #else

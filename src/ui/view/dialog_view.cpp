@@ -39,11 +39,6 @@ DialogView::DialogView(int width, Alignment alignment, TTF_Font* titleFont, TTF_
     hint.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
 }
 
-void DialogView::setContent(UiView* newContent, int height) {
-    content       = newContent;
-    contentHeight = height;
-}
-
 void DialogView::setContext(UiContext& context) {
     UiView::setContext(context);
     title.setContext(context);
@@ -61,7 +56,9 @@ void DialogView::layout(UiLayoutContext& context) {
     const int textWidth       = width - 2 * padding;
     const int titleHeight = measuring.layoutChild(title, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
     const int hintHeight  = measuring.layoutChild(hint, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
-    const int bodyHeight  = content ? contentHeight + gap : 0;
+    const int contentHeight =
+        content ? measuring.layoutChild(*content, SDL_Rect{0, 0, textWidth, space.h}).getSize().h : 0;
+    const int bodyHeight = content ? contentHeight + gap : 0;
     const int height      = top + titleHeight + gap + bodyHeight + hintHeight + gap;
 
     const SDL_Rect surface = {(space.w - width) / 2, (space.h - height) / 2, width, height};

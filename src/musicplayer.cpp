@@ -30,6 +30,7 @@ extern "C" {
 
 // Module architecture
 #include "module_common.h"
+#include "ui/database_error_dialog_page.hpp"
 #include "ui/main_menu_page.hpp"
 #include "ui/page/page_stack.hpp"
 #include "module_library.h"
@@ -46,6 +47,8 @@ extern "C" {
 #include "db.h"
 #include "test_control.h"
 #include "filedb.h"
+#include "pad_reset.h"
+#include "scoped_init.hpp"
 
 static DisplayContext* display;
 
@@ -103,6 +106,7 @@ static void print_usage(const char* program) {
 
 int main(int argc, char* argv[]) {
     Debug_init();
+    ScopedInit testControl{TestControl_quit};
 
     // Read the options before anything else, so --help gives its text without a
     // display, and an option that is not correct stops the app at once.
@@ -132,17 +136,18 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    SDL_Surface* const screen = GFX_init(MODE_MAIN);
+    ScopedInit gfx{[] { return GFX_init(MODE_MAIN); }, GFX_quit};
+    SDL_Surface* const screen = gfx.value;
     Theme_init(screen);
     display = DisplayHelper_init(screen);
-    Toast_init(display);
+    ScopedInit toast{[] { Toast_init(display); }, Toast_quit};
     PWR_pinToCores(CPU_CORE_PERFORMANCE);
     // Load the font that the user selected in the settings of the system
-    Fonts_load();
+    ScopedInit fonts{Fonts_load, Fonts_unload};
 
     // The keyboard's characters are filtered by what the font can draw, so the
     // map is built once the fonts are up rather than on the first keyboard
-    KeyboardMap_prepare(Fonts_hasGlyph, Fonts_getMedium());
+    ScopedInit keyboardMap{[] { KeyboardMap_prepare(Fonts_hasGlyph, Fonts_getMedium()); }, KeyboardMap_quit};
 
     // Show splash screen immediately while heavy subsystems initialize
     {
@@ -172,26 +177,35 @@ int main(int argc, char* argv[]) {
         ModuleCommon_frameEnd(screen);
     }
 
-    InitSettings();
-    PAD_init();
-    PWR_init();
+    ScopedInit systemSettings{InitSettings, QuitSettings};
+    ScopedInit pad{PAD_init, PAD_quit};
+    ScopedInit power{PWR_init, PWR_quit};
     WIFI_init();
     psa_crypto_init();
-    Icons_init();
-    Keyboard_init();
+    ScopedInit icons{Icons_init, Icons_quit};
+    ScopedInit keyboard{Keyboard_init, UIKeyboard_quit};
 
     signal(SIGINT, sigHandler);
     signal(SIGTERM, sigHandler);
 
-    // Initialize the database before any application modules.
-    if (!Db_init()) {
-        LOG_error("Database is unavailable, continuing without it\n");
+    // The common module does not use the database, and the dialog below needs it
+    ScopedInit moduleCommon{ModuleCommon_init, ModuleCommon_quit};
+
+    // The app does not run without its database. The dialog names the log, which gives the cause.
+    ScopedInit database{Db_init, Db_quit};
+    if (!database.value) {
+        // A press during the splash is in the queue of the platform. The poll reads the queue, and
+        // the reset drops what it read, thus that press does not close the dialog.
+        PAD_poll();
+        PadReset_run();
+        PageStack::run(DatabaseErrorDialogPage{}, display);
+        return EXIT_FAILURE;
     }
 
     // Start database-backed workers after schema and data migrations finish.
-    FileDb_start();
+    ScopedInit fileDb{FileDb_start, FileDb_quit};
 
-    Settings_init();
+    ScopedInit settings{Settings_init, Settings_quit};
 
     // Seed random number generator for shuffle
     srand((unsigned int)time(nullptr));
@@ -202,48 +216,26 @@ int main(int argc, char* argv[]) {
     // Initialize player core
     if (Player_init() != 0) {
         LOG_error("Failed to initialize audio player\n");
-        goto cleanup;
+        return EXIT_FAILURE;
     }
+    ScopedInit player{Player_quit};
+    ScopedInit playerModule{PlayerModule_quit};
+    ScopedInit background{Background_stopAll};
 
     // Restore the volume on the mixer of the output, after the audio device is open and stable
     Player_syncOutputVolume();
 
     // Initialize self-update module
-    SelfUpdate_init(".");
-
-    // Initialize common module (global input handling)
-    ModuleCommon_init();
+    ScopedInit selfUpdate{[] { SelfUpdate_init("."); }, SelfUpdate_cleanup};
 
     // Initialize resume state
     Resume_init();
 
     // Initialize YouTube downloader (loads queue, auto-resumes pending downloads)
-    Downloader_init();
+    ScopedInit downloader{Downloader_init, Downloader_cleanup};
 
     // The app runs one page stack, with Main at the bottom, until the user quits
     PageStack::run(MainMenuPage{}, display);
-
-cleanup:
-    Background_stopAll();
-    Downloader_cleanup();
-    FileDb_quit();
-    Settings_quit();
-    ModuleCommon_quit();
-    SelfUpdate_cleanup();
-    PlayerModule_quit();
-    Player_quit();
-    Toast_quit();
-    Icons_quit();
-    UIKeyboard_quit();
-    KeyboardMap_quit();
-    Fonts_unload();
-
-    Db_quit();
-    QuitSettings();
-    TestControl_quit();
-    PWR_quit();
-    PAD_quit();
-    GFX_quit();
 
     return EXIT_SUCCESS;
 }
