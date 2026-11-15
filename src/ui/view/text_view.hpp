@@ -72,10 +72,11 @@ private:
     TTF_Font* font;
     bool useEllipsis;
     std::string text;
-    // A color mod that changes nothing, until the owner sets the color of a role
+    // White, until the owner sets the color of a role
     //noinspection HardcodedColor
     SDL_Color color      = {255, 255, 255, 255};
-    SDL_Surface* bitmap  = nullptr;  // the text in white
+    /** The text in its color, premultiplied */
+    SDL_Surface* bitmap  = nullptr;
     bool renderStale     = true;
     int renderedMaxWidth = -1;
     int textWidth        = 0;

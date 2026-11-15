@@ -29,8 +29,9 @@ void TextView::setColor(SDL_Color newColor) {
     if (newColor.r == color.r && newColor.g == color.g && newColor.b == color.b && newColor.a == color.a) {
         return;
     }
-    color = newColor;
-    dirty = true;
+    color       = newColor;
+    renderStale = true;
+    dirty       = true;
 }
 
 bool TextView::isClipped() const { return maxWidth > 0 && textWidth > maxWidth; }
@@ -104,6 +105,32 @@ void TextView::freeRender() {
     bitmap = nullptr;
 }
 
+// Converts `surface` to premultiplied ARGB8888, the form of a bitmap of a view. Frees `surface`.
+static SDL_Surface* toPremultiplied(SDL_Surface* surface) {
+    if (!surface) return nullptr;
+    SDL_Surface* converted = surface;
+    if (surface->format->format != SDL_PIXELFORMAT_ARGB8888) {
+        converted = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ARGB8888, 0);
+        SDL_FreeSurface(surface);
+        if (!converted) return nullptr;
+    }
+    for (int y = 0; y < converted->h; y++) {
+        uint32_t* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(converted->pixels) + y * converted->pitch);
+        for (int x = 0; x < converted->w; x++) {
+            const uint32_t alpha = row[x] >> 24;
+            if (alpha == 255) continue;
+            uint32_t pixel = alpha << 24;
+            for (int shift = 0; shift < 24; shift += 8) {
+                pixel |= ((((row[x] >> shift) & 0xFF) * alpha + 127) / 255) << shift;
+            }
+            row[x] = pixel;
+        }
+    }
+    // The bitmap of the view is empty under the text, thus a copy gives the same pixels as a blend
+    SDL_SetSurfaceBlendMode(converted, SDL_BLENDMODE_NONE);
+    return converted;
+}
+
 void TextView::render() {
     freeRender();
     renderStale      = false;
@@ -112,15 +139,13 @@ void TextView::render() {
     if (text.empty()) return;
     TTF_SizeUTF8(font, text.c_str(), &textWidth, nullptr);
 
-    // The text is white, thus the color mod of the draw gives it any color
-    //noinspection HardcodedColor
-    const SDL_Color white = {255, 255, 255, 255};
+    const SDL_Color opaque = {color.r, color.g, color.b, 255};
     if (useEllipsis && textWidth > maxWidth) {
         std::vector<char> truncated(text.size() + 1);
         UI_truncateText(font, text.c_str(), truncated.data(), maxWidth, 0);
-        bitmap = TTF_RenderUTF8_Blended(font, truncated.data(), white);
+        bitmap = toPremultiplied(TTF_RenderUTF8_Blended(font, truncated.data(), opaque));
     } else {
-        bitmap = TTF_RenderUTF8_Blended(font, text.c_str(), white);
+        bitmap = toPremultiplied(TTF_RenderUTF8_Blended(font, text.c_str(), opaque));
     }
 }
 
@@ -143,12 +168,7 @@ void TextView::layout(UiLayoutContext& context) {
 void TextView::draw(UiDrawContext& context) {
     dirty               = false;
     SDL_Surface* target = context.getSurface();
-    if (!bitmap) return;
-    SDL_SetSurfaceBlendMode(bitmap, SDL_BLENDMODE_BLEND);
-    // The text is opaque, as a text that TTF renders in a role color is
-    SDL_SetSurfaceColorMod(bitmap, color.r, color.g, color.b);
-
-    if (!target) return;
+    if (!bitmap || !target) return;
     context.setContentRect(SDL_Rect{0, textTop, target->w, bitmap->h});
     SDL_Rect from = {offset, 0, bitmap->w - offset, bitmap->h};
     SDL_Rect to   = {0, textTop, 0, 0};
