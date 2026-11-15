@@ -32,8 +32,8 @@ public:
     void setTitle(const std::string& text) { title.setText(text); }
     void setHint(const std::string& text) { hint.setText(text); }
 
-    /** Shows content between the title and the hint. Pass the height of content in height. */
-    void setContent(UiView* content, int height);
+    /** Shows content between the title and the hint, as high as its layout makes it. */
+    void setContent(UiView* content) { this->content = content; }
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -48,8 +48,7 @@ private:
     DialogFrameView frame;
     TextView title;
     TextView hint;
-    UiView* content   = nullptr;
-    int contentHeight = 0;
+    UiView* content = nullptr;
 };
 
 #endif

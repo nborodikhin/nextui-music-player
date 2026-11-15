@@ -235,7 +235,7 @@ LOCAL_SRC = \
     spectrum_ceiling.c \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
     input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
-    ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/quit_dialog_page.cpp ui/controls_help_page.cpp \
+    ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/quit_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
     ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/podcast_page.cpp \
     ui/settings_page.cpp \
     ui/main_menu_page.cpp \
@@ -243,7 +243,7 @@ LOCAL_SRC = \
     ui/view/text_view.cpp ui/view/title_text_view.cpp ui/view/list_row_view.cpp ui/view/list_view.cpp \
     ui/view/scroll_indicator_view.cpp ui/view/platform_group_view.cpp ui/view/status_group_view.cpp \
     ui/view/button_hints_view.cpp ui/view/list_screen_view.cpp ui/view/box_view.cpp \
-    ui/view/dialog_view.cpp ui/view/snapshot_view.cpp \
+    ui/view/dialog_view.cpp ui/view/multiline_text_view.cpp ui/view/snapshot_view.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c

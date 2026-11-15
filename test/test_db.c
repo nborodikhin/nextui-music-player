@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,12 +24,21 @@
 static char temp_dir[512];
 static char database_path[1024];
 
+// The log of the module under test, for the tests of the log lines
+static char log_text[4096];
+
 void LOG_note(int level, const char* format, ...) {
     (void)level;
-    (void)format;
+    size_t used = strlen(log_text);
+    if (used + 1 >= sizeof(log_text)) return;
+    va_list args;
+    va_start(args, format);
+    vsnprintf(log_text + used, sizeof(log_text) - used, format, args);
+    va_end(args);
 }
 
 static bool start_test(void) {
+    log_text[0] = '\0';
     if (!mk_tempdir("db-test", temp_dir, sizeof(temp_dir))) return false;
     snprintf(database_path, sizeof(database_path), "%s/music-player.db", temp_dir);
     return true;
@@ -295,7 +305,8 @@ TEST(sqlite_is_the_device_version) {
 TEST(fresh_database_gets_schema) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
-    CHECK(Db_isAvailable());
+    CHECK(Db_begin());
+    CHECK(Db_rollback());
     CHECK_EQ_INT(sqlite_user_version(database_path), 14);
     CHECK(sqlite_has_table(database_path, "settings"));
     CHECK(sqlite_has_table(database_path, "dirs"));
@@ -449,12 +460,13 @@ TEST(selected_channel_stays_after_restart) {
     stop_test();
 }
 
-TEST(open_failure_disables_database) {
+TEST(open_failure_leaves_no_database) {
     CHECK(start_test());
     char missing_path[sizeof(database_path)];
     snprintf(missing_path, sizeof(missing_path), "%s/missing/music-player.db", temp_dir);
     CHECK(!Db_initInternal(missing_path));
-    CHECK(!Db_isAvailable());
+    CHECK(!Db_begin());
+    CHECK(strstr(log_text, "remain open") == NULL);
     DbSettingsResult* result = Db_readSettings();
     CHECK(result != NULL);
     CHECK(result && result->count == 0);
@@ -462,10 +474,26 @@ TEST(open_failure_disables_database) {
     stop_test();
 }
 
+TEST(damaged_file_gives_its_path_and_the_sqlite_message) {
+    CHECK(start_test());
+    FILE* file = fopen(database_path, "wb");
+    CHECK(file != NULL);
+    if (file) {
+        for (int i = 0; i < 64; i++) fputs("this is not a SQLite file\n", file);
+        fclose(file);
+    }
+    CHECK(!Db_initInternal(database_path));
+    CHECK(strstr(log_text, database_path) != NULL);
+    CHECK(strstr(log_text, "not a database") != NULL);
+    stop_test();
+}
+
 TEST(newer_database_is_not_changed) {
     CHECK(start_test());
     CHECK(sqlite_exec(database_path, "PRAGMA user_version = 99"));
     CHECK(!Db_initInternal(database_path));
+    CHECK(!Db_begin());
+    CHECK(strstr(log_text, "remain open") == NULL);
     CHECK_EQ_INT(sqlite_user_version(database_path), 99);
     CHECK(!sqlite_has_table(database_path, "settings"));
     stop_test();
@@ -475,6 +503,8 @@ TEST(failed_schema_migration_rolls_back) {
     CHECK(start_test());
     CHECK(sqlite_exec(database_path, "CREATE TABLE settings (wrong INTEGER)"));
     CHECK(!Db_initInternal(database_path));
+    CHECK(!Db_begin());
+    CHECK(strstr(log_text, "remain open") == NULL);
     CHECK_EQ_INT(sqlite_user_version(database_path), 0);
     CHECK(sqlite_exec(database_path, "DROP TABLE settings"));
     CHECK(Db_initInternal(database_path));
@@ -1245,7 +1275,8 @@ int main(void) {
     RUN(auto_update_off_becomes_off_channel);
     RUN(no_auto_update_row_gives_no_channel_row);
     RUN(selected_channel_stays_after_restart);
-    RUN(open_failure_disables_database);
+    RUN(open_failure_leaves_no_database);
+    RUN(damaged_file_gives_its_path_and_the_sqlite_message);
     RUN(newer_database_is_not_changed);
     RUN(failed_schema_migration_rolls_back);
     RUN(resume_file_is_removed_without_copying);

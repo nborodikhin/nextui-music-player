@@ -19,8 +19,6 @@ typedef struct DbResult {
 bool Db_init(void);
 /* Closes the database connections of the process. */
 void Db_quit(void);
-/* Returns whether the database is open. */
-bool Db_isAvailable(void);
 
 /* Starts a transaction on the calling thread. */
 bool Db_begin(void);

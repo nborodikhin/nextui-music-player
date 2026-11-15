@@ -21,7 +21,8 @@ void shell_escape(const char* src, char* dst, int dst_size);
 /**
  * Make path and each directory above it.
  *
- * @return true if path is a directory when the function returns
+ * @return true if path is a directory when the function returns. On false, errno gives the
+ *         error of the step that failed.
  */
 bool mkdir_p(const char* path);
 

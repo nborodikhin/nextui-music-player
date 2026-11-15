@@ -79,6 +79,7 @@ void ControlsHelpView::layout(UiLayoutContext& context) {
         context.layoutChild(*row.action, SDL_Rect{getButtonWidth(), y, width - getButtonWidth(), getRowHeight()});
         y += getRowHeight();
     }
+    context.setSize(UiSize{width, getHeight()});
 }
 
 /**
@@ -98,7 +99,7 @@ public:
           dialog(SCALE1(240), DialogView::Alignment::Left, Fonts_getMedium(), Fonts_getSmall()),
           rows(get_controls_help(helpId, &title), Fonts_getSmall()) {
         dialog.setTitle(title);
-        dialog.setContent(&rows, rows.getHeight());
+        dialog.setContent(&rows);
         dialog.setHint("Press any button to close");
     }
 

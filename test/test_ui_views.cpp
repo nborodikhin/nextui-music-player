@@ -15,11 +15,14 @@
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_view.hpp"
 #include "ui/view/list_screen_view.hpp"
+#include "ui/view/multiline_text_view.hpp"
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
 #include "input/common_button_handler.hpp"
+#include "input/input_driver.hpp"
 #include "ui/controls_help_page.hpp"
+#include "ui/database_error_dialog_page.hpp"
 #include "ui/quit_dialog_page.hpp"
 #include "ui/page/page_stack.hpp"
 #include "ui/view/dialog_view.hpp"
@@ -1097,6 +1100,155 @@ TEST(test_dialog_pages_give_the_earphone_buttons_to_the_playback) {
     CHECK(pressEarphoneButtonOn(ControlsHelpPage(HELP_MAIN_MENU)) == want);
 }
 
+namespace input {
+
+// Gives the test the step of the driver that takes a pad state, as test_input_events.cpp does
+struct InputDriverTest {
+    static void update(InputDriver& driver, const PadState& padState, bool padReset, uint32_t now,
+                       RawEventListener& listener) {
+        driver.update(padState, padReset, now, listener);
+    }
+};
+
+}  // namespace input
+
+// The database error dialog closes on each button of the pad
+TEST(test_database_error_dialog_closes_on_a_pad_button) {
+    using input::Button;
+    const DatabaseErrorDialogPage dialog;
+    for (Button button : {Button::A, Button::B, Button::X, Button::Y, Button::Start, Button::Select,
+                          Button::DpadUp, Button::L1, Button::R2, Button::Menu, Button::Minus}) {
+        CHECK(pressClosesDialog(dialog, {button}));
+    }
+}
+
+// A media key goes to the playback, and the database error dialog stays open
+TEST(test_database_error_dialog_stays_open_at_a_media_key) {
+    Fixture f;
+    RecordingPlayback playback;
+    PageStack stack(playback);
+    stack.start(DatabaseErrorDialogPage{}.createPageImpl(), f.compositor);
+    stack.startFrame(0);
+    stack.getRawInput().onRawEvent({0, input::event::Media{input::MediaKey::PlayPause}});
+    stack.tickInput();
+    stack.tickPages();
+    stack.endFrame();
+    CHECK(playback.commands == std::vector<std::string>{"toggle"});
+    CHECK(!stack.isDone());
+    stack.closeAll();
+}
+
+// After the reset of the pad, the release of a press from before the reset does not close the
+// dialog, and a new press closes it
+TEST(test_database_error_dialog_ignores_a_press_from_before_the_reset) {
+    using input::Button;
+    Fixture f;
+    RecordingPlayback playback;
+    PageStack stack(playback);
+    stack.start(DatabaseErrorDialogPage{}.createPageImpl(), f.compositor);
+    input::InputDriver driver;
+    const uint32_t a = input::getButtonBit(Button::A);
+    uint32_t now     = 0;
+    auto frame       = [&](const input::PadState& state, bool reset) {
+        stack.startFrame(now);
+        stack.beginPoll();
+        input::InputDriverTest::update(driver, state, reset, now, stack.getRawInput());
+        stack.tickInput();
+        stack.tickPages();
+        stack.endFrame();
+        now += 16;
+    };
+    frame(input::PadState{.pressed = 0, .justPressed = 0, .justReleased = 0}, true);
+    frame(input::PadState{.pressed = 0, .justPressed = 0, .justReleased = a}, false);
+    CHECK(!stack.isDone());
+    frame(input::PadState{.pressed = a, .justPressed = a, .justReleased = 0}, false);
+    frame(input::PadState{.pressed = 0, .justPressed = 0, .justReleased = a}, false);
+    CHECK(stack.isDone());
+    stack.closeAll();
+}
+
+int getMultilineHeight(int lines) {
+    return lines * std::max(TTF_FontLineSkip(testFont), TTF_FontHeight(testFont));
+}
+
+// A text that is wider than the view goes on more lines, and no line goes past the width
+TEST(test_multiline_text_wraps_at_a_space) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
+    CHECK(view.getSize().w == 100);
+    CHECK(view.getSize().h > getMultilineHeight(1));
+    CHECK(view.getSize().h % getMultilineHeight(1) == 0);
+    CHECK(f.surfaceHasPixels(SDL_Rect{0, 0, 100, getMultilineHeight(1)}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{100, 0, kScreenW - 100, kScreenH}));
+}
+
+// A line break starts a new line, and two line breaks leave an empty line
+TEST(test_multiline_text_starts_a_line_at_a_line_break) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("a\n\nb");
+    f.frame(view, SDL_Rect{0, 0, 200, kScreenH});
+    const int line = getMultilineHeight(1);
+    CHECK(view.getSize().h == getMultilineHeight(3));
+    CHECK(f.surfaceHasPixels(SDL_Rect{0, 0, 200, line}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{0, line, 200, line}));
+    CHECK(f.surfaceHasPixels(SDL_Rect{0, 2 * line, 200, line}));
+}
+
+// A word that is wider than the view breaks at a character
+TEST(test_multiline_long_word_breaks_at_a_character) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("abcdefghijklmnopqrstuvwxyz");
+    f.frame(view, SDL_Rect{0, 0, 40, kScreenH});
+    CHECK(view.getSize().h > getMultilineHeight(1));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{40, 0, kScreenW - 40, kScreenH}));
+}
+
+// Spans in different roles that fit share a line, one after the other
+TEST(test_multiline_spans_share_a_line) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText(SpannedText().add("ab ").add("cd", THEME_ROLE_SECONDARY));
+    f.frame(view, SDL_Rect{0, 0, 200, kScreenH});
+    int firstWidth = 0;
+    TTF_SizeUTF8(testFont, "ab ", &firstWidth, nullptr);
+    CHECK(view.getSize().h == getMultilineHeight(1));
+    CHECK(f.surfaceHasPixels(SDL_Rect{firstWidth, 0, 200 - firstWidth, getMultilineHeight(1)}));
+}
+
+// A plain text is a text of one span in the primary role
+TEST(test_multiline_same_text_is_not_dirty) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    CHECK(view.setText("text"));
+    f.frame(view, kRow);
+    CHECK(!view.isDirty());
+    CHECK(!view.setText("text"));
+    CHECK(!view.setText(SpannedText().add("text")));
+    CHECK(!view.isDirty());
+}
+
+// The dialog makes the space of its content as high as the layout of the content
+TEST(test_dialog_takes_the_height_of_its_content) {
+    Fixture f(kScreenW, 200);
+    DialogView dialog(200, DialogView::Alignment::Left, testFont, testFont);
+    MultilineTextView message(testFont);
+    dialog.setContext(f.context);
+    dialog.setTitle("Title");
+    dialog.setContent(&message);
+    message.setText("one\ntwo\nthree");
+    f.frame(dialog, SDL_Rect{0, 0, kScreenW, 200});
+    CHECK(message.getSize().h == getMultilineHeight(3));
+}
+
 int main() {
     SDL_Init(0);
     if (TTF_Init() != 0) {
@@ -1143,9 +1295,18 @@ int main() {
     RUN(test_single_item_does_not_move);
     RUN(test_empty_list_gives_minus_one);
     RUN(test_dialog_draws_again_only_for_a_change);
+    RUN(test_multiline_text_wraps_at_a_space);
+    RUN(test_multiline_text_starts_a_line_at_a_line_break);
+    RUN(test_multiline_long_word_breaks_at_a_character);
+    RUN(test_multiline_spans_share_a_line);
+    RUN(test_multiline_same_text_is_not_dirty);
+    RUN(test_dialog_takes_the_height_of_its_content);
     RUN(test_dialog_pages_give_the_earphone_buttons_to_the_playback);
     RUN(test_controls_help_ignores_start_with_a_volume_button);
     RUN(test_quit_dialog_ignores_start_with_a_volume_button);
+    RUN(test_database_error_dialog_closes_on_a_pad_button);
+    RUN(test_database_error_dialog_stays_open_at_a_media_key);
+    RUN(test_database_error_dialog_ignores_a_press_from_before_the_reset);
     RUN(test_status_group_refresh_with_the_same_pixels_changes_nothing);
     RUN(test_status_group_refresh_gives_the_same_pixels);
     RUN(test_status_group_renders_when_a_value_settles);

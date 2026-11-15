@@ -89,6 +89,11 @@ inline bool isButtonEvent(const RawEvent& event) {
     return std::get_if<event::Media>(&event.kind) == nullptr;
 }
 
+/** Returns: true for the press of a button of the pad */
+inline bool isButtonPressedEvent(const RawEvent& event) {
+    return std::get_if<event::ButtonPressed>(&event.kind) != nullptr;
+}
+
 // The button events: what the input means.
 namespace event {
 struct ShortPress {
