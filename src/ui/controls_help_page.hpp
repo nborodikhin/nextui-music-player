@@ -5,7 +5,7 @@
 #include <variant>
 
 #include "help_screen.h"
-#include "ui/ui_page.hpp"
+#include "ui/page/ui_page.hpp"
 
 /** The dialog that lists the controls of a screen. */
 class ControlsHelpPage final : public UiPage {

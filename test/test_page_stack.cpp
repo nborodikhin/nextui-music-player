@@ -8,8 +8,8 @@
 
 #include "input/input_state.hpp"
 #include "test.h"
-#include "ui/legacy_module_page.hpp"
-#include "ui/page_stack.hpp"
+#include "ui/page/legacy_module_page.hpp"
+#include "ui/page/page_stack.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui/view/ui_view.hpp"
 #include "ui_layers.h"
@@ -38,6 +38,12 @@ public:
 
     void layout(UiLayoutContext&) override { layoutLog.push_back(name); }
     bool isDirty() const override { return dirty; }
+    /** Counts the frames in a frame callback of the view */
+    void countFrames() {
+        getScheduler().runEachFrame([this] { frames++; });
+    }
+
+    int frames = 0;
 
     void draw(UiDrawContext& context) override {
         dirty = false;
@@ -60,7 +66,7 @@ public:
     void changeVolume(int step) override { commands.push_back(step > 0 ? "volume+" : "volume-"); }
 };
 
-class FakeContext : public UiContext {
+class FakeScreen : public UiScreenInfo {
 public:
     SDL_PixelFormat* getPixelFormat() const override { return nullptr; }
     UiSize getScreenSize() const override { return UiSize{640, 480}; }
@@ -80,6 +86,8 @@ struct TestPage final : public UiPage {
     uint32_t color = 0;
     /** Called with the implementation at each short press that the page gets */
     std::function<void(TestPageImpl<TestPage>&, Button)> onShortPress;
+    /** Called with the implementation at onEnter() */
+    std::function<void(TestPageImpl<TestPage>&)> onEnterHook;
 
     std::unique_ptr<UiPageImplBase> createPageImpl() const override {
         return std::make_unique<TestPageImpl<TestPage>>(*this);
@@ -96,12 +104,23 @@ public:
         : UiPageImpl<Page>(page.kind), page(page), root(page.name, page.color) {}
 
     HelpId getHelpId() const override { return page.helpId; }
-    void setContext(UiContext&) override { add("setContext"); }
-    void onEnter() override { add("enter"); }
+    void setContext(UiContext& context) override {
+        add("setContext");
+        root.setContext(context);
+        if (second) second->setContext(context);
+    }
+    void onEnter() override {
+        add("enter");
+        if (page.onEnterHook) page.onEnterHook(*this);
+    }
     void onExit() override { add("exit"); }
-    void pause(uint32_t) override { add("pause"); }
-    void resume(uint32_t) override { add("resume"); }
-    void layout(UiLayoutContext& context) override { context.layoutChild(root, context.getMaxRect()); }
+    void pause() override { add("pause"); }
+    void resume() override { add("resume"); }
+    void layout(UiLayoutContext& context) override {
+        if (layoutRoot) context.layoutChild(root, context.getMaxRect());
+        if (second && layoutSecond) context.layoutChild(*second, context.getMaxRect());
+        if (measureRoot) context.createMeasuringContext().layoutChild(root, context.getMaxRect());
+    }
 
     bool onRawEvent(const RawEvent& event) override {
         if (const auto* typedEvent = std::get_if<event::ButtonPressed>(&event.kind)) {
@@ -121,6 +140,16 @@ public:
     }
 
     PageNavigator& navigator() { return this->getNavigator(); }
+    UiContext& context() { return this->getContext(); }
+    UiTaskScheduler& scheduler() { return this->getScheduler(); }
+    TestRootView& getRoot() { return root; }
+    /** A second root view, laid out after the first while it is set */
+    std::unique_ptr<TestRootView> second;
+    bool layoutRoot   = true;
+    bool layoutSecond = true;
+    bool measureRoot  = false;
+    /** Tasks that the page holds until it is destroyed */
+    std::vector<ScheduledTask> heldTasks;
     void doClose() { this->close(); }
     void doFinish(typename Page::Result result)
         requires(!std::is_same_v<typename Page::Result, std::monostate>)
@@ -144,13 +173,14 @@ PlainPage makePage(const char* name, PageKind kind = PageKind::FullScreen) {
 
 struct StackFixture {
     FakePlaybackControl playback;
-    FakeContext context;
+    FakeScreen screen;
     PageStack stack{playback};
     uint32_t now = 0;
 
     explicit StackFixture(const PlainPage& bottom) {
         pageLog.clear();
-        stack.start(bottom.createPageImpl(), context);
+        stack.start(bottom.createPageImpl(), screen);
+        stack.startFrame(now);
     }
 
     void send(const RawEvent& event) { stack.getRawInput().onRawEvent(event); }
@@ -160,11 +190,12 @@ struct StackFixture {
 
     /** Ends the poll of this frame: the tick of the input and of the top page, and the commands */
     void endFrame() {
-        stack.tickInput(now);
-        stack.tickTop(now);
-        stack.endFrame(now);
+        stack.tickInput();
+        stack.tickPages();
+        stack.endFrame();
         stack.beginPoll();
         now += 16;
+        stack.startFrame(now);
     }
 
     void tap(Button button) {
@@ -253,7 +284,8 @@ TEST(events_after_a_command_reach_no_owner) {
     f.press(Button::Start);
     f.endFrame();
     f.now = ButtonDetector::kLongPressMs;
-    f.stack.tickInput(f.now);
+    f.stack.startFrame(f.now);
+    f.stack.tickInput();
     f.media();
     f.release(Button::Start);
     f.endFrame();
@@ -297,6 +329,7 @@ TEST(dialog_gets_no_event_of_the_opening_gesture) {
     f.press(Button::Start);
     f.endFrame();
     f.now = ButtonDetector::kLongPressMs;
+    f.stack.startFrame(f.now);
     f.endFrame();
     CHECK(hasLine("quit enter"));
     pageLog.clear();
@@ -462,14 +495,13 @@ public:
     void beforeModule() override { pageLog.push_back("before module"); }
     void afterModule() override { pageLog.push_back("after module"); }
     SDL_Surface* getScreen() override { return screen; }
-    uint32_t getTime() override { return 1000; }
     void requestQuit() override { quitRequested = true; }
 };
 
 struct LegacyFixture {
     FakePlaybackControl playback;
-    PageStack stack{playback};
     UiCompositor compositor;
+    PageStack stack{playback};
     TestLegacyHost host;
 
     explicit LegacyFixture(const PlainPage& bottom = makePage("main")) {
@@ -485,6 +517,16 @@ struct LegacyFixture {
     ~LegacyFixture() {
         stack.closeAll();
         SDL_FreeSurface(host.screen);
+    }
+
+    uint32_t now = 0;
+
+    /** Starts a frame 16 ms after the last one, runs the tasks of the top page, and draws it */
+    void runFrame() {
+        now += 16;
+        stack.startFrame(now);
+        stack.tickPages();
+        drawFrame();
     }
 
     /** Lays out and draws one frame, and returns true when it wrote the surface */
@@ -503,13 +545,13 @@ TEST(paused_page_is_not_laid_out) {
     LegacyFixture f;
     f.drawFrame();
     f.stack.open(makePage("dialog", PageKind::Dialog));
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     layoutLog.clear();
     f.drawFrame();
     f.drawFrame();
     CHECK(layoutLog == (std::vector<std::string>{"main", "dialog", "dialog"}));
     layoutLog.clear();
-    f.stack.setContext(f.compositor);
+    f.stack.setScreen(f.compositor);
     f.drawFrame();
     CHECK(layoutLog == (std::vector<std::string>{"main", "dialog"}));
 }
@@ -519,11 +561,11 @@ TEST(closed_dialog_refreshes_the_status_group) {
     LegacyFixture f;
     f.drawFrame();
     f.stack.open(makePage("dialog", PageKind::Dialog));
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     f.drawFrame();
     InputState::getInstance().clearStatusChanged();
     static_cast<TestPageImpl<PlainPage>*>(f.stack.getTop())->doClose();
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     CHECK(InputState::getInstance().isStatusChanged());
 }
 
@@ -536,12 +578,12 @@ TEST(covered_page_shows_dimmed_under_a_dialog) {
     f.drawFrame();
     CHECK(f.getScreenPixel() == 0xFFFFFFFF);
     f.stack.open(makePage("dialog", PageKind::Dialog));
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     f.drawFrame();
     // White with half of the black over it
     CHECK(f.getScreenPixel() == 0xFF7F7F7F);
     static_cast<TestPageImpl<PlainPage>*>(f.stack.getTop())->doClose();
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     f.drawFrame();
     CHECK(f.getScreenPixel() == 0xFFFFFFFF);
 }
@@ -555,7 +597,7 @@ TEST(legacy_module_takes_the_screen_again_at_the_same_address) {
     LegacyTestPage page;
     page.run = [](DisplayContext*) { return MODULE_EXIT_TO_MENU; };
     f.stack.open(page);
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     pageLog.clear();
     CHECK(runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr));
     CHECK(isLog({"before module", "after module", "main setContext", "legacy exit",
@@ -576,7 +618,7 @@ TEST(legacy_module_leaves_no_pixels_on_the_layers) {
         return MODULE_EXIT_BACK;
     };
     f.stack.open(page);
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr);
     f.drawFrame();
     CHECK(!layerHasPixels[UI_LAYER_ANIMATION]);
@@ -590,9 +632,258 @@ TEST(legacy_module_that_quits_requests_the_quit) {
     LegacyTestPage page;
     page.run = [](DisplayContext*) { return MODULE_EXIT_QUIT; };
     f.stack.open(page);
-    f.stack.endFrame(0);
+    f.stack.endFrame();
     runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr);
     CHECK(f.host.quitRequested);
+}
+
+// The context of a page: its active time and its tasks
+
+TEST(context_is_ready_at_enter_and_a_task_from_enter_runs_in_the_next_frame) {
+    int runs   = 0;
+    PlainPage page = makePage("main");
+    page.onEnterHook = [&runs](TestPageImpl<PlainPage>& impl) { impl.scheduler().post([&runs] { runs++; }); };
+    StackFixture f(page);
+    CHECK_EQ_INT(runs, 0);
+    f.endFrame();
+    CHECK_EQ_INT(runs, 1);
+}
+
+TEST(active_time_advances_for_the_top_page_only) {
+    UiContext* mainContext = nullptr;
+    UiContext* nextContext = nullptr;
+    PlainPage next = makePage("next");
+    next.onEnterHook = [&nextContext](TestPageImpl<PlainPage>& impl) { nextContext = &impl.context(); };
+    next.onShortPress = [](TestPageImpl<PlainPage>& impl, Button button) {
+        if (button == Button::B) impl.doClose();
+    };
+    PlainPage main = makeOpener(next, makePage("dialog", PageKind::Dialog));
+    main.onEnterHook = [&mainContext](TestPageImpl<PlainPage>& impl) { mainContext = &impl.context(); };
+    StackFixture f(main);
+    f.endFrame();
+    f.endFrame();
+    CHECK_EQ_INT(mainContext->getActiveTime(), 32);
+
+    // Next covers main for ten frames
+    f.tap(Button::A);
+    const uint32_t mainAtCover        = mainContext->getActiveTime();
+    const uint32_t mainElapsedAtCover = mainContext->getElapsedTime();
+    for (int frame = 0; frame < 10; frame++) f.endFrame();
+    CHECK_EQ_INT(mainContext->getActiveTime(), mainAtCover);
+    // Next gets the 11 frames after the open, and its first frame adds no time
+    CHECK_EQ_INT(nextContext->getActiveTime(), 160);
+    // A covered page keeps the elapsed time of its last frame as the top
+    CHECK_EQ_INT(mainContext->getElapsedTime(), mainElapsedAtCover);
+    CHECK_EQ_INT(nextContext->getElapsedTime(), f.now);
+
+    // Main gets no part of the covered time
+    f.tap(Button::B);
+    CHECK(hasLine("main resume"));
+    f.endFrame();
+    // The pause is a gap, thus the first frame after the return adds no time
+    CHECK_EQ_INT(mainContext->getActiveTime(), mainAtCover + 16);
+}
+
+TEST(covered_page_runs_no_task_and_no_frame_callback) {
+    int frames = 0;
+    int tasks  = 0;
+    PlainPage main = makeOpener(makePage("next"), makePage("dialog", PageKind::Dialog));
+    main.onEnterHook = [&](TestPageImpl<PlainPage>& impl) {
+        impl.scheduler().runEachFrame([&frames] { frames++; });
+        impl.scheduler().postDelayed([&tasks] { tasks++; }, 100);
+    };
+    StackFixture f(main);
+    f.endFrame();
+    CHECK_EQ_INT(frames, 1);
+    f.tap(Button::X);
+    const int framesAtCover = frames;
+    for (int frame = 0; frame < 20; frame++) f.endFrame();
+    CHECK_EQ_INT(frames, framesAtCover);
+    CHECK_EQ_INT(tasks, 0);
+}
+
+TEST(pending_task_survives_a_new_screen) {
+    int runs = 0;
+    PlainPage page = makePage("main");
+    page.onEnterHook = [&runs](TestPageImpl<PlainPage>& impl) { impl.scheduler().postDelayed([&runs] { runs++; }, 100); };
+    StackFixture f(page);
+    f.endFrame();
+    FakeScreen other;
+    f.stack.setScreen(other);
+    for (int frame = 0; frame < 5; frame++) f.endFrame();
+    CHECK_EQ_INT(runs, 0);
+    for (int frame = 0; frame < 3; frame++) f.endFrame();
+    CHECK_EQ_INT(runs, 1);
+}
+
+TEST(task_of_a_closed_page_does_not_run) {
+    int runs = 0;
+    PlainPage next = makePage("next");
+    next.onEnterHook = [&runs](TestPageImpl<PlainPage>& impl) { impl.scheduler().postDelayed([&runs] { runs++; }, 50); };
+    next.onShortPress = [](TestPageImpl<PlainPage>& impl, Button button) {
+        if (button == Button::B) impl.doClose();
+    };
+    StackFixture f(makeOpener(next, makePage("dialog", PageKind::Dialog)));
+    f.tap(Button::A);
+    f.tap(Button::B);
+    for (int frame = 0; frame < 10; frame++) f.endFrame();
+    CHECK_EQ_INT(runs, 0);
+}
+
+TEST(teardown_with_held_tasks_touches_no_destroyed_object) {
+    int runs = 0;
+    auto holdTasks = [&runs](TestPageImpl<PlainPage>& impl) {
+        UiTaskScheduler& scheduler = impl.scheduler();
+        impl.heldTasks.emplace_back(scheduler, scheduler.postDelayed([&runs] { runs++; }, 1000));
+        impl.heldTasks.emplace_back(scheduler, scheduler.runEachFrame([] {}));
+    };
+    PlainPage dialog = makePage("dialog", PageKind::Dialog);
+    dialog.onEnterHook = holdTasks;
+    PlainPage main = makeOpener(makePage("next"), dialog);
+    main.onEnterHook = holdTasks;
+    {
+        StackFixture f(main);
+        f.tap(Button::X);
+        f.endFrame();
+        // A quit closes each page from the top down
+        f.stack.exit();
+        f.endFrame();
+        CHECK(f.stack.isDone());
+    }
+    {
+        StackFixture f(main);
+        f.tap(Button::X);
+        // The destructor of the stack closes the pages
+    }
+    CHECK_EQ_INT(runs, 0);
+}
+
+// The tasks of the views of a page
+
+/** Returns a page named name that gives its implementation to impl at onEnter() */
+PlainPage makeCapturedPage(const char* name, TestPageImpl<PlainPage>*& impl, PageKind kind = PageKind::FullScreen) {
+    PlainPage page   = makePage(name, kind);
+    page.onEnterHook = [&impl](TestPageImpl<PlainPage>& entered) { impl = &entered; };
+    return page;
+}
+
+TEST(view_task_runs_while_the_view_is_laid_out_and_ends_when_it_leaves) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    f.drawFrame();
+    main->getRoot().countFrames();
+    f.runFrame();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 2);
+
+    main->layoutRoot = false;
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 3);
+    // The layout of that frame did not give the view, thus its task ended
+    main->layoutRoot = true;
+    f.runFrame();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 3);
+}
+
+TEST(page_with_no_view_in_its_layout_ends_each_view_task) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    main->second = std::make_unique<TestRootView>("second", 0);
+    main->second->setContext(main->context());
+    f.drawFrame();
+    main->getRoot().countFrames();
+    main->second->countFrames();
+    main->layoutRoot   = false;
+    main->layoutSecond = false;
+    f.runFrame();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 1);
+    CHECK_EQ_INT(main->second->frames, 1);
+}
+
+TEST(view_that_stays_keeps_its_task_while_another_leaves) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    main->second = std::make_unique<TestRootView>("second", 0);
+    main->second->setContext(main->context());
+    f.drawFrame();
+    main->getRoot().countFrames();
+    main->second->countFrames();
+    main->layoutRoot = false;
+    for (int frame = 0; frame < 3; frame++) f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 1);
+    CHECK_EQ_INT(main->second->frames, 3);
+}
+
+TEST(hidden_view_keeps_its_task) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    f.drawFrame();
+    main->getRoot().countFrames();
+    main->getRoot().setVisible(false);
+    for (int frame = 0; frame < 3; frame++) f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 3);
+}
+
+TEST(view_that_is_only_measured_loses_its_task) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    main->layoutRoot  = false;
+    main->measureRoot = true;
+    f.drawFrame();
+    main->getRoot().countFrames();
+    for (int frame = 0; frame < 3; frame++) f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 1);
+}
+
+TEST(page_task_does_not_depend_on_the_layout) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    int runs = 0;
+    main->scheduler().runEachFrame([&runs] { runs++; });
+    main->layoutRoot = false;
+    for (int frame = 0; frame < 3; frame++) f.runFrame();
+    CHECK_EQ_INT(runs, 3);
+}
+
+TEST(views_of_a_page_under_a_dialog_keep_their_tasks) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    f.drawFrame();
+    main->getRoot().countFrames();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 1);
+
+    TestPageImpl<PlainPage>* dialog = nullptr;
+    f.stack.open(makeCapturedPage("dialog", dialog, PageKind::Dialog));
+    f.stack.endFrame();
+    for (int frame = 0; frame < 3; frame++) f.runFrame();
+    // A new screen takes the snapshot of main again
+    f.stack.setScreen(f.compositor);
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 1);
+
+    dialog->doClose();
+    f.stack.endFrame();
+    f.runFrame();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 3);
+}
+
+TEST(view_destroyed_after_it_left_the_layout_gets_no_call) {
+    TestPageImpl<PlainPage>* main = nullptr;
+    LegacyFixture f(makeCapturedPage("main", main));
+    main->second = std::make_unique<TestRootView>("second", 0);
+    main->second->setContext(main->context());
+    f.drawFrame();
+    main->second->countFrames();
+    main->layoutSecond = false;
+    f.runFrame();
+    main->second.reset();
+    f.runFrame();
+    f.runFrame();
+    CHECK_EQ_INT(main->getRoot().frames, 0);
 }
 
 int main(void) {
@@ -619,5 +910,19 @@ int main(void) {
     RUN(legacy_module_takes_the_screen_again_at_the_same_address);
     RUN(legacy_module_leaves_no_pixels_on_the_layers);
     RUN(legacy_module_that_quits_requests_the_quit);
+    RUN(context_is_ready_at_enter_and_a_task_from_enter_runs_in_the_next_frame);
+    RUN(active_time_advances_for_the_top_page_only);
+    RUN(covered_page_runs_no_task_and_no_frame_callback);
+    RUN(pending_task_survives_a_new_screen);
+    RUN(task_of_a_closed_page_does_not_run);
+    RUN(teardown_with_held_tasks_touches_no_destroyed_object);
+    RUN(view_task_runs_while_the_view_is_laid_out_and_ends_when_it_leaves);
+    RUN(page_with_no_view_in_its_layout_ends_each_view_task);
+    RUN(view_that_stays_keeps_its_task_while_another_leaves);
+    RUN(hidden_view_keeps_its_task);
+    RUN(view_that_is_only_measured_loses_its_task);
+    RUN(page_task_does_not_depend_on_the_layout);
+    RUN(views_of_a_page_under_a_dialog_keep_their_tasks);
+    RUN(view_destroyed_after_it_left_the_layout_gets_no_call);
     return test_summary();
 }

@@ -3,7 +3,7 @@
 
 #include <SDL2/SDL.h>
 
-#include "ui/ui_page.hpp"
+#include "ui/page/ui_page.hpp"
 
 class PageStack;
 class UiCompositor;
@@ -39,7 +39,6 @@ public:
     /** Called after the module returns, before the stack takes the screen again. */
     virtual void afterModule() = 0;
     virtual SDL_Surface* getScreen() = 0;
-    virtual uint32_t getTime() = 0;
     virtual void requestQuit() = 0;
 
 protected:

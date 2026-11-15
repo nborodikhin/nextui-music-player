@@ -17,10 +17,19 @@ public:
     /** Returns an id that no other view of the run has. */
     int getId() const { return id; }
 
-    /** Drops each cache of the view. An override calls the base and forwards the call to the children. */
-    virtual void setContext(UiContext& newContext) { context = &newContext; }
+    /**
+     * Drops each cache of the view. An override calls the base and forwards the call to the
+     * children.
+     */
+    virtual void setContext(UiContext& newContext) {
+        context = &newContext;
+        scheduler.setContext(newContext);
+    }
 
-    /** Sets the size and the content rectangle of the view, and lays out its children. */
+    /**
+     * Sets the size and the content rectangle of the view, and lays out its children. A view
+     * stays alive until the layout of the page after it leaves the tree of the page.
+     */
     virtual void layout(UiLayoutContext&) {}
 
     /** Returns the size from the last layout. */
@@ -43,11 +52,18 @@ protected:
     UiContext& getContext() const { return *context; }
     bool hasContext() const { return context != nullptr; }
 
+    /**
+     * Returns the scheduler of the view. The stack cancels each task of the view after a layout of
+     * the page that does not give the view.
+     */
+    UiTaskScheduler& getScheduler() { return scheduler; }
+
 private:
     friend class UiLayoutContext;
 
     int id;
     UiContext* context = nullptr;
+    OwnerScheduler scheduler{id};
     UiSize size        = {0, 0};
     bool ownerVisible  = true;
 };

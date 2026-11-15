@@ -280,6 +280,19 @@ TEST(deferred_short_press_at_the_release) {
     CHECK(isRecord(f.log.records[0], Kind::Short, Button::A, 420));
 }
 
+// The loop gives the same frame time to the poll and to the tick. A press time later than the
+// tick time would wrap the time of the hold and give a long press at once.
+TEST(press_and_tick_at_one_frame_time_give_no_long_press) {
+    Fixture f;
+    f.press(Button::A, 5000);
+    f.detector.onTick(5000);
+    CHECK_EQ_SZ(f.log.records.size(), 0);
+    f.detector.onTick(5016);
+    CHECK_EQ_SZ(f.log.records.size(), 0);
+    f.detector.onTick(5000 + ButtonDetector::kLongPressMs);
+    CHECK_EQ_SZ(f.log.records.size(), 1);
+}
+
 TEST(long_press_one_time_and_no_short_press_after_it) {
     Fixture f;
     f.press(Button::A, 0);
@@ -999,6 +1012,7 @@ int main(void) {
     RUN(pad_gives_no_release_of_a_button_that_was_not_pressed);
     RUN(immediate_short_press_at_the_press);
     RUN(deferred_short_press_at_the_release);
+    RUN(press_and_tick_at_one_frame_time_give_no_long_press);
     RUN(long_press_one_time_and_no_short_press_after_it);
     RUN(repeat_after_the_delay_then_at_each_interval);
     RUN(repeat_count_of_a_hold);

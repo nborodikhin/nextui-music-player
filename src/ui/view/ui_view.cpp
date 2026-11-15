@@ -1,9 +1,5 @@
 #include "ui/view/ui_view.hpp"
 
-namespace {
+#include "ui/view/unique_id.hpp"
 
-int nextViewId = 1;
-
-}  // namespace
-
-UiView::UiView() : id(nextViewId++) {}
+UiView::UiView() : id(ui::generateUniqueId()) {}

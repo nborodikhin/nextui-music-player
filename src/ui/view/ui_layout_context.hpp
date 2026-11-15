@@ -2,6 +2,7 @@
 #define __UI_VIEW_UI_LAYOUT_CONTEXT_HPP__
 
 #include <list>
+#include <vector>
 
 #include <SDL2/SDL.h>
 
@@ -62,6 +63,9 @@ public:
     SDL_Rect getClipRect() const { return clipRect; }
 
     const std::list<UiLayoutContext>& getChildren() const { return children; }
+
+    /** Adds the id of each view of this tree to `viewIds`. */
+    void collectViewIds(std::vector<int>& viewIds) const;
 
 private:
     UiLayoutContext& layoutChildIn(UiView& childView, const SDL_Rect& rect, const SDL_Rect* clip);

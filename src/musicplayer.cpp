@@ -31,7 +31,7 @@ extern "C" {
 // Module architecture
 #include "module_common.h"
 #include "ui/main_menu_page.hpp"
-#include "ui/page_stack.hpp"
+#include "ui/page/page_stack.hpp"
 #include "module_library.h"
 #include "module_player.h"
 #include "module_radio.h"

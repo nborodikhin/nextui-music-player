@@ -3,7 +3,7 @@
 
 #include <memory>
 
-#include "ui/ui_page.hpp"
+#include "ui/page/ui_page.hpp"
 
 /** The dialog that asks before the app quits. */
 class QuitDialogPage final : public UiPage {

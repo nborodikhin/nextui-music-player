@@ -1,6 +1,7 @@
 #include "ui/view/text_view.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "ui_utils.h"
@@ -20,6 +21,7 @@ bool TextView::setText(const std::string& newText) {
     text        = newText;
     renderStale = true;
     dirty       = true;
+    resetScrolling();
     return true;
 }
 
@@ -33,22 +35,60 @@ void TextView::setColor(SDL_Color newColor) {
 
 bool TextView::isClipped() const { return maxWidth > 0 && textWidth > maxWidth; }
 
-void TextView::updateScrolling(uint32_t elapsedMs) {
-    if (useEllipsis || !isClipped()) {
-        if (scrolling || offset != 0) {
-            scrolling = false;
-            offset    = 0;
-            dirty     = true;
-        }
+void TextView::startScrolling(int32_t spPerSecond) {
+    if (spPerSecond <= 0) {
+        stopScrolling();
         return;
     }
-    const uint64_t distance   = static_cast<uint64_t>(elapsedMs) * SCALE1(SCROLLING_SPEED_SP) / 1000;
-    const int newOffset       = static_cast<int>(distance % static_cast<uint64_t>(textWidth + SCALE1(SCROLL_GAP_SP)));
-    const bool newScrolling   = elapsedMs > 0;
-    if (newOffset == offset && newScrolling == scrolling) return;
-    offset    = newOffset;
+    speedSpPerSecond = spPerSecond;
+    if (!hasContext()) return;
+    // The new speed counts from now, also for a text that moves
+    stepTime = getContext().getActiveTime();
+    if (!getScheduler().isTaskPending(scrollTask)) {
+        scrollTask = getScheduler().runEachFrame([this] { stepScroll(); });
+    }
+    updateScrolling();
+}
+
+void TextView::startScrolling() { startScrolling(SCROLLING_SPEED_SP); }
+
+void TextView::stopScrolling() {
+    speedSpPerSecond = 0;
+    getScheduler().cancelTask(scrollTask);
+    scrollTask = 0;
+    updateScrolling();
+}
+
+void TextView::resetScrolling() {
+    setOffset(0);
+    updateScrolling();
+}
+
+void TextView::updateScrolling() {
+    const bool newScrolling = !useEllipsis && (speedSpPerSecond > 0 || offset > 0);
+    if (newScrolling == scrolling) return;
     scrolling = newScrolling;
     dirty     = true;
+}
+
+void TextView::stepScroll() {
+    const uint32_t now = getContext().getActiveTime();
+    const uint32_t step = now - stepTime;
+    stepTime = now;
+    if (useEllipsis || !isClipped()) {
+        setOffset(0);
+        return;
+    }
+    const double loop = textWidth + SCALE1(SCROLL_GAP_SP);
+    setOffset(std::fmod(exactOffset + static_cast<double>(SCALE1(speedSpPerSecond)) * step / 1000.0, loop));
+}
+
+void TextView::setOffset(double newOffset) {
+    exactOffset     = newOffset;
+    const int whole = static_cast<int>(newOffset);
+    if (whole == offset) return;
+    offset = whole;
+    dirty  = true;
 }
 
 void TextView::setContext(UiContext& context) {

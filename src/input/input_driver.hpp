@@ -12,9 +12,9 @@ namespace input {
 // Translates the input devices (buttons and the USB HID) into events.
 class InputDriver {
 public:
-    // Captures the current state into InputState
-    // Emits corresponding set of RawEvents.
-    void poll(RawEventListener& listener);
+    // Captures the current state into InputState. Raw events of the poll will
+    // have `time` as their event time.
+    void poll(RawEventListener& listener, uint32_t time);
 
 private:
     friend struct InputDriverTest;

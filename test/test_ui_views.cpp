@@ -21,8 +21,9 @@
 #include "input/common_button_handler.hpp"
 #include "ui/controls_help_page.hpp"
 #include "ui/quit_dialog_page.hpp"
-#include "ui/page_stack.hpp"
+#include "ui/page/page_stack.hpp"
 #include "ui/view/dialog_view.hpp"
+#include "ui/page/page_context.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui_layers.h"
 #include "ui_theme.h"
@@ -68,6 +69,8 @@ constexpr SDL_Color kRed        = {255, 0, 0, 255};
 struct Fixture {
     SDL_Surface* screen;
     UiCompositor compositor;
+    std::unique_ptr<PageContext> contextHolder = PageContext::create(compositor);
+    PageContext& context                       = *contextHolder;
 
     explicit Fixture(int width = kScreenW, int height = kScreenH) {
         screen = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -99,8 +102,21 @@ struct Fixture {
         return false;
     }
 
+    /** Starts and runs one frame of the page, stepMs after the last one. */
+    void tick(uint32_t stepMs) {
+        elapsed += stepMs;
+        context.startFrame(elapsed, context.getActiveTime() + stepMs);
+        context.runFrameTasks();
+    }
+
+    uint32_t elapsed = 0;
+
     void frame(UiView& view, const SDL_Rect& rect) {
-        compositor.beginLayout().layoutChild(view, rect);
+        UiLayoutContext& root = compositor.beginLayout();
+        root.layoutChild(view, rect);
+        std::vector<TaskOwner> owners;
+        root.collectViewIds(owners);
+        context.updateActiveOwners(owners);
         compositor.drawFrame();
     }
 };
@@ -110,14 +126,223 @@ const SDL_Rect kRow = {0, 0, 200, 40};
 TEST(test_text_that_fits_is_not_clipped_and_does_not_scroll) {
     Fixture f;
     TextView view(testFont, false);
+    view.setContext(f.context);
     view.setText("short");
     f.frame(view, kRow);
     CHECK(!view.isClipped());
-    view.updateScrolling(5000);
+    view.startScrolling();
+    f.frame(view, kRow);
+    f.tick(5000);
     CHECK(!view.isDirty());
     f.frame(view, kRow);
     CHECK(!f.layerHasPixels(kRow));
     CHECK(f.surfaceHasPixels(kRow));
+}
+
+// The scroll of a text on the active time of its page
+
+/** Returns the offset of a scroll of ms at speedSp */
+int scrolledBy(int speedSp, uint32_t ms) { return SCALE1(speedSp) * static_cast<int>(ms) / 1000; }
+
+TEST(test_scroll_moves_at_its_speed_on_the_active_time) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(16);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), scrolledBy(40, 516));
+    f.frame(view, kRow);
+    CHECK(f.layerHasPixels(kRow));
+}
+
+TEST(test_stop_keeps_the_offset_and_a_new_speed_continues_from_it) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(1000);
+    const int stopped = view.getScrollOffset();
+    CHECK(stopped > 0);
+
+    for (int speed : {0, -5}) {
+        view.startScrolling(40);
+        if (speed == 0) view.stopScrolling(); else view.startScrolling(speed);
+        f.tick(1000);
+        CHECK_EQ_INT(view.getScrollOffset(), stopped);
+    }
+    view.startScrolling(0);
+    f.frame(view, kRow);
+    f.tick(1000);
+    CHECK_EQ_INT(view.getScrollOffset(), stopped);
+
+    // The time of the stop does not count
+    view.startScrolling(80);
+    f.frame(view, kRow);
+    f.tick(250);
+    CHECK_EQ_INT(view.getScrollOffset(), stopped + scrolledBy(80, 250));
+}
+
+TEST(test_a_new_speed_in_a_frame_does_not_count_the_time_before_it) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.tick(500);
+    const int before = view.getScrollOffset();
+
+    // As from an input handler: after the start of the frame, before its callbacks
+    f.elapsed += 500;
+    f.context.startFrame(f.elapsed, f.context.getActiveTime() + 500);
+    view.startScrolling(80);
+    f.context.runFrameTasks();
+    CHECK_EQ_INT(view.getScrollOffset(), before);
+    f.tick(250);
+    CHECK_EQ_INT(view.getScrollOffset(), before + scrolledBy(80, 250));
+}
+
+TEST(test_a_text_that_leaves_the_layout_stops_until_the_next_start) {
+    Fixture f;
+    TextView view(testFont, false);
+    TextView other(testFont, false);
+    view.setContext(f.context);
+    other.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(500);
+    const int before = view.getScrollOffset();
+
+    f.frame(other, kRow);
+    f.tick(5000);
+    CHECK_EQ_INT(view.getScrollOffset(), before);
+
+    f.frame(view, kRow);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), before);
+
+    // The time away does not count
+    view.startScrolling(40);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), before + scrolledBy(40, 500));
+}
+
+TEST(test_reset_puts_the_text_at_its_start_and_keeps_the_speed) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(1000);
+    view.resetScrolling();
+    CHECK_EQ_INT(view.getScrollOffset(), 0);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), scrolledBy(40, 500));
+}
+
+TEST(test_new_text_puts_the_offset_at_zero_and_keeps_the_speed) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(1000);
+    view.setText(std::string(kLongText) + " and more");
+    CHECK_EQ_INT(view.getScrollOffset(), 0);
+    f.frame(view, kRow);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), scrolledBy(40, 500));
+}
+
+TEST(test_text_that_fits_does_not_move) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText("short");
+    f.frame(view, kRow);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(5000);
+    CHECK_EQ_INT(view.getScrollOffset(), 0);
+    f.frame(view, kRow);
+    CHECK(!f.layerHasPixels(kRow));
+}
+
+TEST(test_start_moves_the_text_from_the_next_frame) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setContext(f.context);
+    view.setText(kLongText);
+    f.frame(view, kRow);
+    f.tick(1000);
+    view.startScrolling(40);
+    CHECK_EQ_INT(view.getScrollOffset(), 0);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), scrolledBy(40, 500));
+}
+
+TEST(test_row_forwards_the_scroll_to_its_whole_text) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText(kLongText);
+    row.setSelected(true);
+    f.frame(row, kRow);
+    row.startScrolling();
+    f.frame(row, kRow);
+    f.tick(1000);
+    f.frame(row, kRow);
+    CHECK(f.layerHasPixels(kRow));
+    row.stopScrolling();
+    row.resetScrolling();
+    f.frame(row, kRow);
+    CHECK(!f.layerHasPixels(kRow));
+}
+
+TEST(test_row_scrolls_again_when_its_whole_text_comes_back) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText(kLongText);
+    row.setSelected(true);
+    f.frame(row, kRow);
+    row.startScrolling();
+    f.frame(row, kRow);
+    f.tick(500);
+    f.frame(row, kRow);
+    CHECK(f.layerHasPixels(kRow));
+
+    // A wide screen shows the short text, and the whole text leaves the layout
+    const SDL_Rect wide = {0, 0, 4000, 40};
+    f.frame(row, wide);
+    f.tick(500);
+    f.frame(row, kRow);
+    const std::vector<uint32_t> before = layerPixels;
+    f.tick(500);
+    f.frame(row, kRow);
+    CHECK(layerPixels != before);
+
+    // A stopped text does not start again
+    row.stopScrolling();
+    row.resetScrolling();
+    f.frame(row, wide);
+    f.frame(row, kRow);
+    f.tick(500);
+    f.frame(row, kRow);
+    CHECK(!f.layerHasPixels(kRow));
 }
 
 TEST(test_text_is_as_high_as_a_line_with_the_text_in_the_middle) {
@@ -144,12 +369,15 @@ TEST(test_text_takes_no_less_than_the_font_height) {
 TEST(test_long_text_with_ellipsis_keeps_one_width) {
     Fixture f;
     TextView view(testFont, true);
+    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     CHECK(view.isClipped());
     CHECK(view.getSize().w <= kRow.w);
     const int width = view.getSize().w;
-    view.updateScrolling(5000);
+    view.startScrolling();
+    f.frame(view, kRow);
+    f.tick(5000);
     f.frame(view, kRow);
     CHECK_EQ_INT(view.getSize().w, width);
     CHECK(!f.layerHasPixels(kRow));
@@ -177,14 +405,18 @@ TEST(test_color_change_draws_the_view_again) {
 TEST(test_scrolling_text_moves_to_the_layer_and_back) {
     Fixture f;
     TextView view(testFont, false);
+    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     CHECK(f.surfaceHasPixels(kRow));
-    view.updateScrolling(1000);
+    view.startScrolling();
+    f.frame(view, kRow);
+    f.tick(1000);
     f.frame(view, kRow);
     CHECK(f.layerHasPixels(kRow));
     CHECK(!f.surfaceHasPixels(kRow));
-    view.updateScrolling(0);
+    view.stopScrolling();
+    view.resetScrolling();
     f.frame(view, kRow);
     CHECK(!f.layerHasPixels(kRow));
     CHECK(f.surfaceHasPixels(kRow));
@@ -193,22 +425,28 @@ TEST(test_scrolling_text_moves_to_the_layer_and_back) {
 TEST(test_same_offset_in_whole_pixels_is_not_dirty) {
     Fixture f;
     TextView view(testFont, false);
+    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
-    view.updateScrolling(1000);
+    view.startScrolling(40);
     f.frame(view, kRow);
-    view.updateScrolling(1001);
+    f.tick(1000);
+    f.frame(view, kRow);
+    f.tick(1);
     CHECK(!view.isDirty());
-    view.updateScrolling(1500);
+    f.tick(500);
     CHECK(view.isDirty());
 }
 
 TEST(test_surface_only_mode_shows_the_text_at_its_offset) {
     Fixture f;
     TextView view(testFont, false);
+    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
-    view.updateScrolling(1000);
+    view.startScrolling();
+    f.frame(view, kRow);
+    f.tick(1000);
     f.frame(view, kRow);
     f.compositor.setSurfaceOnly(true);
     f.frame(view, kRow);
@@ -300,21 +538,29 @@ TEST(test_title_fades_at_the_cut_and_not_when_it_fits) {
 TEST(test_row_shows_long_text_only_when_selected) {
     Fixture f;
     ListRowView row(testFont);
+    row.setContext(f.context);
     row.setText(kLongText);
-    row.updateScrolling(1000);
+    row.startScrolling();
+    f.frame(row, kRow);
+    f.tick(1000);
     f.frame(row, kRow);
     CHECK(!f.layerHasPixels(kRow));
 
     row.setSelected(true);
-    row.updateScrolling(1000);
+    row.startScrolling();
+    f.frame(row, kRow);
+    f.tick(1000);
     f.frame(row, kRow);
     CHECK(f.layerHasPixels(kRow));
 
+    Fixture g;
     ListRowView shortRow(testFont);
+    shortRow.setContext(g.context);
     shortRow.setText("short");
     shortRow.setSelected(true);
-    shortRow.updateScrolling(1000);
-    Fixture g;
+    shortRow.startScrolling();
+    g.frame(shortRow, kRow);
+    g.tick(1000);
     g.frame(shortRow, kRow);
     CHECK(!g.layerHasPixels(kRow));
 }
@@ -358,12 +604,15 @@ class TestAdapter : public ListAdapter {
 public:
     std::vector<long> ids;
     int created = 0;
+    /** Each view that the adapter made, in order */
+    std::vector<std::shared_ptr<UiView>> made;
 
     int getCount() const override { return static_cast<int>(ids.size()); }
     long getItemId(int index) const override { return ids[static_cast<size_t>(index)]; }
     std::shared_ptr<UiView> getView(int) override {
         created++;
-        return std::make_shared<TestItem>();
+        made.push_back(std::make_shared<TestItem>());
+        return made.back();
     }
 };
 
@@ -513,7 +762,7 @@ TEST(test_status_group_refresh_with_the_same_pixels_changes_nothing) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     CHECK(f.compositor.hasSurfaceChanged());
     status.refresh();
@@ -526,7 +775,7 @@ TEST(test_status_group_refresh_gives_the_same_pixels) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     const uint32_t once = f.surfaceAt(10, 10);
     CHECK((once >> 24) > 0);
@@ -556,7 +805,7 @@ TEST(test_status_group_renders_when_a_value_settles) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws = 0;
     for (uint32_t now = 1100; now < 1600; now += 100) {
@@ -578,7 +827,7 @@ TEST(test_status_group_renders_again_after_a_change_during_the_render) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readValuesThatChangeInTheDraw);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws = 0;
     statusFrame(f, status, 1100);
@@ -595,7 +844,7 @@ TEST(test_status_group_ignores_a_value_that_comes_back) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws        = 0;
     fakeValues.connection = -1;
@@ -610,7 +859,7 @@ TEST(test_shorter_status_group_leaves_no_old_pixels) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.compositor);
+    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     CHECK_EQ_INT(status.getSize().w, 200);
     fakeGroupWidth = 100;
@@ -682,7 +931,7 @@ struct ScreenFixture {
         for (long id = 1; id <= 60; id++) adapter.ids.push_back(id);
         list.setAdapter(adapter);
         list.setSelectedIndex(0);
-        list.setContext(f.compositor);
+        list.setContext(f.context);
         f.frame(listScreen, SDL_Rect{0, 0, kBigW, kBigH});
     }
     void frame() { f.frame(listScreen, SDL_Rect{0, 0, kBigW, kBigH}); }
@@ -751,7 +1000,7 @@ TEST(test_new_status_width_moves_the_title) {
 TEST(test_dialog_draws_again_only_for_a_change) {
     Fixture f(kScreenW, kScreenH);
     DialogView dialog(200, DialogView::Alignment::Center, testFont, testFont);
-    dialog.setContext(f.compositor);
+    dialog.setContext(f.context);
     dialog.setTitle("Quit?");
     dialog.setHint("A: Yes");
     const SDL_Rect screen = {0, 0, kScreenW, kScreenH};
@@ -800,11 +1049,12 @@ bool pressClosesDialog(const UiPage& dialog, std::initializer_list<input::Button
     stack.start(dialog.createPageImpl(), f.compositor);
     uint32_t now = 0;
     auto endFrame = [&] {
-        stack.tickInput(now);
-        stack.tickTop(now);
-        stack.endFrame(now);
+        stack.tickInput();
+        stack.tickPages();
+        stack.endFrame();
         stack.beginPoll();
         now += 16;
+        stack.startFrame(now);
     };
     for (input::Button button : buttons) {
         stack.getRawInput().onRawEvent({now, input::event::ButtonPressed{button}});
@@ -861,6 +1111,16 @@ int main() {
     SDL_Surface* themeScreen = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_ARGB8888);
     Theme_init(themeScreen);
     RUN(test_text_that_fits_is_not_clipped_and_does_not_scroll);
+    RUN(test_scroll_moves_at_its_speed_on_the_active_time);
+    RUN(test_stop_keeps_the_offset_and_a_new_speed_continues_from_it);
+    RUN(test_a_new_speed_in_a_frame_does_not_count_the_time_before_it);
+    RUN(test_a_text_that_leaves_the_layout_stops_until_the_next_start);
+    RUN(test_reset_puts_the_text_at_its_start_and_keeps_the_speed);
+    RUN(test_new_text_puts_the_offset_at_zero_and_keeps_the_speed);
+    RUN(test_text_that_fits_does_not_move);
+    RUN(test_start_moves_the_text_from_the_next_frame);
+    RUN(test_row_forwards_the_scroll_to_its_whole_text);
+    RUN(test_row_scrolls_again_when_its_whole_text_comes_back);
     RUN(test_text_is_as_high_as_a_line_with_the_text_in_the_middle);
     RUN(test_text_takes_no_less_than_the_font_height);
     RUN(test_long_text_with_ellipsis_keeps_one_width);

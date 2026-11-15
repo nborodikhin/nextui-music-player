@@ -7,8 +7,8 @@
 #include "pad_reset.h"
 #include "toast.h"
 #include "ui/controls_help_page.hpp"
-#include "ui/legacy_module_page.hpp"
-#include "ui/page_stack.hpp"
+#include "ui/page/legacy_module_page.hpp"
+#include "ui/page/page_stack.hpp"
 #include "ui/quit_dialog_page.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui_theme.h"
@@ -53,7 +53,6 @@ public:
     }
 
     SDL_Surface* getScreen() override { return DisplayHelper_getSurface(display); }
-    uint32_t getTime() override { return SDL_GetTicks(); }
     void requestQuit() override { ModuleCommon_requestQuit(); }
 
 private:
@@ -88,31 +87,33 @@ void runFrameLoop(PageStack& stack, DisplayContext* display, UiCompositor& compo
         if (newScreen != screen || outputSwitched) {
             screen = newScreen;
             compositor.setScreen(screen);
-            stack.setContext(compositor);
+            stack.setScreen(compositor);
             state.setStatusChanged();
+            stack.onActivityGap();
         }
+
+        // Each part of the frame, the input too, uses this one time
+        const uint32_t now = SDL_GetTicks();
+        stack.startFrame(now);
 
         // frameBegin() opens the lock at SELECT + A, thus the frame reads it after that
         state.setKeyLocked(ModuleCommon_isKeyLocked());
         stack.beginPoll();
-        driver.poll(stack.getRawInput());
-        uint32_t now = state.getTime();
-        stack.tickInput(now);
+        driver.poll(stack.getRawInput(), now);
+        stack.tickInput();
 
         // A sleep runs inside the tick of the handler
         CommonButtonHandler& handler = stack.getCommonButtonHandler();
         if (handler.onTick(now)) state.setStatusChanged();
-        // The sleep leaves the screen empty. The clocks of the page do not count the sleep, and
-        // the frame reads its time after it.
+        // The sleep leaves the screen empty. The rest of the frame keeps the time from before the
+        // sleep, and the active time does not count the sleep.
         if (handler.hasWoken()) {
-            stack.getTop()->pause(now);
-            now = SDL_GetTicks();
-            stack.getTop()->resume(now);
-            compositor.invalidateAll();
+            stack.onWakeFromSleep();
             state.setStatusChanged();
+            compositor.invalidateAll();
         }
         Background_tick();
-        stack.tickTop(now);
+        stack.tickPages();
 
         stack.layout(compositor);
         compositor.drawFrame();
@@ -120,12 +121,13 @@ void runFrameLoop(PageStack& stack, DisplayContext* display, UiCompositor& compo
         if (compositor.hasSurfaceChanged()) ModuleCommon_markSurfaceDrawn();
         hasFrame = true;
 
-        stack.endFrame(now);
+        stack.endFrame();
         if (stack.takeQuitRequest()) ModuleCommon_requestQuit();
 
         if (runLegacyModuleOfStack(stack, compositor, legacyHost, display)) {
             screen   = DisplayHelper_getSurface(display);
             hasFrame = false;
+            stack.onActivityGap();
         }
 
         if (stack.isDone()) {
@@ -143,6 +145,8 @@ void runFrameLoop(PageStack& stack, DisplayContext* display, UiCompositor& compo
 void PageStack::run(const UiPage& page, DisplayContext* display) {
     if (ModuleCommon_stopSignalled()) return;
     PlatformPlaybackControl playback;
+    // The compositor outlives the stack, because each context of the stack reads it
+    UiCompositor compositor;
     PageStack stack(playback);
     stack.setDimColor(getDimColor());
     stack.setDialogOpeners([&stack](HelpId helpId) { stack.open(ControlsHelpPage(helpId)); },
@@ -151,7 +155,6 @@ void PageStack::run(const UiPage& page, DisplayContext* display) {
                                    if (quit) stack.exit();
                                });
                            });
-    UiCompositor compositor;
     compositor.setScreen(DisplayHelper_getSurface(display));
     stack.start(page.createPageImpl(), compositor);
     runFrameLoop(stack, display, compositor);
