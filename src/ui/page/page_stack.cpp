@@ -1,4 +1,4 @@
-#include "ui/page_stack.hpp"
+#include "ui/page/page_stack.hpp"
 
 #include <cstdio>
 #include <utility>
@@ -38,6 +38,7 @@ PageStack::PageStack(PlaybackControl& playback)
 
 PageStack::~PageStack() {
     closeAll();
+    snapshot.clear();
 }
 
 void PageStack::setDialogOpeners(std::function<void(HelpId)> help, std::function<void()> quit) {
@@ -45,32 +46,63 @@ void PageStack::setDialogOpeners(std::function<void(HelpId)> help, std::function
     openQuit = std::move(quit);
 }
 
-void PageStack::start(std::unique_ptr<UiPageImplBase> page, UiContext& newContext) {
-    context = &newContext;
-    push(std::move(page), 0);
+void PageStack::start(std::unique_ptr<UiPageImplBase> page, const UiScreenInfo& newScreen) {
+    screen       = &newScreen;
+    stackContext = PageContext::create(newScreen);
+    snapshot.setContext(*stackContext);
+    push(std::move(page));
 }
 
-void PageStack::setContext(UiContext& newContext) {
-    context = &newContext;
-    for (const auto& page : pages) page->setContext(newContext);
+void PageStack::setScreen(const UiScreenInfo& newScreen) {
+    screen = &newScreen;
+    stackContext->setScreen(newScreen);
+    snapshot.setContext(*stackContext);
+    for (PageEntry& entry : entries) {
+        entry.context->setScreen(newScreen);
+        entry.page->setContext(*entry.context);
+    }
     snapshotStale = true;
+}
+
+void PageStack::startFrame(uint32_t newFrameTime) {
+    frameTime = newFrameTime;
+    // A covered page keeps the times of its last frame as the top
+    if (entries.empty()) return;
+    PageEntry& top = entries.back();
+    top.clock.onFrameStart(frameTime);
+    top.context->startFrame(frameTime, top.clock.getActiveTime());
+}
+
+void PageStack::onActivityGap() {
+    if (!entries.empty()) entries.back().clock.onActivityGap();
+}
+
+void PageStack::onWakeFromSleep() {
+    UiPageImplBase* top = getTop();
+    if (!top) return;
+    top->pause();
+    onActivityGap();
+    top->resume();
 }
 
 void PageStack::beginPoll() {
     manager.beginPoll();
 }
 
-void PageStack::tickInput(uint32_t now) {
-    frameTime = now;
-    if (detector) detector->onTick(now);
+void PageStack::tickInput() {
+    if (detector) detector->onTick(frameTime);
 }
 
-void PageStack::tickTop(uint32_t now) {
-    if (UiPageImplBase* top = getTop()) top->onTick(now);
+void PageStack::tickPages() {
+    // A covered page is paused, thus only the top page runs
+    UiPageImplBase* top = getTop();
+    if (!top) return;
+    top->onTick();
+    entries.back().context->runFrameTasks();
 }
 
 void PageStack::layout(UiCompositor& compositor) {
-    if (pages.empty()) return;
+    if (entries.empty()) return;
     const bool dialogOnTop = isDialogOnTop();
     // A change composes the whole screen
     if (compositor.isSurfaceOnly() != dialogOnTop) compositor.setSurfaceOnly(dialogOnTop);
@@ -82,42 +114,50 @@ void PageStack::layout(UiCompositor& compositor) {
 
     UiLayoutContext& root = compositor.beginLayout();
     if (dialogOnTop) root.layoutChild(snapshot, root.getMaxRect());
-    pages.back()->layout(root);
+    PageEntry& top = entries.back();
+    top.page->layout(root);
+
+    // A view that left the layout loses its tasks. The layout of a snapshot does not count, thus
+    // the views of a covered page keep their tasks.
+    std::vector<TaskOwner> owners;
+    root.collectViewIds(owners);
+    owners.push_back(top.page->id);
+    top.context->updateActiveOwners(owners);
 }
 
 void PageStack::takeSnapshot(UiCompositor& compositor) {
     snapshotStale = false;
     // A dialog cannot open a page, thus only the bottom page can have no page under it
-    if (pages.size() < 2) {
+    if (entries.size() < 2) {
         snapshot.clear();
         return;
     }
-    pages[pages.size() - 2]->layout(compositor.beginLayout());
+    entries[entries.size() - 2].page->layout(compositor.beginLayout());
     snapshot.setImage(compositor.drawSnapshot(), dimColor);
 }
 
-void PageStack::endFrame(uint32_t now) {
+void PageStack::endFrame() {
     // A command that a result callback gives goes into the queue, and applies after it
     while (pending) {
         Command command = std::move(*pending);
         pending.reset();
         frameHasCommand = false;
-        apply(std::move(command), now);
+        apply(std::move(command));
     }
     frameHasCommand = false;
 }
 
 void PageStack::closeAll() {
-    while (!pages.empty()) {
-        pages.back()->onExit();
-        pages.pop_back();
+    while (!entries.empty()) {
+        entries.back().page->onExit();
+        entries.pop_back();
     }
     pending.reset();
     legacyModule = nullptr;
 }
 
 bool PageStack::isDialogOnTop() const {
-    return !pages.empty() && pages.back()->getKind() == PageKind::Dialog;
+    return !entries.empty() && entries.back().page->getKind() == PageKind::Dialog;
 }
 
 bool PageStack::takeQuitRequest() {
@@ -128,8 +168,8 @@ std::function<ModuleExitReason(DisplayContext*)> PageStack::takeLegacyModule() {
     return std::exchange(legacyModule, nullptr);
 }
 
-void PageStack::completeLegacyModule(uint32_t now) {
-    pop(now, nullptr);
+void PageStack::completeLegacyModule() {
+    pop(nullptr);
 }
 
 void PageStack::exit() {
@@ -160,26 +200,27 @@ void PageStack::queueClose(UiPageImplBase& page, std::function<void()> deliver) 
 }
 
 bool PageStack::acceptCommand() {
-    if (pages.empty()) return false;
+    if (entries.empty()) return false;
     if (frameHasCommand) {
         logRefusal("the frame already has a navigation command");
         return false;
     }
     frameHasCommand = true;
     // The page gets no more events of this frame and of this gesture
-    pages.back()->onRawEvent({frameTime, event::ButtonReset{}});
+    entries.back().page->onRawEvent({frameTime, event::ButtonReset{}});
     manager.discardGesture(frameTime);
     return true;
 }
 
-void PageStack::apply(Command command, uint32_t now) {
+void PageStack::apply(Command command) {
     switch (command.kind) {
         case Command::Kind::Open:
-            pages.back()->pause(now);
-            push(std::move(command.page), now);
+            entries.back().page->pause();
+            onActivityGap();
+            push(std::move(command.page));
             break;
         case Command::Kind::Close:
-            pop(now, std::move(command.deliver));
+            pop(std::move(command.deliver));
             break;
         case Command::Kind::Exit:
             closeAll();
@@ -188,22 +229,31 @@ void PageStack::apply(Command command, uint32_t now) {
     }
 }
 
-void PageStack::push(std::unique_ptr<UiPageImplBase> page, uint32_t) {
+void PageStack::push(std::unique_ptr<UiPageImplBase> page) {
     UiPageImplBase& added = *page;
-    added.navigator       = this;
-    pages.push_back(std::move(page));
-    if (context) added.setContext(*context);
+    auto context          = PageContext::create(*screen);
+    // A new page starts at the elapsed time of the frame
+    context->startFrame(frameTime, 0);
+    added.navigator = this;
+    added.context   = context.get();
+    added.scheduler.setContext(*context);
+    added.setContext(*context);
+    entries.push_back(PageEntry{
+        .context = std::move(context),
+        .clock   = {},
+        .page    = std::move(page),
+    });
     added.onEnter();
     connectTop();
 }
 
-void PageStack::pop(uint32_t now, std::function<void()> deliver) {
-    if (pages.empty()) return;
-    pages.back()->onExit();
-    pages.pop_back();
+void PageStack::pop(std::function<void()> deliver) {
+    if (entries.empty()) return;
+    entries.back().page->onExit();
+    entries.pop_back();
     if (deliver) deliver();
-    if (pages.empty()) return;
-    pages.back()->resume(now);
+    if (entries.empty()) return;
+    entries.back().page->resume();
     connectTop();
     // The status group of the page did not change while it was covered
     input::InputState::getInstance().setStatusChanged();
@@ -211,7 +261,7 @@ void PageStack::pop(uint32_t now, std::function<void()> deliver) {
 
 void PageStack::connectTop() {
     snapshotStale       = true;
-    UiPageImplBase& top = *pages.back();
+    UiPageImplBase& top = *entries.back().page;
     manager.setChain({&top, &commonButtonHandler});
     std::vector<ButtonRequest> requests;
     const auto globalRequests = CommonButtonHandler::getButtonRequests();

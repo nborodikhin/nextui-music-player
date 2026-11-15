@@ -25,11 +25,12 @@ void ListRowView::setSelected(bool newSelected) {
     selected = newSelected;
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
-    if (!selected) longText.updateScrolling(0);
+    if (!selected) {
+        stopScrolling();
+        resetScrolling();
+    }
     dirty = true;
 }
-
-void ListRowView::updateScrolling(uint32_t elapsedMs) { longText.updateScrolling(elapsedMs); }
 
 void ListRowView::setContext(UiContext& context) {
     UiView::setContext(context);
@@ -50,8 +51,12 @@ void ListRowView::layout(UiLayoutContext& context) {
     measuring.layoutChild(longText, textRect);
     textRect.y = (size.h - textHeight) / 2;
     textRect.h = textHeight;
-    const bool clipped = shortText.isClipped();
-    TextView& shown    = selected && clipped ? longText : shortText;
+    const bool clipped      = shortText.isClipped();
+    const bool showLongText = selected && clipped;
+    // The whole text lost its frame callback while the row showed the short text
+    if (showLongText && !longTextShown && scrollRequested) longText.startScrolling();
+    longTextShown   = showLongText;
+    TextView& shown = showLongText ? longText : shortText;
     context.setSize(size);
 
     // A text that does not fit takes the whole row, and the pill with it

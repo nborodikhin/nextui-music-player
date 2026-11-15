@@ -1,8 +1,8 @@
-#include "ui/legacy_module_page.hpp"
+#include "ui/page/legacy_module_page.hpp"
 
 #include <functional>
 
-#include "ui/page_stack.hpp"
+#include "ui/page/page_stack.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui_layers.h"
 
@@ -22,7 +22,7 @@ bool runLegacyModuleOfStack(PageStack& stack, UiCompositor& compositor, LegacyMo
     // A display made again can have the same address, thus the compositor takes the screen in
     // each case, and draws the whole screen
     compositor.setScreen(host.getScreen());
-    stack.setContext(compositor);
-    stack.completeLegacyModule(host.getTime());
+    stack.setScreen(compositor);
+    stack.completeLegacyModule();
     return true;
 }

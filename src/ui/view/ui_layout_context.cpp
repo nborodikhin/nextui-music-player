@@ -77,3 +77,8 @@ SDL_Point UiLayoutContext::screenToView(SDL_Point point) const {
 SDL_Rect UiLayoutContext::getScreenRect() const {
     return SDL_Rect{origin.x, origin.y, size.w, size.h};
 }
+
+void UiLayoutContext::collectViewIds(std::vector<int>& viewIds) const {
+    if (view) viewIds.push_back(view->getId());
+    for (const UiLayoutContext& child : children) child.collectViewIds(viewIds);
+}

@@ -23,8 +23,19 @@ public:
     void setSelected(bool selected);
     bool isSelected() const { return selected; }
 
-    /** Moves the whole text, where the row shows it. See TextView::updateScrolling(). */
-    void updateScrolling(uint32_t elapsedMs);
+    /**
+     * Moves the whole text at the scrolling speed of the app, where the row shows it. The text
+     * moves again each time the row shows it, until stopScrolling().
+     */
+    void startScrolling() {
+        scrollRequested = true;
+        longText.startScrolling();
+    }
+    void stopScrolling() {
+        scrollRequested = false;
+        longText.stopScrolling();
+    }
+    void resetScrolling() { longText.resetScrolling(); }
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -36,6 +47,10 @@ private:
     TextView longText;
     bool selected  = false;
     bool dirty     = true;
+    /** The owner started the scroll and did not stop it */
+    bool scrollRequested = false;
+    /** The last layout showed the whole text */
+    bool longTextShown = false;
     int pillWidth  = 0;
     int pillHeight = 0;
 };

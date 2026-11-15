@@ -7,6 +7,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
+#include "ui/view/ui_task_scheduler.hpp"
 #include "ui/view/ui_view.hpp"
 
 /**
@@ -29,10 +30,24 @@ public:
     bool isClipped() const;
 
     /**
-     * Moves the text to its place at elapsedMs after it started to scroll. Pass 0 to put the
-     * text at rest at its start. A text that fits ignores the call.
+     * Moves the text at `spPerSecond` from where it is. A value of 0 or less stops the text where it
+     * is. A text that fits does not move. A view without a context does not move. A view that
+     * leaves the layout stops, and moves again at the next start.
      */
-    void updateScrolling(uint32_t elapsedMs);
+    void startScrolling(int32_t spPerSecond);
+
+    /** Moves the text at the speed of each scrolling text of the app. */
+    void startScrolling();
+
+    /** Stops the text where it is. */
+    void stopScrolling();
+
+    /** Puts the text at its start. Keeps the speed. */
+    void resetScrolling();
+
+    /** Returns how far the text moved from its start, in pixels. */
+    int getScrollOffset() const { return offset; }
+
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -49,6 +64,10 @@ protected:
 private:
     void render();
     void freeRender();
+    /** Sets the scrolling flag from the speed and the offset. */
+    void updateScrolling();
+    void stepScroll();
+    void setOffset(double newOffset);
 
     TTF_Font* font;
     bool useEllipsis;
@@ -66,6 +85,13 @@ private:
     int offset           = 0;
     bool scrolling       = false;
     bool dirty           = true;
+    int32_t speedSpPerSecond = 0;
+    /** The offset with its fraction */
+    double exactOffset = 0;
+    /** The active time of the last step of the scroll */
+    uint32_t stepTime  = 0;
+    /** The frame callback of the scroll */
+    TaskId scrollTask = 0;
 };
 
 #endif

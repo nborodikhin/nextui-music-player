@@ -1,7 +1,7 @@
 #include "ui/podcast_page.hpp"
 
 #include "module_podcast.h"
-#include "ui/legacy_module_page.hpp"
+#include "ui/page/legacy_module_page.hpp"
 
 namespace {
 

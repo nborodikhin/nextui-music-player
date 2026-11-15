@@ -2,7 +2,7 @@
 
 #include "module_player.h"
 #include "resume.h"
-#include "ui/legacy_module_page.hpp"
+#include "ui/page/legacy_module_page.hpp"
 
 namespace {
 

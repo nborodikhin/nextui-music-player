@@ -4,7 +4,7 @@
 #include <memory>
 #include <variant>
 
-#include "ui/ui_page.hpp"
+#include "ui/page/ui_page.hpp"
 
 /** The main menu: the first page of the app. Its rows open the other screens. */
 class MainMenuPage final : public UiPage {

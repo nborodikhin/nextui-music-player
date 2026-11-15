@@ -15,7 +15,7 @@
  * since the last frame from those bitmaps. Each target gets the alpha form that the platform
  * blends it with.
  */
-class UiCompositor : public UiContext {
+class UiCompositor final : public UiScreenInfo {
 public:
     UiCompositor() = default;
     ~UiCompositor();

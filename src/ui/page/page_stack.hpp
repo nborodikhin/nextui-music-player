@@ -10,7 +10,9 @@
 #include "input/button_detector.hpp"
 #include "input/common_button_handler.hpp"
 #include "input/input_manager.hpp"
-#include "ui/ui_page.hpp"
+#include "ui/page/activity_clock.hpp"
+#include "ui/page/page_context.hpp"
+#include "ui/page/ui_page.hpp"
 #include "ui/view/snapshot_view.hpp"
 #include "ui/view/ui_compositor.hpp"
 
@@ -28,23 +30,32 @@ public:
     PageStack& operator=(const PageStack&) = delete;
 
     /**
-     * Runs a stack with page at the bottom. Returns when the bottom page closes, or at a quit. A
+     * Runs a stack with `page` at the bottom. Returns when the bottom page closes, or at a quit. A
      * stack can run inside a legacy module that a legacy page of another stack runs. Returns at
      * once when a stop signal came before the call.
      */
     static void run(const UiPage& page, DisplayContext* display);
 
     /**
-     * Sets the functions that open the dialogs of the global buttons. openHelp gets the help id
+     * Sets the functions that open the dialogs of the global buttons. `openHelp` gets the help id
      * of the top page, and the stack calls it only for a page that has controls help.
      */
     void setDialogOpeners(std::function<void(HelpId)> openHelp, std::function<void()> openQuit);
 
-    /** Puts page at the bottom, and gives it its context and onEnter(). */
-    void start(std::unique_ptr<UiPageImplBase> page, UiContext& context);
+    /** Puts `page` at the bottom, and gives it its context and onEnter(). */
+    void start(std::unique_ptr<UiPageImplBase> page, const UiScreenInfo& screen);
 
-    /** Gives each page the context of a new screen. */
-    void setContext(UiContext& context);
+    /** Gives the facts of a new screen to each context, and gives each page its context again. */
+    void setScreen(const UiScreenInfo& screen);
+
+    /** Starts a frame at `frameTime`. Only the top page gets the frame and its active time. */
+    void startFrame(uint32_t frameTime);
+
+    /** The time from the last frame to the next frame does not count as active time of the top page. */
+    void onActivityGap();
+
+    /** Pauses and resumes the top page. The sleep does not count as active time. */
+    void onWakeFromSleep();
 
     /** Call before each poll of the pad. */
     void beginPoll();
@@ -53,10 +64,10 @@ public:
     input::RawEventListener& getRawInput() { return rawInput; }
 
     /** Gives the time of the frame to the detector of the buttons. */
-    void tickInput(uint32_t now);
+    void tickInput();
 
-    /** Calls onTick() of the top page. */
-    void tickTop(uint32_t now);
+    /** Ticks the pages that run in the frame: onTick(), then the frame callbacks and the expired tasks. */
+    void tickPages();
 
     /** Sets the color that a dialog puts over the page under it. */
     void setDimColor(SDL_Color color) { dimColor = color; }
@@ -70,17 +81,17 @@ public:
     void layout(UiCompositor& compositor);
 
     /** Applies the navigation command of the frame. */
-    void endFrame(uint32_t now);
+    void endFrame();
 
     /** Closes each page from the top down with no result. */
     void closeAll();
 
-    bool isDone() const { return pages.empty(); }
+    bool isDone() const { return entries.empty(); }
 
     bool isDialogOnTop() const;
 
     /** Returns the top page, or nullptr when the stack is done. */
-    UiPageImplBase* getTop() const { return pages.empty() ? nullptr : pages.back().get(); }
+    UiPageImplBase* getTop() const { return entries.empty() ? nullptr : entries.back().page.get(); }
 
     input::CommonButtonHandler& getCommonButtonHandler() { return commonButtonHandler; }
 
@@ -91,7 +102,7 @@ public:
     std::function<ModuleExitReason(DisplayContext*)> takeLegacyModule();
 
     /** Closes the legacy page after its module returned, and resumes the page under it. */
-    void completeLegacyModule(uint32_t now);
+    void completeLegacyModule();
 
     void exit() override;
     void runLegacyModule(std::function<ModuleExitReason(DisplayContext*)> module) override;
@@ -120,11 +131,19 @@ private:
 
     /** Returns false and keeps no command when the frame already has one. */
     bool acceptCommand();
-    void apply(Command command, uint32_t now);
-    void push(std::unique_ptr<UiPageImplBase> page, uint32_t now);
-    void pop(uint32_t now, std::function<void()> deliver);
+    void apply(Command command);
+    void push(std::unique_ptr<UiPageImplBase> page);
+    void pop(std::function<void()> deliver);
     /** Gives the input to the new top page. */
     void connectTop();
+    /** What the stack keeps for one open page */
+    struct PageEntry {
+        std::unique_ptr<PageContext> context;
+        ActivityClock clock;
+        // The last member, thus a page is destroyed before its context
+        std::unique_ptr<UiPageImplBase> page;
+    };
+
     /** Takes the snapshot of the page under the top dialog. */
     void takeSnapshot(UiCompositor& compositor);
 
@@ -132,8 +151,10 @@ private:
     input::InputManager manager;
     std::unique_ptr<input::ButtonDetector> detector;
     RawEventFanOut rawInput;
-    std::vector<std::unique_ptr<UiPageImplBase>> pages;
-    UiContext* context = nullptr;
+    const UiScreenInfo* screen = nullptr;
+    /** The context of the stack, for the snapshot */
+    std::unique_ptr<PageContext> stackContext;
+    std::vector<PageEntry> entries;
     std::optional<Command> pending;
     /** The frame has a command, thus the stack ignores a later one */
     bool frameHasCommand = false;

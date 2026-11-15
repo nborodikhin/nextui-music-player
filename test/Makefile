@@ -94,6 +94,8 @@ TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
 TESTS   += $(BIN)/test_playlist
 TESTS   += $(BIN)/test_input_events
+TESTS   += $(BIN)/test_page_context
+TESTS   += $(BIN)/test_activity_clock
 TESTS   += $(BIN)/test_page_stack
 TESTS   += $(BIN)/test_ui_compositor
 
@@ -145,7 +147,7 @@ check: headers
 # forces into NextUI's config.c is not an interface, thus it is not checked. A
 # check runs again only after a change of a file that the header includes.
 HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h $(SRC)/ui/*.h))
-CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/view/*.hpp)
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/page/*.hpp $(SRC)/ui/view/*.hpp)
 HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
                 $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
 HEADER_INC    = $(INC) $(DESKTOP_INC) \
@@ -209,12 +211,19 @@ $(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input
                           $(SRC)/help_screen.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
 
-PAGE_STACK_SRC = $(SRC)/ui/page_stack.cpp $(SRC)/ui/legacy_module_page.cpp $(INPUT_EVENTS_SRC) \
+$(BIN)/test_page_context: test_page_context.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/page_context.hpp \
+                          $(SRC)/ui/view/ui_context.hpp $(SRC)/ui/view/ui_task_scheduler.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_page_context.cpp $(SRC)/ui/page/page_context.cpp
+
+$(BIN)/test_activity_clock: test_activity_clock.cpp $(SRC)/ui/page/activity_clock.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_activity_clock.cpp
+
+PAGE_STACK_SRC = $(SRC)/ui/page/page_stack.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/legacy_module_page.cpp $(INPUT_EVENTS_SRC) \
                  $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
                  $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/view/snapshot_view.cpp
 
-$(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page_stack.hpp \
-                        $(SRC)/ui/ui_page.hpp $(SRC)/ui/legacy_module_page.hpp \
+$(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page/page_stack.hpp \
+                        $(SRC)/ui/page/ui_page.hpp $(SRC)/ui/page/legacy_module_page.hpp \
                         $(SRC)/input/input_manager.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_page_stack.cpp $(PAGE_STACK_SRC) \
 	  $(shell pkg-config --libs sdl2)
@@ -417,7 +426,7 @@ DESKTOP_INC = -I../NextUI/workspace/all/common -I../NextUI/workspace/desktop/pla
               -DUSE_SDL2 -DUSE_GL
 # Every object of the desktop build except the two that this test replaces: its
 # own main, and ui_utils.o, which the test compiles from the source instead.
-DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+DESKTOP_LINK_OBJ = $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
                         $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
                       | grep -v -e musicplayer.o -e ui_utils.o)
 # The objects come from the desktop build, thus they must be as new as the sources.
@@ -442,14 +451,14 @@ $(BIN)/test_ui_utils: test_ui_utils.c $(SRC)/ui_utils.c $(SRC)/ui_utils.h test.h
 $(BIN)/test_ui_fonts: test_ui_fonts.c $(SRC)/ui_fonts.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_fonts.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h test.h | $(BIN) desktop-objs
 	$(CC) $(CFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_music_playing.c
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
@@ -457,7 +466,7 @@ $(BIN)/test_ui_views: test_ui_views.cpp $(SRC)/ui/view/ui_view.hpp $(SRC)/ui/vie
                       $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp $(SRC)/ui/view/dialog_view.hpp test.h | $(BIN) desktop-objs
 	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_views.cpp
 	$(CXX) -o $@ $@.o \
-	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
 	      | grep -v -e musicplayer.o -e ui_layers.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 

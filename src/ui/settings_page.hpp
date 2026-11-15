@@ -4,7 +4,7 @@
 #include <memory>
 #include <variant>
 
-#include "ui/ui_page.hpp"
+#include "ui/page/ui_page.hpp"
 
 /** Runs the legacy module of the Settings row of Main. Closes when the module returns. */
 class SettingsPage final : public UiPage {

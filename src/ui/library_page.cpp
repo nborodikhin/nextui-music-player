@@ -1,7 +1,7 @@
 #include "ui/library_page.hpp"
 
 #include "module_library.h"
-#include "ui/legacy_module_page.hpp"
+#include "ui/page/legacy_module_page.hpp"
 
 namespace {
 

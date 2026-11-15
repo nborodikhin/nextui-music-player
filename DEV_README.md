@@ -368,8 +368,9 @@ The music player uses:
 ## UI Framework
 
 The code in `src/ui/view/` draws a screen from views. A page (`UiPage` in
-`src/ui/ui_page.hpp`) owns its views, and the page loop (`runPageLoop()`) runs
-its frames. The main menu and the input test page use this framework. The other
+`src/ui/page/ui_page.hpp`) owns its views. The page stack (`PageStack` in
+`src/ui/page/`) holds the open pages, and its frame loop (`PageStack::run()`) runs
+their frames. The main menu and the input test page use this framework. The other
 screens use the older draw functions.
 
 ### Parts
@@ -380,7 +381,7 @@ screens use the older draw functions.
 | `UiLayout` | A view that only places its children, and draws nothing of its own. |
 | `UiLayoutContext` | The entry of one view in one frame: its place, its size, its content rectangle, its clip, its target layer and its visibility. |
 | `UiDrawContext` | The bitmap of one view during its draw. |
-| `UiContext` | What a view needs from the screen: the pixel format and the size. |
+| `UiContext` | What a page and its views get from the stack: the pixel format, the screen size, the elapsed time, the active time and the tasks. Each page has its own context. |
 | `UiCompositor` | Keeps one bitmap for each view, and composes the bitmaps on the screen. |
 
 `TextView`, `TitleTextView`, `ListRowView`, `ListView`, `ScrollIndicatorView`,
@@ -398,8 +399,8 @@ The page loop does these steps in each frame:
    thus a scrolling text moves in equal steps. The effect of an input shows one
    frame later.
 2. It reads the input, and sends the events to the page.
-3. It calls `onTick()` of the page. The page changes the state of its views
-   here: a text, a selection, the time of a scrolling text.
+3. It calls `onTick()` of the top page, then runs the frame callbacks and the
+   expired tasks of the page (see Timed Work).
 4. It calls `layout()` of the page.
 5. The compositor draws the views that changed, and composes the regions of the
    screen that changed.
@@ -407,6 +408,27 @@ The page loop does these steps in each frame:
 A frame changes the regular surface, the layers, or nothing. The present sends
 only what changed. A frame where only a scrolling text moves changes the
 animation layer only, thus the present does not upload the surface.
+
+### Timed Work
+
+A page and a view do timed work through `getScheduler()`: `post()`,
+`postDelayed()`, `postRepeating()`, `runEachFrame()` and `cancelTask()`. A task
+gets no time. It reads `getElapsedTime()` or `getActiveTime()` from its context.
+
+- The elapsed time is the time of the frame. The loop reads it one time at the
+  start of the frame, and the input of the frame uses the same time.
+- The active time is the time that the page was the top page. It stops while
+  another page covers the page, during a sleep, during a legacy module and at a
+  new screen. Each delay counts on the active time, thus a covered page runs no
+  task, and a wait that a dialog cuts continues with the time that is left.
+- Only the top page runs its tasks. A task that is added during a frame runs in a
+  later frame.
+- Each task belongs to the page or to a view. After each layout, the stack
+  cancels each task of a view that the layout did not reach. Thus a view must
+  stay alive until the layout after it leaves the tree.
+- `TextView::startScrolling()` moves a text that does not fit, and
+  `stopScrolling()` and `resetScrolling()` stop it and put it at its start. The
+  page owns the delay before a text moves.
 
 ### Layout
 

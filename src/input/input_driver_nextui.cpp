@@ -73,8 +73,7 @@ static std::optional<MediaKey> toMediaKey(USBHIDEvent hidEvent) {
     return std::nullopt;
 }
 
-void InputDriver::poll(RawEventListener& listener) {
-    const uint32_t time = SDL_GetTicks();
+void InputDriver::poll(RawEventListener& listener, uint32_t time) {
     // A driver starts with no held button, thus a reset before its first poll is not a change
     const uint32_t resetCount = PadReset_getCount();
     const bool padReset = padResetCount && *padResetCount != resetCount;
