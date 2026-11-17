@@ -1,9 +1,7 @@
 #include "background.h"
-#include "player.h"
 #include "radio.h"
 #include "podcast.h"
-#include "resume.h"
-#include "module_player.h"
+#include "music_session.h"
 #include "module_podcast.h"
 #include "module_common.h"
 
@@ -20,11 +18,7 @@ BackgroundPlayerType Background_getActive(void) {
 void Background_stopAll(void) {
     switch (active_bg) {
         case BG_MUSIC:
-            // Save resume position before stopping
-            if (Player_getState() == PLAYER_STATE_PLAYING || Player_getState() == PLAYER_STATE_PAUSED) {
-                Resume_updatePosition(Player_getPosition());
-            }
-            Player_stop();
+            MusicSession_stop();
             break;
         case BG_RADIO:
             Radio_stop();
@@ -46,7 +40,7 @@ void Background_stopAll(void) {
 bool Background_isPlaying(void) {
     switch (active_bg) {
         case BG_MUSIC:
-            return PlayerModule_isActive();
+            return MusicSession_isActive();
         case BG_RADIO:
             return Radio_isActive();
         case BG_PODCAST:
@@ -57,10 +51,14 @@ bool Background_isPlaying(void) {
     return false;
 }
 
+void Background_frameTick(bool quit_requested) {
+    if (!quit_requested) Background_tick();
+}
+
 void Background_tick(void) {
     switch (active_bg) {
         case BG_MUSIC:
-            PlayerModule_backgroundTick();
+            MusicSession_tick();
             break;
         case BG_RADIO:
             // Radio streams are self-sustaining, just check if still active

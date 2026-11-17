@@ -9,7 +9,8 @@
 #include "ui_layers.h"
 #include "toast.h"
 #include "module_playlist.h"
-#include "module_player.h"
+#include "module_music_playing.h"
+#include "music_session.h"
 #include "playlist_m3u.h"
 #include "playlist.h"
 #include "keyboard.h"
@@ -212,10 +213,12 @@ ModuleExitReason PlaylistModule_run(DisplayContext* display) {
                 if (detail_track_count > 0) {
                     // Play the playlist starting from selected track
                     UiLayer_clear(UI_LAYER_ANIMATION);
-                    PlayerModule_runWithPlaylist(display, detail_tracks,
-                                                 detail_track_count,
-                                                 detail_nav.selected,
-                                                 playlists[current_playlist_index].id);
+                    if (MusicSession_startPlaylist(detail_tracks, detail_track_count,
+                                                   detail_nav.selected,
+                                                   playlists[current_playlist_index].id) &&
+                        MusicPlayingModule_run(display, NULL) == MODULE_EXIT_QUIT) {
+                        return MODULE_EXIT_QUIT;
+                    }
                     // On return, refresh and go back to detail. The title starts
                     // again in the mode of this screen.
                     ScreenTitle_start(false);

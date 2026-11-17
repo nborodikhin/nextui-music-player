@@ -1,6 +1,5 @@
 #include <functional>
 
-#include "background.h"
 #include "input/input_driver.hpp"
 #include "input/input_state.hpp"
 #include "module_common.h"
@@ -112,7 +111,6 @@ void runFrameLoop(PageStack& stack, DisplayContext* display, UiCompositor& compo
             state.setStatusChanged();
             compositor.invalidateAll();
         }
-        Background_tick();
         stack.tickPages();
 
         stack.layout(compositor);

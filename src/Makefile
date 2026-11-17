@@ -222,7 +222,7 @@ LOCAL_SRC = \
     podcast.c podcast_rss.c podcast_search.c \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
-    module_common.c module_library.c module_player.c \
+    module_common.c module_library.c module_file_browser.c music_session.c module_music_playing.c \
     module_playlist.c module_radio.c module_podcast.c module_downloader.c \
     module_about.c frame_state.c ui_layers.c lyric_window.c \
     ui_music_playing.c ui_radio_playing.c ui_podcast_playing.c \
