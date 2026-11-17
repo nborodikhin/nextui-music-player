@@ -2,40 +2,44 @@
 #define __UI_VIEW_LIST_ROW_VIEW_HPP__
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include <SDL2/SDL_ttf.h>
 
 #include "ui/view/text_view.hpp"
-#include "ui/view/ui_view.hpp"
+#include "ui/view/list_item_view.hpp"
 
 /**
  * A row of a list: a selection pill when it is selected, and its text. The row shows its whole
  * text, which can scroll, when it is selected and the text does not fit. Else the text ends in
  * "...".
+ *
+ * A row can have a right view at its right edge, and the text then takes the space to the left of
+ * it. A selected row with a right view shows a band under the whole row.
  */
-class ListRowView : public UiView {
+class ListRowView : public ListItemView {
 public:
     explicit ListRowView(TTF_Font* font);
 
     /** Returns: true when the text changed */
     bool setText(const std::string& text);
-    void setSelected(bool selected);
+    void setSelected(bool selected) override;
+
+    /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
+    void setRightView(std::shared_ptr<UiView> view);
     bool isSelected() const { return selected; }
 
-    /**
-     * Moves the whole text at the scrolling speed of the app, where the row shows it. The text
-     * moves again each time the row shows it, until stopScrolling().
-     */
-    void startScrolling() {
+    /** The text moves again each time the row shows it, until stopScrolling(). */
+    void startScrolling() override {
         scrollRequested = true;
         longText.startScrolling();
     }
-    void stopScrolling() {
+    void stopScrolling() override {
         scrollRequested = false;
         longText.stopScrolling();
     }
-    void resetScrolling() { longText.resetScrolling(); }
+    void resetScrolling() override { longText.resetScrolling(); }
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -45,6 +49,7 @@ public:
 private:
     TextView shortText;
     TextView longText;
+    std::shared_ptr<UiView> rightView;
     bool selected  = false;
     bool dirty     = true;
     /** The owner started the scroll and did not stop it */
@@ -53,6 +58,8 @@ private:
     bool longTextShown = false;
     int pillWidth  = 0;
     int pillHeight = 0;
+    /** The width of the band, which is 0 for a row with no right view */
+    int bandWidth  = 0;
 };
 
 #endif

@@ -1,6 +1,7 @@
 #include "ui/view/list_row_view.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include "ui_theme.h"
 
@@ -32,10 +33,18 @@ void ListRowView::setSelected(bool newSelected) {
     dirty = true;
 }
 
+void ListRowView::setRightView(std::shared_ptr<UiView> view) {
+    if (view == rightView) return;
+    rightView = std::move(view);
+    if (rightView && hasContext()) rightView->setContext(getContext());
+    dirty = true;
+}
+
 void ListRowView::setContext(UiContext& context) {
     UiView::setContext(context);
     shortText.setContext(context);
     longText.setContext(context);
+    if (rightView) rightView->setContext(context);
     dirty = true;
 }
 
@@ -45,8 +54,16 @@ void ListRowView::layout(UiLayoutContext& context) {
     const int padding = SCALE1(BUTTON_PADDING);
     SDL_Rect textRect = {padding, 0, size.w - padding * 2, size.h};
 
-    // Both texts know their space, thus the long text can start to scroll when the row is selected
     UiLayoutContext measuring = context.createMeasuringContext();
+    SDL_Rect rightRect{};
+    if (rightView) {
+        const UiSize rightSize = measuring.layoutChild(*rightView, textRect).getSize();
+        rightRect  = {size.w - padding - rightSize.w, (size.h - rightSize.h) / 2, rightSize.w, rightSize.h};
+        // The text ends one padding before the right view, as the pill around it does
+        textRect.w = std::max(0, rightRect.x - padding * 2 - textRect.x);
+    }
+
+    // Both texts know their space, thus the long text can start to scroll when the row is selected
     const int textHeight      = measuring.layoutChild(shortText, textRect).getSize().h;
     measuring.layoutChild(longText, textRect);
     textRect.y = (size.h - textHeight) / 2;
@@ -59,21 +76,34 @@ void ListRowView::layout(UiLayoutContext& context) {
     TextView& shown = showLongText ? longText : shortText;
     context.setSize(size);
 
-    // A text that does not fit takes the whole row, and the pill with it
-    const int newPillWidth = clipped ? size.w : std::min(size.w, shortText.getSize().w + padding * 2);
-    if (newPillWidth != pillWidth || size.h != pillHeight) {
+    // A text that does not fit takes all of its space, and the pill with it
+    const int textSpace    = textRect.w + padding * 2;
+    const int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2);
+    const int newBandWidth = rightView ? size.w : 0;
+    if (newPillWidth != pillWidth || size.h != pillHeight || newBandWidth != bandWidth) {
         pillWidth  = newPillWidth;
         pillHeight = size.h;
+        bandWidth  = newBandWidth;
         dirty      = true;
     }
     context.layoutChild(shown, textRect);
+    if (rightView) context.layoutChild(*rightView, rightRect);
 }
 
 void ListRowView::draw(UiDrawContext& context) {
     dirty = false;
     if (!selected) return;
     SDL_Rect pill = {0, 0, pillWidth, pillHeight};
-    context.setContentRect(pill);
+    if (bandWidth > 0) {
+        SDL_Rect band = {0, 0, bandWidth, pillHeight};
+        context.setContentRect(band);
+        // The fill argument marks a pill with no separate center color
+        //noinspection HardcodedColor
+        GFX_blitPillColor(ASSET_WHITE_PILL, context.getSurface(), &band,
+                          Theme_getPackedColor(THEME_ROLE_BAND_BACKGROUND, false), RGB_WHITE);
+    } else {
+        context.setContentRect(pill);
+    }
     // The fill argument marks a pill with no separate center color
     //noinspection HardcodedColor
     GFX_blitPillColor(ASSET_WHITE_PILL, context.getSurface(), &pill,

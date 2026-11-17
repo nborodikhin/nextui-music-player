@@ -1,6 +1,6 @@
 #ifdef DEBUG
 
-#include "ui/module_input_test.h"
+#include "ui/input_test_page.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,6 @@
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
-#include "ui/page/page_stack.hpp"
 #include "ui/page/ui_page.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
@@ -39,11 +38,6 @@ constexpr std::array<ButtonRequest, 6> kRequests = {
     request::Repeat{Button::DpadLeft},
     request::Repeat{Button::DpadRight},
     request::Combo{Button::Select, Button::A},
-};
-
-struct InputTestPage final : public UiPage {
-    using Result = std::monostate;
-    std::unique_ptr<UiPageImplBase> createPageImpl() const override;
 };
 
 class InputTestPageImpl final : public UiPageImpl<InputTestPage> {
@@ -202,15 +196,11 @@ void InputTestPageImpl::layout(UiLayoutContext& context) {
     }
 }
 
-std::unique_ptr<UiPageImplBase> InputTestPage::createPageImpl() const {
-    return std::make_unique<InputTestPageImpl>();
-}
-
 }  // namespace
 }  // namespace ui
 
-void InputTestModule_run(DisplayContext* display) {
-    PageStack::run(ui::InputTestPage{}, display);
+std::unique_ptr<UiPageImplBase> InputTestPage::createPageImpl() const {
+    return std::make_unique<ui::InputTestPageImpl>();
 }
 
 #endif

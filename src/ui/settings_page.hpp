@@ -6,7 +6,7 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs the legacy module of the Settings row of Main. Closes when the module returns. */
+/** The settings of the app, and the way to About, the YouTube download helpers and the cache. */
 class SettingsPage final : public UiPage {
 public:
     using Result = std::monostate;

@@ -5,12 +5,13 @@
 #include <vector>
 
 #include "ui/view/list_adapter.hpp"
+#include "ui/view/list_item_view.hpp"
 #include "ui/view/ui_layout.hpp"
 #include "ui/view/ui_view.hpp"
 
 /**
  * Lays out the items of an adapter in a column, and scrolls to keep the selected item
- * visible. Shows whole items only.
+ * visible. Shows whole items only. Sets the selection of each item view.
  */
 class ListView : public UiLayout {
 public:
@@ -44,7 +45,10 @@ public:
     int getFirstVisibleIndex() const { return items.empty() ? -1 : firstVisible; }
     int getLastVisibleIndex() const { return items.empty() ? -1 : lastVisible; }
 
-    UiView& getItemView(int index) { return *items[static_cast<size_t>(index)].view; }
+    ListItemView& getItemView(int index) { return *items[static_cast<size_t>(index)].view; }
+
+    /** Returns the id that the adapter gave for the item at `index`. */
+    long getItemId(int index) const { return items[static_cast<size_t>(index)].id; }
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -52,9 +56,12 @@ public:
 private:
     struct Item {
         long id;
-        std::shared_ptr<UiView> view;
+        std::shared_ptr<ListItemView> view;
         int height;
     };
+
+    /** Selects index, and sets the selection of each item view. */
+    void select(int index);
 
     int getTop(int index) const;
     int findLastFullyVisible(int first, int height) const;
@@ -64,7 +71,7 @@ private:
     std::vector<Item> items;
     // The views that left the list. They stay until the next layout, thus the entries of the
     // frame still hold them.
-    std::vector<std::shared_ptr<UiView>> leaving;
+    std::vector<std::shared_ptr<ListItemView>> leaving;
     bool measured    = false;
     int selected     = -1;
     int firstVisible = 0;

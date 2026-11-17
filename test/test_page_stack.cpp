@@ -425,6 +425,25 @@ TEST(dialog_cannot_open_a_page) {
     CHECK(f.stack.isDialogOnTop());
 }
 
+TEST(fullscreen_page_that_opens_or_closes_changes_the_screen) {
+    StackFixture f(makePage("main"));
+    int changes = 0;
+    f.stack.setScreenChangeCallback([&changes] { changes++; });
+    PlainPage next    = makePage("next");
+    next.onShortPress = [](TestPageImpl<PlainPage>& impl, Button) { impl.doClose(); };
+    f.stack.open(next);
+    f.endFrame();
+    CHECK_EQ_INT(changes, 1);
+    f.tap(Button::B);
+    CHECK_EQ_INT(changes, 2);
+    PlainPage dialog    = makePage("dialog", PageKind::Dialog);
+    dialog.onShortPress = [](TestPageImpl<PlainPage>& impl, Button) { impl.doClose(); };
+    f.stack.open(dialog);
+    f.endFrame();
+    f.tap(Button::B);
+    CHECK_EQ_INT(changes, 2);
+}
+
 TEST(covered_page_pauses_and_resumes) {
     StackFixture f(makePage("main"));
     PlainPage next    = makePage("next");
@@ -901,6 +920,7 @@ int main(void) {
     RUN(open_then_exit_in_one_frame_opens_and_does_not_quit);
     RUN(exit_then_open_in_one_frame_quits);
     RUN(dialog_cannot_open_a_page);
+    RUN(fullscreen_page_that_opens_or_closes_changes_the_screen);
     RUN(covered_page_pauses_and_resumes);
     RUN(exit_closes_each_page_from_the_top_with_no_callback);
     RUN(close_of_the_bottom_page_ends_the_stack);

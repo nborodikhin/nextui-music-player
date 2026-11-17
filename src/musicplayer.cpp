@@ -38,7 +38,6 @@ extern "C" {
 #include "module_radio.h"
 #include "module_podcast.h"
 #include "downloader.h"
-#include "module_settings.h"
 #include "settings.h"
 #include "resume.h"
 #include "background.h"
