@@ -14,14 +14,14 @@ void ListView::notifyDataChanged() {
     const long selectedId = selected >= 0 ? items[static_cast<size_t>(selected)].id : 0;
     const bool hadSelection = selected >= 0;
 
-    std::unordered_map<long, std::shared_ptr<UiView>> kept;
+    std::unordered_map<long, std::shared_ptr<ListItemView>> kept;
     for (Item& item : items) kept[item.id] = std::move(item.view);
     items.clear();
     const int count = adapter->getCount();
     for (int index = 0; index < count; index++) {
         const long id = adapter->getItemId(index);
         const auto it = kept.find(id);
-        std::shared_ptr<UiView> view;
+        std::shared_ptr<ListItemView> view;
         if (it != kept.end()) {
             view = std::move(it->second);
             kept.erase(it);
@@ -33,24 +33,30 @@ void ListView::notifyDataChanged() {
     }
     for (auto& [id, view] : kept) leaving.push_back(std::move(view));
 
-    measured = false;
-    selected = items.empty() ? -1 : std::clamp(selected, 0, count - 1);
+    measured     = false;
+    int newIndex = items.empty() ? -1 : std::clamp(selected, 0, count - 1);
     if (hadSelection) {
         for (int index = 0; index < count; index++) {
-            if (items[static_cast<size_t>(index)].id == selectedId) selected = index;
+            if (items[static_cast<size_t>(index)].id == selectedId) newIndex = index;
         }
     }
+    select(newIndex);
+}
+
+void ListView::select(int index) {
+    selected = index;
+    for (int i = 0; i < getItemCount(); i++) items[static_cast<size_t>(i)].view->setSelected(i == selected);
 }
 
 bool ListView::moveForward() {
     if (getItemCount() < 2) return false;
-    selected = (selected + 1) % getItemCount();
+    select((selected + 1) % getItemCount());
     return true;
 }
 
 bool ListView::moveBackward() {
     if (getItemCount() < 2) return false;
-    selected = (selected + getItemCount() - 1) % getItemCount();
+    select((selected + getItemCount() - 1) % getItemCount());
     return true;
 }
 
@@ -71,12 +77,12 @@ bool ListView::movePage(int direction) {
         target = next;
     }
     if (target == selected) return false;
-    selected = target;
+    select(target);
     return true;
 }
 
 void ListView::setSelectedIndex(int index) {
-    selected = items.empty() ? -1 : std::clamp(index, 0, getItemCount() - 1);
+    select(items.empty() ? -1 : std::clamp(index, 0, getItemCount() - 1));
 }
 
 void ListView::setContext(UiContext& context) {

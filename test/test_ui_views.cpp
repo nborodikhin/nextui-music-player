@@ -4,8 +4,10 @@
 //
 // The layer is a test double of ui_layers.c, as in test_ui_compositor.cpp.
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,7 @@
 #include "ui/view/title_text_view.hpp"
 #include "input/common_button_handler.hpp"
 #include "input/input_driver.hpp"
+#include "ui/confirm_dialog_page.hpp"
 #include "ui/controls_help_page.hpp"
 #include "ui/database_error_dialog_page.hpp"
 #include "ui/quit_dialog_page.hpp"
@@ -581,7 +584,7 @@ TEST(test_selection_change_makes_the_row_dirty) {
 }
 
 // A view of a fixed height that counts its draws and shows its selection.
-class TestItem : public UiView {
+class TestItem : public ListItemView {
 public:
     void layout(UiLayoutContext& context) override {
         context.setSize(UiSize{context.getMaxSize().w, 10});
@@ -592,7 +595,7 @@ public:
         dirty = false;
         draws++;
     }
-    void setSelected(bool value) {
+    void setSelected(bool value) override {
         if (selected == value) return;
         selected = value;
         dirty    = true;
@@ -608,11 +611,11 @@ public:
     std::vector<long> ids;
     int created = 0;
     /** Each view that the adapter made, in order */
-    std::vector<std::shared_ptr<UiView>> made;
+    std::vector<std::shared_ptr<ListItemView>> made;
 
     int getCount() const override { return static_cast<int>(ids.size()); }
     long getItemId(int index) const override { return ids[static_cast<size_t>(index)]; }
-    std::shared_ptr<UiView> getView(int) override {
+    std::shared_ptr<ListItemView> getView(int) override {
         created++;
         made.push_back(std::make_shared<TestItem>());
         return made.back();
@@ -631,15 +634,63 @@ TEST(test_cursor_move_draws_only_the_two_changed_rows) {
     ListView list;
     list.setAdapter(adapter);
     list.setSelectedIndex(0);
-    itemAt(list, 0).setSelected(true);
     f.frame(list, kList);
     CHECK(list.moveForward());
-    itemAt(list, 0).setSelected(false);
-    itemAt(list, 1).setSelected(true);
     f.frame(list, kList);
     CHECK_EQ_INT(itemAt(list, 0).draws, 2);
     CHECK_EQ_INT(itemAt(list, 1).draws, 2);
     CHECK_EQ_INT(itemAt(list, 2).draws, 1);
+}
+
+TEST(test_move_selects_the_new_row_and_clears_the_old_row) {
+    TestAdapter adapter;
+    adapter.ids = {1, 2, 3, 4, 5, 6};
+    ListView list;
+    list.setAdapter(adapter);
+    CHECK(itemAt(list, 0).selected);
+    CHECK(list.moveForward());
+    CHECK(!itemAt(list, 0).selected);
+    CHECK(itemAt(list, 1).selected);
+    CHECK(list.moveBackward());
+    CHECK(itemAt(list, 0).selected);
+    CHECK(!itemAt(list, 1).selected);
+    list.setSelectedIndex(4);
+    CHECK(!itemAt(list, 0).selected);
+    CHECK(itemAt(list, 4).selected);
+}
+
+TEST(test_page_move_selects_the_new_row) {
+    Fixture f;
+    TestAdapter adapter;
+    adapter.ids = {1, 2, 3, 4, 5, 6};
+    ListView list;
+    list.setAdapter(adapter);
+    f.frame(list, kList);
+    CHECK(list.pageForward());
+    CHECK(!itemAt(list, 0).selected);
+    CHECK(itemAt(list, list.getSelectedIndex()).selected);
+}
+
+TEST(test_data_change_selects_only_the_row_of_the_cursor) {
+    TestAdapter adapter;
+    adapter.ids = {1, 2, 3, 4};
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(2);
+    // A new row before the cursor, and the row of the cursor stays
+    adapter.ids = {9, 1, 2, 3, 4};
+    list.notifyDataChanged();
+    CHECK_EQ_INT(list.getSelectedIndex(), 3);
+    for (int index = 0; index < list.getItemCount(); index++) {
+        CHECK(itemAt(list, index).selected == (index == 3));
+    }
+    // The row of the cursor goes away, thus the cursor stays at its index
+    adapter.ids = {9, 1, 2, 4};
+    list.notifyDataChanged();
+    CHECK_EQ_INT(list.getSelectedIndex(), 3);
+    for (int index = 0; index < list.getItemCount(); index++) {
+        CHECK(itemAt(list, index).selected == (index == 3));
+    }
 }
 
 TEST(test_removed_item_moves_the_rows_with_no_draw) {
@@ -897,6 +948,90 @@ public:
     int draws            = 0;
 };
 
+constexpr uint32_t kRightColor = 0xFF0000FF;
+constexpr UiSize kRightSize   = {20, 10};
+
+// The rectangle of the right view in kRow
+SDL_Rect rightViewRect() {
+    const int padding = SCALE1(BUTTON_PADDING);
+    const int x       = kRow.w - padding - kRightSize.w;
+    const int y       = (std::min(kRow.h, SCALE1(PILL_SIZE)) - kRightSize.h) / 2;
+    return SDL_Rect{x, y, kRightSize.w, kRightSize.h};
+}
+
+TEST(test_right_view_shows_at_the_right_edge_of_the_row) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText("short");
+    row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
+    f.frame(row, kRow);
+    const SDL_Rect right = rightViewRect();
+    CHECK_EQ_SZ(f.surfaceAt(right.x, right.y), kRightColor);
+    CHECK_EQ_SZ(f.surfaceAt(right.x + right.w - 1, right.y + right.h - 1), kRightColor);
+}
+
+TEST(test_long_text_ends_before_the_right_view) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText(kLongText);
+    row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
+    f.frame(row, kRow);
+    const SDL_Rect right = rightViewRect();
+    const int padding    = SCALE1(BUTTON_PADDING);
+    CHECK(f.surfaceHasPixels(SDL_Rect{padding, 0, right.x - padding * 3, kRow.h}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{right.x - padding * 2, 0, padding * 2, kRow.h}));
+}
+
+TEST(test_right_view_set_after_the_context_gets_the_context) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    // Records that it got a context
+    class ContextView : public SizedView {
+    public:
+        ContextView() : SizedView(kRightColor, kRightSize) {}
+        void setContext(UiContext& context) override {
+            SizedView::setContext(context);
+            gotContext = true;
+        }
+        bool gotContext = false;
+    };
+    auto right = std::make_shared<ContextView>();
+    row.setRightView(right);
+    CHECK(right->gotContext);
+}
+
+TEST(test_removed_right_view_makes_the_row_dirty) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText("short");
+    row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
+    f.frame(row, kRow);
+    CHECK(!row.isDirty());
+    row.setRightView(nullptr);
+    CHECK(row.isDirty());
+    f.frame(row, kRow);
+    CHECK(!f.surfaceHasPixels(rightViewRect()));
+}
+
+TEST(test_new_right_view_of_a_selected_row_draws_the_row_again) {
+    Fixture f;
+    ListRowView row(testFont);
+    row.setContext(f.context);
+    row.setText("short");
+    row.setSelected(true);
+    f.frame(row, kRow);
+    CHECK(!row.isDirty());
+    row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
+    CHECK(row.isDirty());
+    f.frame(row, kRow);
+    CHECK(!row.isDirty());
+    CHECK_EQ_SZ(f.surfaceAt(rightViewRect().x, rightViewRect().y), kRightColor);
+}
+
 constexpr uint32_t kTitleColor = 0xFF101010;
 constexpr uint32_t kUpColor    = 0xFF202020;
 constexpr uint32_t kDownColor  = 0xFF303030;
@@ -1090,6 +1225,69 @@ TEST(test_quit_dialog_ignores_start_with_a_volume_button) {
     CHECK(pressClosesDialog(QuitDialogPage{}, {Button::B}));
     CHECK(!pressClosesDialog(QuitDialogPage{}, {Button::Plus, Button::Start}));
     CHECK(!pressClosesDialog(QuitDialogPage{}, {Button::Start, Button::Minus}));
+}
+
+namespace {
+
+/** A page that opens a confirmation for a result, and keeps the result. */
+class ConfirmParentPage final : public UiPage {
+public:
+    using Result = std::monostate;
+    explicit ConfirmParentPage(std::optional<bool>& result) : result(result) {}
+    std::unique_ptr<UiPageImplBase> createPageImpl() const override;
+
+private:
+    std::optional<bool>& result;
+};
+
+class ConfirmParentPageImpl final : public UiPageImpl<ConfirmParentPage> {
+public:
+    explicit ConfirmParentPageImpl(std::optional<bool>& result) : UiPageImpl(PageKind::FullScreen), result(result) {}
+    void onEnter() override {
+        getNavigator().openForResult(ConfirmDialogPage("Clear?"), [this](const bool& yes) { result = yes; });
+    }
+    void layout(UiLayoutContext&) override {}
+
+private:
+    std::optional<bool>& result;
+};
+
+std::unique_ptr<UiPageImplBase> ConfirmParentPage::createPageImpl() const {
+    return std::make_unique<ConfirmParentPageImpl>(result);
+}
+
+/** Opens a confirmation over a page, presses and releases button, and returns the result. */
+std::optional<bool> confirmWith(input::Button button) {
+    Fixture f;
+    RecordingPlayback playback;
+    PageStack stack(playback);
+    std::optional<bool> result;
+    stack.start(ConfirmParentPage(result).createPageImpl(), f.compositor);
+    uint32_t now = 0;
+    auto frame   = [&] {
+        stack.tickInput();
+        stack.tickPages();
+        stack.endFrame();
+        stack.beginPoll();
+        now += 16;
+        stack.startFrame(now);
+    };
+    frame();
+    stack.getRawInput().onRawEvent({now, input::event::ButtonPressed{button}});
+    frame();
+    stack.getRawInput().onRawEvent({now, input::event::ButtonReleased{button}});
+    frame();
+    stack.closeAll();
+    return result;
+}
+
+}  // namespace
+
+TEST(test_confirm_dialog_gives_yes_on_a_and_no_on_b) {
+    CHECK(confirmWith(input::Button::A) == std::optional<bool>(true));
+    CHECK(confirmWith(input::Button::B) == std::optional<bool>(false));
+    // Another button does not close the dialog
+    CHECK(!confirmWith(input::Button::X).has_value());
 }
 
 // A dialog page gives the buttons of the earphones to the global handler when no pad button is
@@ -1287,6 +1485,9 @@ int main() {
     RUN(test_row_shows_long_text_only_when_selected);
     RUN(test_selection_change_makes_the_row_dirty);
     RUN(test_cursor_move_draws_only_the_two_changed_rows);
+    RUN(test_move_selects_the_new_row_and_clears_the_old_row);
+    RUN(test_page_move_selects_the_new_row);
+    RUN(test_data_change_selects_only_the_row_of_the_cursor);
     RUN(test_removed_item_moves_the_rows_with_no_draw);
     RUN(test_move_past_the_last_visible_row_scrolls);
     RUN(test_row_that_the_clip_cuts_is_hidden);
@@ -1304,6 +1505,7 @@ int main() {
     RUN(test_dialog_pages_give_the_earphone_buttons_to_the_playback);
     RUN(test_controls_help_ignores_start_with_a_volume_button);
     RUN(test_quit_dialog_ignores_start_with_a_volume_button);
+    RUN(test_confirm_dialog_gives_yes_on_a_and_no_on_b);
     RUN(test_database_error_dialog_closes_on_a_pad_button);
     RUN(test_database_error_dialog_stays_open_at_a_media_key);
     RUN(test_database_error_dialog_ignores_a_press_from_before_the_reset);
@@ -1313,6 +1515,11 @@ int main() {
     RUN(test_status_group_renders_again_after_a_change_during_the_render);
     RUN(test_status_group_ignores_a_value_that_comes_back);
     RUN(test_shorter_status_group_leaves_no_old_pixels);
+    RUN(test_right_view_shows_at_the_right_edge_of_the_row);
+    RUN(test_long_text_ends_before_the_right_view);
+    RUN(test_right_view_set_after_the_context_gets_the_context);
+    RUN(test_removed_right_view_makes_the_row_dirty);
+    RUN(test_new_right_view_of_a_selected_row_draws_the_row_again);
     RUN(test_up_indicator_shows_over_the_title_with_no_title_draw);
     RUN(test_new_title_draws_the_title_under_the_indicator);
     RUN(test_scrolling_title_frame_changes_the_layer_only);

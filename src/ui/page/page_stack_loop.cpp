@@ -149,6 +149,8 @@ void PageStack::run(const UiPage& page, DisplayContext* display) {
     UiCompositor compositor;
     PageStack stack(playback);
     stack.setDimColor(getDimColor());
+    // A screen-bound toast belongs to the screen that showed it
+    stack.setScreenChangeCallback(Toast_screenChanged);
     stack.setDialogOpeners([&stack](HelpId helpId) { stack.open(ControlsHelpPage(helpId)); },
                            [&stack] {
                                stack.openForResult(QuitDialogPage{}, [&stack](bool quit) {

@@ -214,14 +214,20 @@ bool PageStack::acceptCommand() {
 
 void PageStack::apply(Command command) {
     switch (command.kind) {
-        case Command::Kind::Open:
+        case Command::Kind::Open: {
+            const bool fullScreen = command.page->getKind() == PageKind::FullScreen;
             entries.back().page->pause();
             onActivityGap();
             push(std::move(command.page));
+            if (fullScreen && onScreenChange) onScreenChange();
             break;
-        case Command::Kind::Close:
+        }
+        case Command::Kind::Close: {
+            const bool fullScreen = entries.back().page->getKind() == PageKind::FullScreen;
             pop(std::move(command.deliver));
+            if (fullScreen && !entries.empty() && onScreenChange) onScreenChange();
             break;
+        }
         case Command::Kind::Exit:
             closeAll();
             quitRequested = true;

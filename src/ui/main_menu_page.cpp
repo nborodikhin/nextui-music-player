@@ -12,6 +12,7 @@
 #include "toast.h"
 #include "ui/library_page.hpp"
 #include "ui/now_playing_page.hpp"
+#include "ui/page/list_screen_controller.hpp"
 #include "ui/podcast_page.hpp"
 #include "ui/radio_page.hpp"
 #include "ui/resume_page.hpp"
@@ -60,17 +61,6 @@ constexpr size_t kMenuItemCount = static_cast<size_t>(MenuItem::Settings) + 1;
 
 constexpr const char* kLeftHints[]  = {"START", "CONTROLS", nullptr};
 constexpr const char* kRightHints[] = {"B", "EXIT", "A", "OPEN", nullptr};
-
-constexpr std::array<ButtonRequest, 8> kRequests = {
-    request::Repeat{Button::DpadUp},
-    request::Repeat{Button::DpadDown},
-    request::Repeat{Button::DpadLeft},
-    request::Repeat{Button::DpadRight},
-    request::Repeat{Button::AnalogUp},
-    request::Repeat{Button::AnalogDown},
-    request::Repeat{Button::AnalogLeft},
-    request::Repeat{Button::AnalogRight},
-};
 
 /** The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed. */
 ToastToken exitPrompt = TOAST_TOKEN_NONE;
@@ -133,7 +123,7 @@ public:
     long getItemId(int index) const override { return static_cast<long>(getItem(index)); }
 
     /** Each item keeps its view while the menu runs, thus the Resume row keeps its scrolling. */
-    std::shared_ptr<UiView> getView(int index) override {
+    std::shared_ptr<ListItemView> getView(int index) override {
         std::shared_ptr<ListRowView>& row = rowViews[static_cast<size_t>(getItem(index))];
         if (!row) row = std::make_shared<ListRowView>(Fonts_getLarge());
         return row;
@@ -144,7 +134,7 @@ private:
     std::array<std::shared_ptr<ListRowView>, kMenuItemCount> rowViews;
 };
 
-class MainMenuPageImpl final : public UiPageImpl<MainMenuPage> {
+class MainMenuPageImpl final : public UiPageImpl<MainMenuPage>, private ListScreenListener {
 public:
     MainMenuPageImpl() : UiPageImpl(PageKind::FullScreen) {
         screenView.getTitleView().setText("Music Player");
@@ -152,14 +142,17 @@ public:
         screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
     }
 
-    std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
+    std::span<const ButtonRequest> getButtonRequests() const override {
+        return ListScreenController::getButtonRequests();
+    }
 
     HelpId getHelpId() const override { return HELP_MAIN_MENU; }
 
     void onEnter() override {
-        restartScrolling(screenView.getTitleView(), titleStart);
+        items.setRows(getRows());
         getList().setAdapter(items);
-        updateRowMap();
+        updateLabels();
+        list.start();
         getScheduler().postRepeating([this] { refreshRows(); }, kRowRefreshMs);
     }
 
@@ -175,6 +168,7 @@ public:
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (exiting) return true;
+        if (list.onButtonEvent(event)) return true;
         if (const auto* typedEvent = std::get_if<event::ShortPress>(&event.kind)) {
             return pressButton(typedEvent->button);
         }
@@ -185,35 +179,29 @@ public:
     }
 
 private:
+    /** Left and Right move one page */
+    bool onLeftRight(int, HorizontalDirection, bool) override { return false; }
+
+    void onSelectionChanged(int listItemPosition) override { selectedItem = items.getItem(listItemPosition); }
+
     void refreshRows() {
         updateRowMap();
         updateLabels();
     }
 
-    /** Builds the rows, and sets the labels of new rows. */
-    void updateRowMap() {
+    /** Returns the items of the rows, in order. */
+    static std::vector<MenuItem> getRows() {
         std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings};
         const MenuItem playingItem = getPlayingItem();
         if (playingItem != MenuItem::None) rows.insert(rows.begin(), playingItem);
-
-        if (items.setRows(rows)) {
-            getList().notifyDataChanged();
-            updateLabels();
-        }
-        showSelection();
+        return rows;
     }
 
-    /** Puts the selection pill on the row of the cursor, and restarts the wait of its text. */
-    void showSelection() {
-        const int selectedIndex = getList().getSelectedIndex();
-        for (int index = 0; index < getList().getItemCount(); index++) {
-            getRow(index).setSelected(index == selectedIndex);
-        }
-        const MenuItem newSelectedItem = items.getItem(selectedIndex);
-        if (newSelectedItem != selectedItem) {
-            selectedItem = newSelectedItem;
-            restartRowScrolling();
-        }
+    /** Builds the rows, and sets the labels of new rows. */
+    void updateRowMap() {
+        if (!items.setRows(getRows())) return;
+        list.notifyDataChanged();
+        updateLabels();
     }
 
     /** Sets the label of each row. A new label of the selected row restarts the wait of its text. */
@@ -221,26 +209,8 @@ private:
         const int selectedIndex = getList().getSelectedIndex();
         for (int index = 0; index < getList().getItemCount(); index++) {
             const bool changed = getRow(index).setText(getRowLabel(items.getItem(index)));
-            if (changed && index == selectedIndex) restartRowScrolling();
+            if (changed && index == selectedIndex) list.restartRowScrolling();
         }
-    }
-
-    void restartRowScrolling() {
-        const int selectedIndex = getList().getSelectedIndex();
-        if (selectedIndex < 0) {
-            getScheduler().cancelTask(rowStart);
-            return;
-        }
-        restartScrolling(getRow(selectedIndex), rowStart);
-    }
-
-    /** Puts the text of `view` at rest, and starts the wait before it scrolls. */
-    template <class View>
-    void restartScrolling(View& view, TaskId& start) {
-        view.stopScrolling();
-        view.resetScrolling();
-        getScheduler().cancelTask(start);
-        start = getScheduler().postDelayed([&view] { view.startScrolling(); }, SCROLL_START_DELAY);
     }
 
     ListView& getList() { return screenView.getListView(); }
@@ -249,24 +219,11 @@ private:
     /** Returns: true when the button has an action on the menu */
     bool pressButton(Button button) {
         switch (button) {
-            case Button::DpadUp:
-            case Button::AnalogUp:    showMovedCursor(getList().moveBackward()); return true;
-            case Button::DpadDown:
-            case Button::AnalogDown:  showMovedCursor(getList().moveForward()); return true;
-            case Button::DpadLeft:
-            case Button::AnalogLeft:  showMovedCursor(getList().pageBackward()); return true;
-            case Button::DpadRight:
-            case Button::AnalogRight: showMovedCursor(getList().pageForward()); return true;
             case Button::A: openItem(); return true;
             case Button::X: clearPlayingItem(); return true;
             case Button::B: askExit(); return true;
             default:        return false;
         }
-    }
-
-    void showMovedCursor(bool moved) {
-        if (!moved) return;
-        showSelection();
     }
 
     void openItem() {
@@ -308,12 +265,9 @@ private:
     bool exiting = false;
 
     ListScreenView screenView{Fonts_getLarge()};
+    ListScreenController list{screenView, getScheduler(), *this};
     /** The item of the row of the cursor */
     MenuItem selectedItem = MenuItem::None;
-    /** The wait before the text of the selected row scrolls */
-    TaskId rowStart = 0;
-    /** The wait before the title scrolls */
-    TaskId titleStart = 0;
 };
 
 }  // namespace

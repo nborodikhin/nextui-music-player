@@ -42,6 +42,12 @@ public:
      */
     void setDialogOpeners(std::function<void(HelpId)> openHelp, std::function<void()> openQuit);
 
+    /**
+     * Sets the function that the stack calls when a fullscreen page opens or closes, thus the
+     * screen changes. A dialog does not change the screen.
+     */
+    void setScreenChangeCallback(std::function<void()> callback) { onScreenChange = std::move(callback); }
+
     /** Puts `page` at the bottom, and gives it its context and onEnter(). */
     void start(std::unique_ptr<UiPageImplBase> page, const UiScreenInfo& screen);
 
@@ -162,6 +168,7 @@ private:
     std::function<ModuleExitReason(DisplayContext*)> legacyModule;
     std::function<void(HelpId)> openHelp;
     std::function<void()> openQuit;
+    std::function<void()> onScreenChange;
     uint32_t frameTime = 0;
     SnapshotView snapshot;
     /** The snapshot does not show the page under the top dialog */
