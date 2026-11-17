@@ -6,8 +6,8 @@ extern "C" {
 #endif
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
-#include "browser.h"
 
 // The music playing screen: its renderer and the GPU layers that it paints.
 // The status layer holds the play time. The animation layer holds the spectrum
@@ -15,10 +15,10 @@ extern "C" {
 // art, the metadata, the lyric window and the playback mode indicators.
 
 // Renders the screen on the surface, and records where each layer element goes.
-// playlist_track_num and playlist_total: if > 0, use these instead of browser counts
-void render_playing(SDL_Surface* screen, int show_setting, BrowserContext* browser,
+// `track_num` is the 1-based position of the track in a queue of `total_tracks`.
+void render_playing(SDL_Surface* screen, int show_setting,
                     bool shuffle_enabled, bool repeat_enabled,
-                    int playlist_track_num, int playlist_total);
+                    int track_num, int total_tracks);
 
 // Paints each layer of the screen. Call after each render of the surface, thus
 // the frame that presents the surface holds every element.

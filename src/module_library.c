@@ -7,7 +7,7 @@
 #include "module_common.h"
 #include "toast.h"
 #include "module_library.h"
-#include "module_player.h"
+#include "module_file_browser.h"
 #include "module_playlist.h"
 #include "module_downloader.h"
 #include "ui_utils.h"
@@ -76,7 +76,7 @@ ModuleExitReason LibraryModule_run(DisplayContext* display) {
 
             switch (nav.selected) {
                 case LIBRARY_FILES:
-                    reason = PlayerModule_run(display, false);  // File browser entry
+                    reason = FileBrowserModule_run(display);
                     break;
                 case LIBRARY_PLAYLISTS:
                     reason = PlaylistModule_run(display);

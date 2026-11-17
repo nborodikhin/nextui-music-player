@@ -40,6 +40,10 @@ void Playlist_clear(PlaylistContext* ctx);
 // Returns: number of tracks added, or -1 on error
 int Playlist_buildFromDirectory(PlaylistContext* ctx, int dir_id, int start_file_id);
 
+// Build a playlist of the one indexed file `file_id`.
+// Returns: 1, or -1 on error
+int Playlist_buildFromFile(PlaylistContext* ctx, int file_id);
+
 // Collect at most max_tracks playable files of an indexed directory and its
 // descendants into a new array. The caller frees *tracks.
 // Returns: number of tracks, or -1 on error
@@ -53,6 +57,24 @@ int Playlist_prev(PlaylistContext* ctx);
 // Shuffle - pick a random track
 // Returns: new index, or -1 if empty
 int Playlist_shuffle(PlaylistContext* ctx);
+
+// How the queue selects the track after the current one
+typedef enum {
+    PLAYLIST_STEP_NEXT,     // the next track of the queue, or none after the last one
+    PLAYLIST_STEP_SHUFFLE,  // a random track
+    PLAYLIST_STEP_REPEAT,   // the current track again
+} PlaylistStep;
+
+// Starts the playback of `track`.
+// Returns: true when the track plays
+typedef bool (*PlaylistStartFn)(const PlaylistTrack* track, void* user);
+
+// Starts the track at `index`. When a track does not start, selects the next one with `step`
+// and starts it, and tries each track at most once. Pass -1 in `index` to select the first
+// track with `step` from the current track. Sets the current index to the track that plays.
+// Returns: the index of the track that plays, or -1 when no track starts
+int Playlist_startWithRecovery(PlaylistContext* ctx, int index, PlaylistStep step,
+                               PlaylistStartFn start, void* user);
 
 // Set current track by index
 // Returns: 0 on success, -1 if invalid index

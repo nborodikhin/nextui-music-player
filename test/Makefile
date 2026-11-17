@@ -89,6 +89,7 @@ TESTS    = $(BIN)/test_list_nav $(BIN)/test_toast_state \
 TESTS   += $(BIN)/test_id3
 TESTS   += $(BIN)/test_radio_hls
 TESTS   += $(BIN)/test_icy
+TESTS   += $(BIN)/test_background
 TESTS   += $(BIN)/test_playlist_m3u
 TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
@@ -344,6 +345,10 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
 	  $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
 	  $(SRC)/utf8.c \
 	  $(SQLITE_LIBS) -lzip
+
+$(BIN)/test_background: test_background.c $(SRC)/background.c $(SRC)/background.h \
+                         $(SRC)/music_session.h $(SRC)/module_common.h test.h | $(BIN)
+	$(CC) $(CFLAGS) $(INC) -o $@ test_background.c $(SRC)/background.c
 
 $(BIN)/test_icy: test_icy.c $(SRC)/icy.c $(SRC)/icy.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_icy.c $(SRC)/icy.c $(SRC)/utf8.c

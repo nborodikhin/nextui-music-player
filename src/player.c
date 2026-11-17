@@ -2560,7 +2560,7 @@ int Player_load(const char* filepath) {
         set_title_from_filename(filepath);
         result = load_streaming(filepath);
 
-        // Album art fetch moved to module_player.c (after Player_play)
+        // The music session fetches the album art after Player_play()
         // to avoid blocking playback start
     } else {
         LOG_error("Unsupported format for streaming: %s\n", filepath);

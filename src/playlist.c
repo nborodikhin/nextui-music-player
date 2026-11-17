@@ -135,6 +135,23 @@ int Playlist_buildFromDirectory(PlaylistContext* ctx, int dir_id,
     return count;
 }
 
+int Playlist_buildFromFile(PlaylistContext* ctx, int file_id) {
+    if (!ctx || file_id <= 0) return -1;
+    if (!ctx->tracks) {
+        Playlist_init(ctx);
+        if (!ctx->tracks) return -1;
+    }
+
+    Playlist_clear(ctx);
+    DbFileResult* result = Db_getFile(file_id);
+    if (!result) return -1;
+    bool filled = fill_track(&ctx->tracks[0], &result->file);
+    Db_freeResult(result);
+    if (!filled) return -1;
+    ctx->track_count = 1;
+    return 1;
+}
+
 int Playlist_collectDirectory(int dir_id, int max_tracks, PlaylistTrack** tracks) {
     if (!tracks) return -1;
     *tracks = NULL;
@@ -176,6 +193,51 @@ int Playlist_shuffle(PlaylistContext* ctx) {
     } while (index == ctx->current_index);
     ctx->current_index = index;
     return index;
+}
+
+// Returns a random index that `tried` does not mark and that is not `exclude`, or -1 when there
+// is none.
+static int random_untried_index(const bool* tried, int count, int exclude) {
+    int candidates = 0;
+    for (int i = 0; i < count; i++) {
+        if (!tried[i] && i != exclude) candidates++;
+    }
+    if (candidates == 0) return -1;
+    int pick = rand() % candidates;
+    for (int i = 0; i < count; i++) {
+        if (tried[i] || i == exclude) continue;
+        if (pick == 0) return i;
+        pick--;
+    }
+    return -1;
+}
+
+static int select_index(const PlaylistContext* ctx, int from, PlaylistStep step,
+                        const bool* tried) {
+    switch (step) {
+        case PLAYLIST_STEP_REPEAT:  return from;
+        case PLAYLIST_STEP_SHUFFLE:
+            // A queue of one track repeats it, as a shuffle of one track can
+            if (ctx->track_count == 1) return 0;
+            return random_untried_index(tried, ctx->track_count, from);
+        case PLAYLIST_STEP_NEXT:    break;
+    }
+    return from + 1 < ctx->track_count ? from + 1 : -1;
+}
+
+int Playlist_startWithRecovery(PlaylistContext* ctx, int index, PlaylistStep step,
+                               PlaylistStartFn start, void* user) {
+    if (!ctx || !ctx->tracks || ctx->track_count <= 0 || !start) return -1;
+
+    bool tried[PLAYLIST_MAX_TRACKS] = {false};
+    if (index < 0) index = select_index(ctx, ctx->current_index, step, tried);
+    while (index >= 0 && index < ctx->track_count && !tried[index]) {
+        tried[index] = true;
+        ctx->current_index = index;
+        if (start(&ctx->tracks[index], user)) return index;
+        index = select_index(ctx, index, step, tried);
+    }
+    return -1;
 }
 
 int Playlist_setCurrentIndex(PlaylistContext* ctx, int index) {

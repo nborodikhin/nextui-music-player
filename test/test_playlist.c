@@ -155,10 +155,121 @@ TEST(directory_collection_pages_past_queue_limit) {
     stop_test();
 }
 
+TEST(queue_of_one_file_holds_that_file) {
+    CHECK(start_test());
+    PlaylistContext playlist = {0};
+    int file_id = file_id_at("Small/b.mp3");
+    CHECK(file_id > 0);
+    CHECK_EQ_INT(Playlist_buildFromFile(&playlist, file_id), 1);
+    CHECK_EQ_INT(Playlist_getCount(&playlist), 1);
+    CHECK_EQ_INT(Playlist_getCurrentIndex(&playlist), 0);
+    const PlaylistTrack* track = Playlist_getCurrentTrack(&playlist);
+    CHECK(track && track->file_id == file_id);
+    CHECK(track && strcmp(track->name, "b.mp3") == 0);
+    CHECK_EQ_INT(Playlist_buildFromFile(&playlist, 999999), -1);
+    Playlist_free(&playlist);
+    stop_test();
+}
+
+// A queue of tracks whose file id is the index, and a start that fails for the marked ids
+#define STEP_TRACKS 6
+
+typedef struct {
+    bool fails[STEP_TRACKS];
+    int  starts[STEP_TRACKS];
+} FakeStarts;
+
+static bool fake_start(const PlaylistTrack* track, void* user) {
+    FakeStarts* fake = (FakeStarts*)user;
+    fake->starts[track->file_id]++;
+    return !fake->fails[track->file_id];
+}
+
+static void make_step_queue(PlaylistContext* playlist) {
+    Playlist_init(playlist);
+    for (int i = 0; i < STEP_TRACKS; i++) {
+        memset(&playlist->tracks[i], 0, sizeof(playlist->tracks[i]));
+        playlist->tracks[i].file_id = i;
+    }
+    playlist->track_count = STEP_TRACKS;
+}
+
+static bool each_start_at_most_once(const FakeStarts* fake) {
+    for (int i = 0; i < STEP_TRACKS; i++) {
+        if (fake->starts[i] > 1) return false;
+    }
+    return true;
+}
+
+TEST(step_passes_tracks_that_do_not_start) {
+    PlaylistContext playlist = {0};
+    make_step_queue(&playlist);
+    FakeStarts fake = {{false}, {0}};
+    fake.fails[1] = true;
+    fake.fails[2] = true;
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, -1, PLAYLIST_STEP_NEXT, fake_start, &fake), 3);
+    CHECK_EQ_INT(Playlist_getCurrentIndex(&playlist), 3);
+    CHECK(each_start_at_most_once(&fake));
+    Playlist_free(&playlist);
+}
+
+TEST(step_stops_after_last_track_that_does_not_start) {
+    PlaylistContext playlist = {0};
+    make_step_queue(&playlist);
+    FakeStarts fake = {{false}, {0}};
+    fake.fails[5] = true;
+    Playlist_setCurrentIndex(&playlist, 4);
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, -1, PLAYLIST_STEP_NEXT, fake_start, &fake), -1);
+    CHECK_EQ_INT(fake.starts[5], 1);
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, -1, PLAYLIST_STEP_NEXT, fake_start, &fake), -1);
+    Playlist_free(&playlist);
+}
+
+TEST(shuffle_step_finds_the_track_that_starts) {
+    for (int round = 0; round < 50; round++) {
+        PlaylistContext playlist = {0};
+        make_step_queue(&playlist);
+        FakeStarts fake = {{true, true, true, true, true, true}, {0}};
+        fake.fails[4] = false;
+        int index = Playlist_startWithRecovery(&playlist, 0, PLAYLIST_STEP_SHUFFLE, fake_start, &fake);
+        CHECK_EQ_INT(index, 4);
+        CHECK(each_start_at_most_once(&fake));
+        Playlist_free(&playlist);
+    }
+}
+
+TEST(shuffle_step_tries_each_track_once_when_none_starts) {
+    PlaylistContext playlist = {0};
+    make_step_queue(&playlist);
+    FakeStarts fake = {{true, true, true, true, true, true}, {0}};
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, 2, PLAYLIST_STEP_SHUFFLE, fake_start, &fake), -1);
+    for (int i = 0; i < STEP_TRACKS; i++) CHECK_EQ_INT(fake.starts[i], 1);
+    Playlist_free(&playlist);
+}
+
+TEST(repeat_step_stops_when_the_track_does_not_start) {
+    PlaylistContext playlist = {0};
+    make_step_queue(&playlist);
+    FakeStarts fake = {{false}, {0}};
+    fake.fails[3] = true;
+    Playlist_setCurrentIndex(&playlist, 3);
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, -1, PLAYLIST_STEP_REPEAT, fake_start, &fake), -1);
+    CHECK_EQ_INT(fake.starts[3], 1);
+    fake.fails[3] = false;
+    CHECK_EQ_INT(Playlist_startWithRecovery(&playlist, -1, PLAYLIST_STEP_REPEAT, fake_start, &fake), 3);
+    Playlist_free(&playlist);
+}
+
 int main(void) {
     RUN(queue_starts_at_selected_file_past_first_page);
     RUN(queue_without_start_file_holds_first_files);
     RUN(queue_puts_earlier_files_before_subdirectory_files);
     RUN(directory_collection_pages_past_queue_limit);
+    RUN(queue_of_one_file_holds_that_file);
+    RUN(step_passes_tracks_that_do_not_start);
+    RUN(step_stops_after_last_track_that_does_not_start);
+    RUN(shuffle_step_finds_the_track_that_starts);
+    RUN(shuffle_step_tries_each_track_once_when_none_starts);
+    RUN(repeat_step_stops_when_the_track_does_not_start);
     return test_summary();
 }

@@ -5,7 +5,7 @@
 #include "defines.h"
 #include "api.h"
 #include "module_common.h"
-#include "module_player.h"
+#include "music_session.h"
 #include "settings.h"
 #include "ui_main.h"
 #include "ui_layers.h"
@@ -145,11 +145,11 @@ bool ModuleCommon_skipTrack(bool next) {
         Radio_play(stations[new_idx].url);
         return true;
     }
-    if (PlayerModule_isActive()) {
+    if (MusicSession_isActive()) {
         if (next) {
-            PlayerModule_nextTrack();
+            MusicSession_next();
         } else {
-            PlayerModule_prevTrack();
+            MusicSession_prev();
         }
         return true;
     }
@@ -504,6 +504,7 @@ void ModuleCommon_frameBegin(bool start_frame_clock) {
     TestControl_tick();
     if (key_locked) update_key_lock();
     Toast_tick();
+    Background_frameTick(ModuleCommon_isQuitRequested());
 }
 
 bool ModuleCommon_takeOutputSwitched(void) {
