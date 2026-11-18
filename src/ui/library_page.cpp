@@ -1,13 +1,106 @@
 #include "ui/library_page.hpp"
 
-#include "module_library.h"
-#include "ui/page/legacy_module_page.hpp"
+#include <iterator>
+#include <memory>
+
+#include "ui/downloader_page.hpp"
+#include "ui/file_browser_page.hpp"
+#include "ui/page/list_screen_controller.hpp"
+#include "ui/playlists_page.hpp"
+#include "ui/view/list_adapter.hpp"
+#include "ui/view/list_row_view.hpp"
+#include "ui/view/list_screen_view.hpp"
+#include "ui_fonts.h"
+#include "ui_theme.h"
+
+using namespace input;
 
 namespace {
 
-class LibraryPageImpl final : public LegacyModulePageImpl<LibraryPage> {
-protected:
-    ModuleExitReason runModule(DisplayContext* display) override { return LibraryModule_run(display); }
+/** An item of Library */
+enum class LibraryItem : int8_t {
+    Files,
+    Playlists,
+    Downloader,
+};
+
+struct LibraryRow {
+    LibraryItem item;
+    const char* label;
+};
+
+constexpr LibraryRow kRows[] = {
+    {LibraryItem::Files,      "Files"     },
+    {LibraryItem::Playlists,  "Playlists" },
+    {LibraryItem::Downloader, "Downloader"},
+};
+
+constexpr int kRowCount = static_cast<int>(std::size(kRows));
+
+constexpr const char* kLeftHints[]  = {"START", "CONTROLS", nullptr};
+constexpr const char* kRightHints[] = {"B", "BACK", "A", "OPEN", nullptr};
+
+/** The rows of Library */
+class LibraryListAdapter final : public ListAdapter {
+public:
+    int getCount() const override { return kRowCount; }
+    long getItemId(int index) const override { return index; }
+    std::shared_ptr<ListItemView> getView(int index) override {
+        auto row = std::make_shared<ListRowView>(Fonts_getLarge());
+        row->setText(kRows[index].label);
+        return row;
+    }
+};
+
+class LibraryPageImpl final : public UiPageImpl<LibraryPage>, private ListScreenListener {
+public:
+    LibraryPageImpl() : UiPageImpl(PageKind::FullScreen) {
+        screenView.getTitleView().setText("Library");
+        screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+        screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
+    }
+
+    std::span<const ButtonRequest> getButtonRequests() const override {
+        return ListScreenController::getButtonRequests();
+    }
+
+    HelpId getHelpId() const override { return HELP_LIBRARY_MENU; }
+
+    void onEnter() override {
+        screenView.getListView().setAdapter(rows);
+        list.start();
+    }
+
+    void setContext(UiContext& context) override { screenView.setContext(context); }
+
+    void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
+
+    bool onButtonEvent(const ButtonEvent& event) override {
+        if (list.onButtonEvent(event)) return true;
+        if (event.isSingleButton(Button::A)) {
+            openItem(screenView.getListView().getSelectedIndex());
+            return true;
+        }
+        if (event.isSingleButton(Button::B)) {
+            close();
+            return true;
+        }
+        return false;
+    }
+
+private:
+    void openItem(int index) {
+        if (index < 0 || index >= kRowCount) return;
+        switch (kRows[index].item) {
+            case LibraryItem::Files:      getNavigator().open(FileBrowserPage{}); break;
+            case LibraryItem::Playlists:  getNavigator().open(PlaylistsPage{}); break;
+            case LibraryItem::Downloader: getNavigator().open(DownloaderPage{}); break;
+        }
+    }
+
+    LibraryListAdapter rows;
+    ListScreenView screenView{Fonts_getLarge()};
+    ListScreenController list{screenView, getScheduler(), *this};
 };
 
 }  // namespace

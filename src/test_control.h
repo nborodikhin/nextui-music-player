@@ -31,11 +31,16 @@ void TestControl_tick(void);
 // Closes the channel. Writes @bye first when the script did not stop the app.
 void TestControl_quit(void);
 
+// Returns true one time after the script asked for a new screen. The caller then
+// moves the app to the active output, as at a change of the output.
+bool TestControl_takeNewDisplayRequest(void);
+
 #else
 
 static inline bool TestControl_init(const char* value) { (void)value; return false; }
 static inline void TestControl_tick(void) {}
 static inline void TestControl_quit(void) {}
+static inline bool TestControl_takeNewDisplayRequest(void) { return false; }
 
 #endif
 

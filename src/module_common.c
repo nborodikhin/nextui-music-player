@@ -490,7 +490,8 @@ bool ModuleCommon_isQuitRequested(void) {
 }
 
 void ModuleCommon_frameBegin(bool start_frame_clock) {
-    if (DisplayHelper_outputChanged()) {
+    // A script of the control channel can ask for a new screen on the same output
+    if (TestControl_takeNewDisplayRequest() || DisplayHelper_outputChanged()) {
         DisplayHelper_moveToOutput();
         output_switched = true;
         // A cable change is an action of the user, as a key press is. It opens

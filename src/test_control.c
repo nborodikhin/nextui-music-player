@@ -48,6 +48,9 @@ int PLAT_captureScreenshot(SDL_Surface* out) __attribute__((weak));
 // Limits for the arguments of a command. The delay stays far inside the
 // interval that a wrap-safe comparison of the SDL clock can measure.
 #define MAX_DELAY_MS   600000
+// Frames that the app draws on a new screen before the reply. A legacy module
+// can use the first frame on the new screen for its input and draw in the next.
+#define NEW_DISPLAY_FRAMES 2
 #define MAX_PRESS_N    (MAX_ACTIONS / 2)
 
 #define REPLY_PREFIX  "@"
@@ -58,6 +61,7 @@ typedef enum {
     ACT_SHOT,
     ACT_EXECUTE_SQL,
     ACT_WAIT_SCAN,
+    ACT_NEW_DISPLAY,
     ACT_KEEP,
     ACT_QUIT,
 } ActionType;
@@ -121,6 +125,16 @@ static bool keep_open = false;   // the end of the source does not stop the app
 static bool quit_asked = false;
 static bool wait_scan_active = false;
 static uint32_t wait_scan_started = 0;
+
+typedef enum {
+    NEW_DISPLAY_IDLE,
+    NEW_DISPLAY_REQUESTED,  // the next frame takes the new screen
+    NEW_DISPLAY_DRAWING,    // the app draws on the new screen
+} NewDisplayState;
+
+static NewDisplayState new_display_state = NEW_DISPLAY_IDLE;
+static int      new_display_frames = 0;
+static uint32_t new_display_started = 0;
 
 static Action   queue[MAX_ACTIONS];
 static int      queue_head = 0;
@@ -327,6 +341,7 @@ bool TestControl_init(const char* value) {
     cursor = 0;
     wait_scan_active = false;
     wait_scan_started = 0;
+    new_display_state = NEW_DISPLAY_IDLE;
     return true;
 }
 
@@ -541,6 +556,17 @@ static uint32_t schedule_command(const char* name, char* args, uint32_t base, in
         return base;
     }
 
+    if (strcmp(name, "new_display") == 0) {
+        if (arg1 && arg1[0] != '\0') {
+            reply("err %d new_display takes no arguments", line);
+            return base;
+        }
+        if (!push_action(ACT_NEW_DISPLAY, base)) {
+            reply("err %d queue is full", line);
+        }
+        return base;
+    }
+
     if (strcmp(name, "screenshot") == 0) {
         if (!arg1 || arg1[0] == '\0' || strlen(arg1) >= MAX_PATH_LEN) {
             reply("err %d bad path", line);
@@ -717,6 +743,18 @@ static void shift_after_wait(uint32_t held) {
     }
 }
 
+// Moves the rest of the script by the time of a hold that started at `started`.
+// The other commands of the line of the hold keep their time after the hold, and
+// a line that arrives later starts after them.
+static void end_hold(uint32_t now, uint32_t started) {
+    uint32_t held = now - started;
+    shift_after_wait(held);
+    cursor += held;
+    Step* step = &steps[steps_head];
+    step->end += held;
+    if (!time_reached(step->end, now)) step->end = now;
+}
+
 static bool run_due_actions(uint32_t now) {
     while (queue_count > 0) {
         Action* a = &queue[queue_head];
@@ -737,10 +775,20 @@ static bool run_due_actions(uint32_t now) {
                     return true;
                 }
                 if (wait_scan_active) {
-                    shift_after_wait(now - wait_scan_started);
+                    end_hold(now, wait_scan_started);
                     wait_scan_active = false;
-                    steps[steps_head].end = now;
                 }
+                break;
+            case ACT_NEW_DISPLAY:
+                if (new_display_state == NEW_DISPLAY_IDLE) {
+                    new_display_state = NEW_DISPLAY_REQUESTED;
+                    new_display_started = now;
+                    return true;
+                }
+                if (new_display_state == NEW_DISPLAY_REQUESTED) return true;
+                if (++new_display_frames <= NEW_DISPLAY_FRAMES) return true;
+                new_display_state = NEW_DISPLAY_IDLE;
+                end_hold(now, new_display_started);
                 break;
             case ACT_KEEP: keep_open = true; break;
             case ACT_QUIT:
@@ -765,15 +813,22 @@ static void reply_finished_steps(uint32_t now) {
     }
 }
 
+bool TestControl_takeNewDisplayRequest(void) {
+    if (new_display_state != NEW_DISPLAY_REQUESTED) return false;
+    new_display_state = NEW_DISPLAY_DRAWING;
+    new_display_frames = 0;
+    return true;
+}
+
 void TestControl_tick(void) {
     if (!active || quit_asked) return;
 
     read_input();
 
     uint32_t now = SDL_GetTicks();
-    bool wait_scan_holding = run_due_actions(now);
+    bool holding = run_due_actions(now);
     if (quit_asked) return;
-    if (!wait_scan_holding) reply_finished_steps(now);
+    if (!holding) reply_finished_steps(now);
 
     if (input_eof && !keep_open && queue_count == 0 && steps_count == 0) {
         quit_asked = true;
