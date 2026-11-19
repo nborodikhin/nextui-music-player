@@ -179,9 +179,6 @@ public:
     }
 
 private:
-    /** Left and Right move one page */
-    bool onLeftRight(int, HorizontalDirection, bool) override { return false; }
-
     void onSelectionChanged(int listItemPosition) override { selectedItem = items.getItem(listItemPosition); }
 
     void refreshRows() {

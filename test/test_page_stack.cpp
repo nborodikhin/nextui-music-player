@@ -88,6 +88,8 @@ struct TestPage final : public UiPage {
     std::function<void(TestPageImpl<TestPage>&, Button)> onShortPress;
     /** Called with the implementation at onEnter() */
     std::function<void(TestPageImpl<TestPage>&)> onEnterHook;
+    /** Called with the implementation at resume() */
+    std::function<void(TestPageImpl<TestPage>&)> onResumeHook;
 
     std::unique_ptr<UiPageImplBase> createPageImpl() const override {
         return std::make_unique<TestPageImpl<TestPage>>(*this);
@@ -115,7 +117,10 @@ public:
     }
     void onExit() override { add("exit"); }
     void pause() override { add("pause"); }
-    void resume() override { add("resume"); }
+    void resume() override {
+        add("resume");
+        if (page.onResumeHook) page.onResumeHook(*this);
+    }
     void layout(UiLayoutContext& context) override {
         if (layoutRoot) context.layoutChild(root, context.getMaxRect());
         if (second && layoutSecond) context.layoutChild(*second, context.getMaxRect());
@@ -575,6 +580,31 @@ TEST(paused_page_is_not_laid_out) {
     CHECK(layoutLog == (std::vector<std::string>{"main", "dialog"}));
 }
 
+// A page that a fullscreen page covered gets resume() before its first layout after the close, thus
+// its first frame shows what changed while it was covered
+TEST(uncovered_page_resumes_before_its_first_layout) {
+    PlainPage bottom = makePage("main");
+    bottom.onEnterHook = [](TestPageImpl<PlainPage>& page) {
+        page.second = std::make_unique<TestRootView>("changed", 0u);
+        page.second->setContext(page.context());
+        page.layoutSecond = false;
+    };
+    bottom.onResumeHook = [](TestPageImpl<PlainPage>& page) { page.layoutSecond = true; };
+    LegacyFixture f(bottom);
+    f.drawFrame();
+    f.stack.open(makePage("next"));
+    f.stack.endFrame();
+    f.drawFrame();
+    layoutLog.clear();
+    pageLog.clear();
+    static_cast<TestPageImpl<PlainPage>*>(f.stack.getTop())->doClose();
+    f.stack.endFrame();
+    CHECK(isLog({"next reset", "next exit", "main resume"}));
+    CHECK(layoutLog.empty());
+    f.drawFrame();
+    CHECK(layoutLog == (std::vector<std::string>{"main", "changed"}));
+}
+
 // The status group of the page under a dialog shows its new values at once after the close
 TEST(closed_dialog_refreshes_the_status_group) {
     LegacyFixture f;
@@ -925,6 +955,7 @@ int main(void) {
     RUN(exit_closes_each_page_from_the_top_with_no_callback);
     RUN(close_of_the_bottom_page_ends_the_stack);
     RUN(paused_page_is_not_laid_out);
+    RUN(uncovered_page_resumes_before_its_first_layout);
     RUN(closed_dialog_refreshes_the_status_group);
     RUN(covered_page_shows_dimmed_under_a_dialog);
     RUN(legacy_module_takes_the_screen_again_at_the_same_address);

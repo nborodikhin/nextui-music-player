@@ -16,9 +16,13 @@ public:
     /**
      * Called for each Left and Right while the list has a selection. `isRepeat` is true when the
      * user holds the button.
-     * Returns: true when the page handles the button, else the list moves one page
+     * Returns: true when the page handles the button, else the list moves one page. The default
+     * returns false.
      */
-    virtual bool onLeftRight(int listItemPosition, HorizontalDirection direction, bool isRepeat) = 0;
+    virtual bool onLeftRight([[maybe_unused]] int listItemPosition, [[maybe_unused]] HorizontalDirection direction,
+                             [[maybe_unused]] bool isRepeat) {
+        return false;
+    }
 
     /** Called with the position of the selection when the selected item or its position changes. */
     virtual void onSelectionChanged(int) {}
