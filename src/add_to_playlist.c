@@ -100,7 +100,7 @@ int AddToPlaylist_handleInput(void) {
     else if (PAD_justPressed(BTN_A)) {
         if (selected == 0) {
             // New Playlist
-            char* name = Keyboard_open("Playlist name", NULL, MAX_PLAYLIST_NAME - 1);
+            char* name = Keyboard_open("Playlist name", MAX_PLAYLIST_NAME - 1);
             if (name && name[0]) {
                 int playlist_id = M3U_create(name);
                 PlaylistInfo* info = M3U_getInfo(playlist_id);

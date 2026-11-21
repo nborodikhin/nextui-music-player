@@ -71,6 +71,27 @@ static void count_copied(const char* rel_path, void* ctx) {
 
 // ---------------------------------------------------------------- userdata paths
 
+TEST(card_display_path_shortens_the_path_of_the_card) {
+    char out[64];
+    CHECK(get_card_display_path("/card/Music/a.mp3", out, sizeof(out)));
+    CHECK(strcmp(out, "<SDCARD>/Music/a.mp3") == 0);
+    CHECK(get_card_display_path("/card", out, sizeof(out)));
+    CHECK(strcmp(out, "<SDCARD>") == 0);
+}
+
+TEST(card_display_path_keeps_a_path_that_is_not_on_the_card) {
+    char out[64];
+    CHECK(get_card_display_path("/cards/a.mp3", out, sizeof(out)));
+    CHECK(strcmp(out, "/cards/a.mp3") == 0);
+    CHECK(get_card_display_path("/tmp/a.mp3", out, sizeof(out)));
+    CHECK(strcmp(out, "/tmp/a.mp3") == 0);
+}
+
+TEST(card_display_path_reports_a_small_buffer) {
+    char out[8];
+    CHECK(!get_card_display_path("/card/Music", out, sizeof(out)));
+}
+
 TEST(userdata_path_resolves_a_relative_path) {
     char path[512];
     CHECK_EQ_INT(userdata_snpath("radio/stations.txt", path, sizeof(path)),
@@ -568,6 +589,9 @@ int main(int argc, char** argv) {
 
     RUN(shell_escape_neutralizes_what_double_quotes_do_not);
     RUN(shell_escape_stays_inside_its_buffer);
+    RUN(card_display_path_shortens_the_path_of_the_card);
+    RUN(card_display_path_keeps_a_path_that_is_not_on_the_card);
+    RUN(card_display_path_reports_a_small_buffer);
     RUN(userdata_path_resolves_a_relative_path);
     RUN(userdata_path_resolves_an_empty_path);
     RUN(userdata_path_reports_a_small_buffer);

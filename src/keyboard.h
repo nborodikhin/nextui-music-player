@@ -21,12 +21,9 @@ void Keyboard_init(void);
 //
 // max_bytes is capped to (KEYBOARD_MAX_INPUT - 1).
 //
-// The field opens with `initial_text`, cut to the whole characters that fit in
-// that limit. Pass NULL in `initial_text` to open an empty field.
-//
 // Note: keyboard runs its own frame loop, so the caller's frame is over when it
 // returns. Callers must re-read the SDL_Surface from DisplayContext.
-char* Keyboard_open(const char* prompt, const char* initial_text, size_t max_bytes);
+char* Keyboard_open(const char* prompt, size_t max_bytes);
 
 #ifdef __cplusplus
 }

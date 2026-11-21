@@ -1397,6 +1397,29 @@ TEST(test_multiline_text_starts_a_line_at_a_line_break) {
     CHECK(f.surfaceHasPixels(SDL_Rect{0, 2 * line, 200, line}));
 }
 
+// With the wrap by words, a long word after a short one starts a line of its own
+TEST(test_multiline_word_wrap_moves_a_long_word_to_the_next_line) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("- abcdefghijklmnopqrstuvwxyz");
+    f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
+    CHECK(!f.surfaceHasPixels(SDL_Rect{50, 0, 50, getMultilineHeight(1)}));
+}
+
+// With the wrap by characters, the first line takes each character that fits
+TEST(test_multiline_character_wrap_fills_the_line) {
+    Fixture f;
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setWrap(MultilineTextView::Wrap::Characters);
+    view.setText("- abcdefghijklmnopqrstuvwxyz");
+    f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
+    CHECK(view.getSize().h > getMultilineHeight(1));
+    CHECK(f.surfaceHasPixels(SDL_Rect{50, 0, 50, getMultilineHeight(1)}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{100, 0, kScreenW - 100, kScreenH}));
+}
+
 // A word that is wider than the view breaks at a character
 TEST(test_multiline_long_word_breaks_at_a_character) {
     Fixture f;
@@ -1498,6 +1521,8 @@ int main() {
     RUN(test_dialog_draws_again_only_for_a_change);
     RUN(test_multiline_text_wraps_at_a_space);
     RUN(test_multiline_text_starts_a_line_at_a_line_break);
+    RUN(test_multiline_word_wrap_moves_a_long_word_to_the_next_line);
+    RUN(test_multiline_character_wrap_fills_the_line);
     RUN(test_multiline_long_word_breaks_at_a_character);
     RUN(test_multiline_spans_share_a_line);
     RUN(test_multiline_same_text_is_not_dirty);

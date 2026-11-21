@@ -8,10 +8,12 @@
 
 #include "album_art.h"
 #include "downloader.h"
+#include "error.h"
 #include "selfupdate.h"
 #include "settings.h"
 #include "ui/about_page.hpp"
 #include "ui/confirm_dialog_page.hpp"
+#include "ui/errors_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
@@ -135,6 +137,7 @@ std::string formatSize(long bytes) {
 }
 
 enum class SettingItem : uint8_t {
+    Errors,
     ScreenOff,
     BassFilter,
     SoftLimiter,
@@ -180,7 +183,11 @@ constexpr SettingRow kRows[] = {
 #endif
 };
 
-constexpr int kRowCount = static_cast<int>(std::size(kRows));
+/** The first row while the error store holds an error */
+constexpr SettingRow kErrorsRow = {SettingItem::Errors, [] { return std::string("Errors"); }, nullptr, nullptr};
+
+/** The count of the items of Settings, each a value of SettingItem from 0 */
+constexpr size_t kSettingItemCount = std::size(kRows) + 1;
 
 constexpr const char* kLeftHints[]        = {"START", "CONTROLS", nullptr};
 constexpr const char* kValueRightHints[]  = {"B", "BACK", "LEFT/RIGHT", "CHANGE", nullptr};
@@ -190,35 +197,61 @@ constexpr const char* kActionRightHints[] = {"B", "BACK", "A", "OPEN", nullptr};
 class SettingsListAdapter final : public ListAdapter {
 public:
     SettingsListAdapter() {
-        for (int index = 0; index < kRowCount; index++) {
-            auto row = std::make_shared<ListRowView>(Fonts_getMedium());
-            if (kRows[index].getValue) {
-                auto value = std::make_shared<TextView>(Fonts_getMedium(), false);
-                value->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-                row->setRightView(value);
-                values[static_cast<size_t>(index)] = std::move(value);
-            }
-            rows[static_cast<size_t>(index)] = std::move(row);
-        }
+        for (const SettingRow& row : kRows) rows.push_back(&row);
     }
 
-    int getCount() const override { return kRowCount; }
-    long getItemId(int index) const override { return index; }
-    std::shared_ptr<ListItemView> getView(int index) override { return rows[static_cast<size_t>(index)]; }
+    /**
+     * Shows the row of the errors first when `show` is true.
+     * Returns: true when the rows changed
+     */
+    bool setErrorsRowShown(bool show) {
+        const bool shown = !rows.empty() && rows.front()->item == SettingItem::Errors;
+        if (show == shown) return false;
+        if (show) {
+            rows.insert(rows.begin(), &kErrorsRow);
+        } else {
+            rows.erase(rows.begin());
+        }
+        return true;
+    }
 
-    ListRowView& getRow(int index) { return *rows[static_cast<size_t>(index)]; }
+    const SettingRow& getSettingRow(int index) const { return *rows[static_cast<size_t>(index)]; }
+
+    int getCount() const override { return static_cast<int>(rows.size()); }
+    long getItemId(int index) const override { return static_cast<long>(getSettingRow(index).item); }
+
+    /** Each item keeps its view while Settings shows, thus a row keeps it when the rows change. */
+    std::shared_ptr<ListItemView> getView(int index) override {
+        const SettingRow& row       = getSettingRow(index);
+        const size_t item           = static_cast<size_t>(row.item);
+        std::shared_ptr<ListRowView>& view = rowViews[item];
+        if (!view) {
+            view = std::make_shared<ListRowView>(Fonts_getMedium());
+            if (row.getValue) {
+                auto value = std::make_shared<TextView>(Fonts_getMedium(), false);
+                value->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+                view->setRightView(value);
+                values[item] = std::move(value);
+            }
+        }
+        return view;
+    }
+
+    ListRowView& getRow(int index) { return static_cast<ListRowView&>(*getView(index)); }
 
     /** Sets the value of the row at `index`, with the arrows of a selected row. */
     void setValue(int index, bool selected) {
-        const SettingRow& row = kRows[index];
+        const SettingRow& row = getSettingRow(index);
         if (!row.getValue) return;
+        getView(index);
         const std::string value = row.getValue();
-        values[static_cast<size_t>(index)]->setText(selected ? "< " + value + " >" : value);
+        values[static_cast<size_t>(row.item)]->setText(selected ? "< " + value + " >" : value);
     }
 
 private:
-    std::array<std::shared_ptr<ListRowView>, kRowCount> rows;
-    std::array<std::shared_ptr<TextView>, kRowCount> values;
+    std::vector<const SettingRow*> rows;
+    std::array<std::shared_ptr<ListRowView>, kSettingItemCount> rowViews;
+    std::array<std::shared_ptr<TextView>, kSettingItemCount> values;
 };
 
 class SettingsPageImpl final : public UiPageImpl<SettingsPage>, private ListScreenListener {
@@ -235,6 +268,7 @@ public:
     HelpId getHelpId() const override { return HELP_SETTINGS; }
 
     void onEnter() override {
+        rows.setErrorsRowShown(Error_hasReports());
         screenView.getListView().setAdapter(rows);
         refreshLabels();
         list.start();
@@ -267,9 +301,10 @@ private:
      * other row is not handled, thus the list moves one page.
      */
     bool onLeftRight(int listItemPosition, HorizontalDirection direction, bool isRepeat) override {
-        if (!kRows[listItemPosition].cycle) return false;
+        const SettingRow& row = rows.getSettingRow(listItemPosition);
+        if (!row.cycle) return false;
         if (isRepeat) return true;
-        kRows[listItemPosition].cycle(direction);
+        row.cycle(direction);
         // A new update channel forgets the last check, thus the label of About can change
         refreshLabels();
         return true;
@@ -280,14 +315,15 @@ private:
         selectedIndex = listItemPosition;
         if (selectedIndex < 0) return;
         rows.setValue(selectedIndex, true);
-        const bool hasValue = kRows[selectedIndex].getValue != nullptr;
+        const bool hasValue = rows.getSettingRow(selectedIndex).getValue != nullptr;
         screenView.getButtonHintsView().setHints(kLeftHints, hasValue ? kValueRightHints : kActionRightHints);
     }
 
-    /** Reads the label and the value of each row again. */
+    /** Shows or hides the row of the errors, and reads the label and the value of each row again. */
     void refreshLabels() {
-        for (int index = 0; index < kRowCount; index++) {
-            const bool changed = rows.getRow(index).setText(kRows[index].getLabel());
+        if (rows.setErrorsRowShown(Error_hasReports())) list.notifyDataChanged();
+        for (int index = 0; index < rows.getCount(); index++) {
+            const bool changed = rows.getRow(index).setText(rows.getSettingRow(index).getLabel());
             if (changed && index == selectedIndex) list.restartRowScrolling();
             rows.setValue(index, index == selectedIndex);
         }
@@ -295,7 +331,7 @@ private:
 
     void activate(int index) {
         if (index < 0) return;
-        const SettingRow& row = kRows[index];
+        const SettingRow& row = rows.getSettingRow(index);
         // A also changes a value
         if (row.cycle) {
             onLeftRight(index, HorizontalDirection::Right, false);
@@ -310,6 +346,7 @@ private:
                 break;
             case SettingItem::UpdateYtdlp: getNavigator().open(YtdlpInstallPage{}); break;
             case SettingItem::About:       getNavigator().open(AboutPage{}); break;
+            case SettingItem::Errors:      getNavigator().open(ErrorsPage{}); break;
 #ifdef DEBUG
             case SettingItem::InputTest:   getNavigator().open(InputTestPage{}); break;
 #endif

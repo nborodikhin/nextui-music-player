@@ -16,6 +16,7 @@ extern "C" {
 
 #include "psa/crypto.h"
 #include "debug.h"
+#include "error.h"
 #include "player.h"
 #include "selfupdate.h"
 
@@ -50,6 +51,9 @@ extern "C" {
 #include "scoped_init.hpp"
 
 static DisplayContext* display;
+
+/** How many errors of each class the store keeps for the Errors page */
+constexpr int kErrorCapacity = 10;
 
 // A handler must call nothing that is not async-signal-safe, thus it only
 // records the request. ModuleCommon_handleGlobalInput() acts on it, thus the
@@ -107,6 +111,7 @@ static void print_usage(const char* program) {
 int main(int argc, char* argv[]) {
     Debug_init();
     ScopedInit testControl{TestControl_quit};
+    ScopedInit errors{[] { Error_init(kErrorCapacity); }, Error_quit};
 
     // Read the options before anything else, so --help gives its text without a
     // display, and an option that is not correct stops the app at once.

@@ -8,6 +8,7 @@
 
 #include "db_statement.h"
 #include "debug.h"
+#include "error.h"
 
 static void set_error_va(DbStatement* statement, const char* format, va_list args) {
     vsnprintf(statement->errmsg, sizeof(statement->errmsg), format, args);
@@ -22,7 +23,7 @@ static void set_error(DbStatement* statement, const char* format, ...) {
 }
 
 // Records a label for the operation, then the message of the last SQLite call on the
-// connection: "bind 3: column index out of range".
+// connection: "bind 3: column index out of range". Reports the same text to the error store.
 static void set_sqlite_error(DbStatement* statement, const char* format, ...) {
     char label[64];
     va_list args;
@@ -30,6 +31,7 @@ static void set_sqlite_error(DbStatement* statement, const char* format, ...) {
     vsnprintf(label, sizeof(label), format, args);
     va_end(args);
     set_error(statement, "%s: %s", label, sqlite3_errmsg(statement->database));
+    Error_report(ERROR_CLASS_DATABASE, statement->errmsg);
 }
 
 void DbStatement_mark_failed(DbStatement* statement, const char* format, ...) {
