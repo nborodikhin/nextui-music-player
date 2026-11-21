@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 
+#include "ui_fonts.h"
 #include "utf8.h"
 
 namespace {
@@ -18,9 +19,14 @@ class LineBuilder {
 public:
     using Emit = std::function<void(const std::string& text, ThemeRole role, int x, int line)>;
 
-    LineBuilder(TTF_Font* font, int width, Emit emit) : font(font), width(width), emit(std::move(emit)) {}
+    LineBuilder(TTF_Font* font, int width, bool breakAnywhere, Emit emit)
+        : font(font), width(width), breakAnywhere(breakAnywhere), emit(std::move(emit)) {}
 
     void addSpan(const TextSpan& span) {
+        if (breakAnywhere) {
+            addCharacters(span);
+            return;
+        }
         const std::string& text = span.text;
         size_t i                = 0;
         while (i < text.size()) {
@@ -46,6 +52,24 @@ public:
     }
 
 private:
+    /** Puts each character after the last one, and starts a line where the next one does not fit */
+    void addCharacters(const TextSpan& span) {
+        const std::string& text = span.text;
+        size_t i                = 0;
+        while (i < text.size()) {
+            if (text[i] == '\n') {
+                startLine(false);
+                i++;
+                continue;
+            }
+            const size_t next          = i + std::max(1, UTF8_charBytes(&text[i]));
+            const std::string character = text.substr(i, next - i);
+            if (lineHasText && getEndWith(character, span.role) > width) startLine(true);
+            append(character, span.role);
+            i = next;
+        }
+    }
+
     void addWord(const std::string& word, ThemeRole role) {
         // The spaces at the start of a line that a wrap made do not show
         const std::string lead = lineHasText || !lineWrapped ? spaces : std::string();
@@ -114,6 +138,7 @@ private:
 
     TTF_Font* font;
     int width;
+    bool breakAnywhere;
     Emit emit;
     std::string spaces;
     std::string run;
@@ -130,6 +155,14 @@ private:
 MultilineTextView::MultilineTextView(TTF_Font* font) : font(font) {}
 
 MultilineTextView::~MultilineTextView() { freeRuns(); }
+
+bool MultilineTextView::setWrap(Wrap newWrap) {
+    if (wrapMode == newWrap) return false;
+    wrapMode  = newWrap;
+    wrapStale = true;
+    dirty     = true;
+    return true;
+}
 
 bool MultilineTextView::setText(const std::string& newText) { return setText(SpannedText().add(newText)); }
 
@@ -167,7 +200,7 @@ void MultilineTextView::setContext(UiContext& context) {
 
 int MultilineTextView::getLineHeight() const {
     if (fixedLineHeight > 0) return fixedLineHeight;
-    return std::max(TTF_FontLineSkip(font), TTF_FontHeight(font));
+    return Fonts_getMetric(font, FONT_METRIC_LINE_HEIGHT);
 }
 
 void MultilineTextView::freeRuns() {
@@ -187,7 +220,7 @@ void MultilineTextView::wrap(int width) {
     // The text is white, thus the color mod of the draw gives it the color of its role
     //noinspection HardcodedColor
     const SDL_Color white = {255, 255, 255, 255};
-    LineBuilder builder(font, width, [this, white](const std::string& part, ThemeRole role, int x, int line) {
+    LineBuilder builder(font, width, wrapMode == Wrap::Characters, [this, white](const std::string& part, ThemeRole role, int x, int line) {
         runs.push_back(Run{TTF_RenderUTF8_Blended(font, part.c_str(), white), role, x, line});
     });
     for (const TextSpan& span : text.getSpans()) builder.addSpan(span);

@@ -39,6 +39,7 @@ typedef enum {
     FONT_METRIC_DESCENT,       // the baseline to the foot of the font, negative
     FONT_METRIC_HEIGHT,        // the whole of one line, the em box
     FONT_METRIC_LINE_SKIP,     // the baseline of one line to the baseline of the next
+    FONT_METRIC_LINE_HEIGHT,   // the room of one line of text: the line skip or the height, the larger
 } FontMetric;
 
 // Returns the metric of `font` in pixels. Returns 0 where there is no font, and 0

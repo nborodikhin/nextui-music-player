@@ -19,6 +19,13 @@ int layoutScreenTop(UiLayoutContext& context, UiView& titleView, UiView& statusV
 int layoutScreenBottom(UiLayoutContext& context, UiView& buttonHintsView);
 
 /**
+ * Lays out the frame of a full screen: the title view and the status view at the top, and the
+ * button hints at the bottom. Returns the rectangle of the body between them.
+ */
+SDL_Rect layoutScreenFrame(UiLayoutContext& context, UiView& titleView, UiView& statusView,
+                           UiView& buttonHintsView);
+
+/**
  * Lays out `view` in its measured size, in the middle of the width of the context and inside its
  * side margins, with its top at `y`. Pass a height in `maxHeight` to limit the height of the
  * view, or 0 for no limit. A text view with the height of its font has no space above its text.

@@ -17,7 +17,16 @@
  */
 class MultilineTextView : public UiView {
 public:
+    /** Where a line can break */
+    enum class Wrap {
+        Words,       // at a space, and inside a word only when the word is wider than a line
+        Characters,  // after any character, thus each line is as full as the width allows
+    };
+
     explicit MultilineTextView(TTF_Font* font);
+
+    /** Returns: true when the wrap changed */
+    bool setWrap(Wrap newWrap);
     ~MultilineTextView() override;
 
     /** Shows text in the primary role. Returns: true when the text changed */
@@ -56,6 +65,7 @@ private:
     int getLineHeight() const;
 
     TTF_Font* font;
+    Wrap wrapMode = Wrap::Words;
     SpannedText text;
     std::vector<Run> runs;
     int lineCount       = 0;

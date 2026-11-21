@@ -38,6 +38,14 @@ int layoutScreenBottom(UiLayoutContext& context, UiView& buttonHintsView) {
     return top;
 }
 
+SDL_Rect layoutScreenFrame(UiLayoutContext& context, UiView& titleView, UiView& statusView,
+                           UiView& buttonHintsView) {
+    const int padding = SCALE1(PADDING);
+    const int top     = layoutScreenTop(context, titleView, statusView);
+    const int bottom  = layoutScreenBottom(context, buttonHintsView);
+    return SDL_Rect{padding, top, context.getMaxSize().w - padding * 2, bottom - top};
+}
+
 int layoutCentered(UiLayoutContext& context, UiView& view, int y, int maxHeight) {
     const UiSize space        = context.getMaxSize();
     const int height          = maxHeight > 0 ? maxHeight : space.h;

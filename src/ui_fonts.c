@@ -26,6 +26,11 @@ int Fonts_getMetric(TTF_Font* font, FontMetric metric) {
         case FONT_METRIC_DESCENT:   return TTF_FontDescent(font);
         case FONT_METRIC_HEIGHT:    return TTF_FontHeight(font);
         case FONT_METRIC_LINE_SKIP: return TTF_FontLineSkip(font);
+        case FONT_METRIC_LINE_HEIGHT: {
+            int line_skip = TTF_FontLineSkip(font);
+            int height = TTF_FontHeight(font);
+            return line_skip > height ? line_skip : height;
+        }
 
         case FONT_METRIC_X_HEIGHT:     sample = 'x'; fallback = X_HEIGHT_OF_ASCENT;     break;
         case FONT_METRIC_CAP_HEIGHT:   sample = 'H'; fallback = CAP_HEIGHT_OF_ASCENT;   break;

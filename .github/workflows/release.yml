@@ -56,6 +56,9 @@ jobs:
       - name: Checkout Music Player
         uses: actions/checkout@v7
 
+      - name: Build and package debug
+        run: ./dev dist all --strict --debug --version "$VERSION"
+
       - name: Build and package release
         run: ./dev dist all --strict --version "$VERSION"
 

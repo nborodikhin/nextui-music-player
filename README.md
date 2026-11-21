@@ -28,6 +28,9 @@ Each release has one `.pakz` package for each platform:
 | Miyoo Flip                     | `Music.Player-my355.pakz`  |
 | Anbernic RG XX (H700) devices  | `Music.Player-h700.pakz`   |
 
+A `Music.Player-debug-<platform>.pakz` package holds a debug build, which writes
+more lines to the log. Install it only to help find the cause of a problem.
+
 1. Mount your NextUI SD card to a computer.
 2. Download the `.pakz` package for device from the latest release on Github.
 3. Copy the package to the root of the SD card

@@ -63,6 +63,14 @@ bool get_music_abspath(const char* rel, char* out, size_t out_size);
 bool get_music_relpath(const char* path, char* out, size_t out_size);
 
 /**
+ * Write an absolute path to out for the user, with "<SDCARD>" in place of the path of the card
+ * at its start. A path that is not on the card is written as it is.
+ *
+ * @return false if the result does not fit in out
+ */
+bool get_card_display_path(const char* path, char* out, size_t out_size);
+
+/**
  * Write the display name of a file to out: the filename without its extension.
  */
 void get_file_display_name(const char* filename, char* out, size_t out_size);
