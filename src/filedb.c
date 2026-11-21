@@ -9,12 +9,14 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "defines.h"
 #include "api.h"
 #include "browser.h"
 #include "db.h"
+#include "debug.h"
 #include "file_utils.h"
 #include "player.h"
 
@@ -286,16 +288,26 @@ static bool rows_have_file(const DbReadDirResult* rows, const char* name) {
 // Reads the visible directories and regular files of a directory. Returns false when the
 // directory cannot be read in full; a caller then keeps its rows. Pass a flag in gone to
 // learn whether the directory no longer exists as a real directory.
+// Returns the path of a directory of the music root for the log.
+static const char* log_path(const char* relative_path) {
+    return relative_path && relative_path[0] ? relative_path : "(root)";
+}
+
 static bool read_card_directory(const char* relative_path, CardEntry** output,
                                 int* count, bool* gone) {
     *gone = false;
     int descriptor = open_card_directory(relative_path);
     if (descriptor < 0) {
-        *gone = errno == ENOENT || errno == ENOTDIR || errno == ELOOP;
+        int open_error = errno;
+        *gone = open_error == ENOENT || open_error == ENOTDIR || open_error == ELOOP;
+        LOG_warn("[FileDb] cannot open the directory %s: %s\n", log_path(relative_path),
+                 strerror(open_error));
         return false;
     }
     DIR* directory = fdopendir(descriptor);
     if (!directory) {
+        LOG_error("[FileDb] cannot read the directory %s: %s\n", log_path(relative_path),
+                  strerror(errno));
         close(descriptor);
         return false;
     }
@@ -311,6 +323,10 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
         struct dirent* item = readdir(directory);
         if (!item) {
             failed = errno != 0;
+            if (failed) {
+                LOG_error("[FileDb] cannot read the directory %s after %d entries: %s\n",
+                          log_path(relative_path), entry_count, strerror(errno));
+            }
             break;
         }
         if (filedb_is_stopping()) {
@@ -318,17 +334,27 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
             break;
         }
         if (item->d_name[0] == '.') continue;
-        if (strlen(item->d_name) >= sizeof(entries[0].name)) continue;
+        if (strlen(item->d_name) >= sizeof(entries[0].name)) {
+            LOG_warn("[FileDb] skip %s/%s: the name is too long\n", log_path(relative_path),
+                     item->d_name);
+            continue;
+        }
 
         struct stat status;
         if (fstatat(dirfd(directory), item->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0) {
             // An entry removed after readdir() is absent. Any other error does not show
             // that the entry is gone.
             if (errno == ENOENT) continue;
+            LOG_error("[FileDb] cannot read %s/%s: %s\n", log_path(relative_path),
+                      item->d_name, strerror(errno));
             failed = true;
             break;
         }
-        if (S_ISLNK(status.st_mode)) continue;
+        if (S_ISLNK(status.st_mode)) {
+            LOG_warn("[FileDb] skip %s/%s: symbolic link\n", log_path(relative_path),
+                     item->d_name);
+            continue;
+        }
 
         CardEntry entry = {
             .is_dir = S_ISDIR(status.st_mode),
@@ -340,6 +366,8 @@ static bool read_card_directory(const char* relative_path, CardEntry** output,
             int next_capacity = capacity ? capacity * 2 : 32;
             CardEntry* next = (CardEntry*)realloc(entries, (size_t)next_capacity * sizeof(*next));
             if (!next) {
+                LOG_error("[FileDb] no memory to list the directory %s\n",
+                          log_path(relative_path));
                 free(entries);
                 closedir(directory);
                 return false;
@@ -385,6 +413,7 @@ static bool check_unknown_files(const DbReadDirResult* rows) {
 static bool scan_directory(int dir_id, IdQueue* children) {
     DbDirResult* directory_result = Db_getDir(dir_id);
     if (!directory_result) {
+        LOG_error("[FileDb] cannot read the directory %d from the database\n", dir_id);
         Db_freeResult(directory_result);
         return false;
     }
@@ -404,6 +433,8 @@ static bool scan_directory(int dir_id, IdQueue* children) {
 
     DbReadDirResult* rows = Db_readDir(dir_id);
     if (!rows) {
+        LOG_error("[FileDb] cannot read the entries of %s from the database\n",
+                  log_path(directory_row->path));
         free(card_entries);
         Db_freeResult(directory_result);
         return false;
@@ -447,8 +478,11 @@ static bool scan_directory(int dir_id, IdQueue* children) {
                     ? snprintf(relative, sizeof(relative), "%s/%s",
                                directory_row->path, card_entries[i].name)
                     : snprintf(relative, sizeof(relative), "%s", card_entries[i].name);
-                if (length < 0 || (size_t)length >= sizeof(relative) ||
-                    !Db_addDir(dir_id, relative, card_entries[i].name)) {
+                if (length < 0 || (size_t)length >= sizeof(relative)) {
+                    LOG_error("[FileDb] the path of %s/%s is too long\n",
+                              log_path(directory_row->path), card_entries[i].name);
+                    success = false;
+                } else if (!Db_addDir(dir_id, relative, card_entries[i].name)) {
                     success = false;
                 }
             } else if (!card_entries[i].is_dir &&
@@ -457,21 +491,40 @@ static bool scan_directory(int dir_id, IdQueue* children) {
             }
         }
         if (success) success = Db_commit();
-        if (!success) Db_rollback();
+        if (!success) {
+            Db_rollback();
+            LOG_error("[FileDb] cannot save the entries of %s to the database\n",
+                      log_path(directory_row->path));
+        }
     }
 
     if (success) {
         DbReadDirResult* updated = Db_readDir(dir_id);
         if (!updated) {
+            LOG_error("[FileDb] cannot read the entries of %s from the database\n",
+                      log_path(directory_row->path));
             success = false;
         } else {
             for (int i = 0; i < updated->dir_count; i++) {
                 if (!id_queue_push(children, updated->dirs[i].id)) {
+                    LOG_error("[FileDb] no memory to queue the directories of %s\n",
+                              log_path(directory_row->path));
                     success = false;
                     break;
                 }
             }
-            if (success) success = check_unknown_files(updated);
+            if (success) {
+                success = check_unknown_files(updated);
+                if (!success) {
+                    LOG_error("[FileDb] cannot save the file types of %s to the database\n",
+                              log_path(directory_row->path));
+                }
+            }
+            if (success) {
+                LOG_debug("[FileDb] scanned %s: %d directories, %d files\n",
+                          log_path(directory_row->path), updated->dir_count,
+                          updated->file_count);
+            }
             Db_freeResult(updated);
         }
     }
@@ -493,10 +546,12 @@ static bool scan_directory_tree(int dir_id) {
     IdQueue directories = {0};
     IdSet listed = {0};
     bool success = id_queue_push(&directories, dir_id);
+    if (!success) LOG_error("[FileDb] no memory to scan the tree of the directory %d\n", dir_id);
     while (success && !filedb_is_stopping()) {
         int current = 0;
         if (!id_queue_pop(&directories, &current)) break;
         if (!id_set_add(&listed, current)) {
+            LOG_error("[FileDb] no memory to scan the directory %d\n", current);
             success = false;
             break;
         }
@@ -506,6 +561,10 @@ static bool scan_directory_tree(int dir_id) {
         for (size_t i = children.head; success && i < children.count; i++) {
             if (!id_set_contains(&listed, children.items[i])) {
                 success = id_queue_push(&directories, children.items[i]);
+                if (!success) {
+                    LOG_error("[FileDb] no memory to queue the directory %d\n",
+                              children.items[i]);
+                }
             }
         }
         id_queue_free(&children);
@@ -863,6 +922,19 @@ static bool execute_request(const FileDbRequest* request) {
     return false;
 }
 
+// Writes the result of the first walk of the whole tree to the log.
+static void log_walk_result(int root_id, int directories, int failures,
+                            const struct timespec* start) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long long ms = (long long)(now.tv_sec - start->tv_sec) * 1000 +
+                   (now.tv_nsec - start->tv_nsec) / 1000000;
+    LOG_info("[FileDb] scan done in %lld ms: %d directories, %d failed, %d files, "
+             "%d music files\n",
+             ms, directories, failures, Db_countFiles(root_id, DB_FILE_TYPE_ALL, true),
+             Db_countFiles(root_id, DB_FILE_TYPE_MUSIC, true));
+}
+
 static void* filedb_thread_main(void* unused) {
     (void)unused;
     IdQueue directories = {0};
@@ -870,7 +942,10 @@ static void* filedb_thread_main(void* unused) {
 
     char music_path[1024];
     if (get_music_abspath("", music_path, sizeof(music_path))) {
-        mkdir_p(music_path);
+        LOG_info("[FileDb] music directory %s\n", music_path);
+        if (!mkdir_p(music_path)) {
+            LOG_error("[FileDb] cannot create %s: %s\n", music_path, strerror(errno));
+        }
     }
     scan_playlists();
     // The walk lists this directory first and lists it again in its place in
@@ -878,7 +953,20 @@ static void* filedb_thread_main(void* unused) {
     int first_directory = last_played_directory();
     int root_id = Db_getRootDirId();
     if (first_directory == root_id) first_directory = -1;
-    if (root_id >= 0) id_queue_push(&directories, root_id);
+    // The counts of the first walk of the whole tree, for the log. A walk that does not
+    // start has no counts.
+    bool walk_reported = true;
+    if (root_id < 0) {
+        LOG_error("[FileDb] the database has no root directory, thus no scan starts\n");
+    } else if (!id_queue_push(&directories, root_id)) {
+        LOG_error("[FileDb] no memory to start the scan\n");
+    } else {
+        walk_reported = false;
+    }
+    int walk_directories = 0;
+    int walk_failures = 0;
+    struct timespec walk_start;
+    clock_gettime(CLOCK_MONOTONIC, &walk_start);
 
     for (;;) {
         FileDbRequest request;
@@ -886,6 +974,11 @@ static void* filedb_thread_main(void* unused) {
         bool do_first = false;
         bool do_request = false;
         bool do_directory = false;
+
+        if (!walk_reported && directories.head == directories.count) {
+            walk_reported = true;
+            log_walk_result(root_id, walk_directories, walk_failures, &walk_start);
+        }
 
         pthread_mutex_lock(&file_db.mutex);
         while (!file_db.stop && file_db.requests.head == file_db.requests.count &&
@@ -922,13 +1015,20 @@ static void* filedb_thread_main(void* unused) {
         if (do_directory) {
             if (filedb_is_stopping()) continue;
             if (id_set_contains(&listed, directory_id)) continue;
-            if (!id_set_add(&listed, directory_id)) continue;
+            if (!id_set_add(&listed, directory_id)) {
+                LOG_error("[FileDb] no memory to scan the directory %d\n", directory_id);
+                walk_directories++;
+                walk_failures++;
+                continue;
+            }
             IdQueue children = {0};
             bool success = scan_directory(directory_id, &children);
             if (success) {
                 for (size_t i = children.head; i < children.count; i++) {
                     if (!id_set_contains(&listed, children.items[i])) {
                         if (!id_queue_push(&directories, children.items[i])) {
+                            LOG_error("[FileDb] no memory to queue the directory %d\n",
+                                      children.items[i]);
                             success = false;
                             break;
                         }
@@ -936,6 +1036,8 @@ static void* filedb_thread_main(void* unused) {
                 }
             }
             id_queue_free(&children);
+            walk_directories++;
+            if (!success) walk_failures++;
             continue;
         }
     }
