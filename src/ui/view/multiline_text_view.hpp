@@ -13,7 +13,7 @@
 /**
  * A text on one or more lines, as wide as the space that the parent gives. A line breaks at a
  * space, and a word that is wider than a line breaks at a character. A line break in the text
- * starts a new line. The view is as high as its lines.
+ * starts a new line. The view is as high as the lines that it shows.
  */
 class MultilineTextView : public UiView {
 public:
@@ -24,6 +24,18 @@ public:
     bool setText(const std::string& text);
     /** Returns: true when the text changed */
     bool setText(const SpannedText& text);
+
+    /** Pass the height of a line in pixels, or 0 for the line spacing of the font. */
+    void setLineHeight(int height);
+
+    /** Shows the first `count` lines only. Pass 0 to show each line. */
+    void setMaxLines(int count);
+
+    /**
+     * Pass true in `cutToSpace` to show only the lines that fit in the height that the parent
+     * gives. The default is each line, also below that height.
+     */
+    void setCutToSpace(bool cutToSpace);
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
@@ -46,8 +58,12 @@ private:
     TTF_Font* font;
     SpannedText text;
     std::vector<Run> runs;
-    int lineCount    = 0;
-    int wrappedWidth = -1;
+    int lineCount       = 0;
+    int shownLineCount  = 0;
+    int fixedLineHeight = 0;
+    int maxLines        = 0;
+    bool cutToSpace     = false;
+    int wrappedWidth    = -1;
     bool wrapStale   = true;
     bool dirty       = true;
 };

@@ -7,26 +7,10 @@ extern "C" {
 }
 
 void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
-    const UiSize screen   = context.getMaxSize();
-    const int padding     = SCALE1(PADDING);
-    const int pillHeight  = SCALE1(PILL_SIZE);
-    const SDL_Rect topRow = {0, 0, screen.w, padding + pillHeight};
-
-    // The status group draws first and gives its width, thus the title takes the room that is
-    // left and never runs under it
-    UiLayoutContext statusMeasuring = context.createMeasuringContext();
-    const int statusWidth           = statusMeasuring.layoutChild(parts.statusView, topRow).getSize().w;
-    const SDL_Rect statusRect       = {screen.w - padding - statusWidth, padding, statusWidth, pillHeight};
-    context.layoutChild(parts.statusView, statusRect);
-
-    // The same inset on each side, thus the title and the status group keep one gap
-    const int titleX          = padding + SCALE1(BUTTON_PADDING);
-    const int titleWidth      = screen.w - padding - SCALE1(BUTTON_PADDING) - statusWidth - titleX;
-    UiLayoutContext measuring = context.createMeasuringContext();
-    const SDL_Rect titleRoom  = {0, 0, titleWidth, pillHeight};
-    const int titleHeight     = measuring.layoutChild(parts.titleView, titleRoom).getSize().h;
-    const int titleY          = padding + (pillHeight - titleHeight) / 2;
-    context.layoutChild(parts.titleView, SDL_Rect{titleX, titleY, titleWidth, titleHeight});
+    const UiSize screen  = context.getMaxSize();
+    const int padding    = SCALE1(PADDING);
+    const int pillHeight = SCALE1(PILL_SIZE);
+    layoutScreenTop(context, parts.titleView, parts.statusView);
 
     // The first row starts where the top pill row ends. The list keeps no room for the down
     // indicator, which sits under the last row, also over the button hints.
@@ -40,7 +24,7 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
     const SDL_Rect upRect         = {(screen.w - upSize.w) / 2, listY - upSize.h, upSize.w, upSize.h};
     context.layoutChild(parts.scrollUpView, upRect);
     context.layoutChild(parts.listView, SDL_Rect{padding, listY, screen.w - padding * 2, listHeight});
-    context.layoutChild(parts.buttonHintsView, SDL_Rect{0, screen.h - padding - pillHeight, screen.w, pillHeight});
+    layoutScreenBottom(context, parts.buttonHintsView);
 
     const int first = parts.listView.getFirstVisibleIndex();
     const int last  = parts.listView.getLastVisibleIndex();
@@ -57,22 +41,20 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
 }
 
 void ListScreenView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    titleView.setContext(context);
-    statusView.setContext(context);
+    ScreenView::setContext(context);
     listView.setContext(context);
     scrollUpView.setContext(context);
     scrollDownView.setContext(context);
-    buttonHintsView.setContext(context);
 }
 
 void ListScreenView::layout(UiLayoutContext& context) {
+    // The scroll indicators sit over the pill rows, thus the list screen lays out the whole screen
     layoutListScreen(context, ListScreenParts{
-                                  .titleView       = titleView,
-                                  .statusView      = statusView,
+                                  .titleView       = getTitleView(),
+                                  .statusView      = getStatusView(),
                                   .listView        = listView,
                                   .scrollUpView    = scrollUpView,
                                   .scrollDownView  = scrollDownView,
-                                  .buttonHintsView = buttonHintsView,
+                                  .buttonHintsView = getButtonHintsView(),
                               });
 }

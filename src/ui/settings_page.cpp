@@ -17,6 +17,7 @@
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/text_view.hpp"
+#include "ui/wifi_dialog_page.hpp"
 #include "ui/ytdlp_install_page.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
@@ -308,7 +309,13 @@ private:
                     refreshLabels();
                 });
                 break;
-            case SettingItem::UpdateYtdlp: getNavigator().open(YtdlpInstallPage{}); break;
+            case SettingItem::UpdateYtdlp:
+                // The downloader starts before the network is up, thus it does not resume its queue
+                Downloader_init();
+                getNavigator().openForResult(WifiDialogPage{}, [this](const bool& connected) {
+                    if (connected) getNavigator().open(YtdlpInstallPage{});
+                });
+                break;
             case SettingItem::About:       getNavigator().open(AboutPage{}); break;
 #ifdef DEBUG
             case SettingItem::InputTest:   getNavigator().open(InputTestPage{}); break;
