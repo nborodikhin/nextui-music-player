@@ -20,8 +20,8 @@
 
 // One release with its notes fits the first. The notes of the recent releases
 // of the Beta channel do not.
-#define RELEASE_JSON_MAX      32768
-#define RELEASE_LIST_JSON_MAX 262144
+#define RELEASE_JSON_MAX      131072
+#define RELEASE_LIST_JSON_MAX 1048576
 #define RELEASE_LIST_COUNT    10
 
 // How the progress bar is shared out. Download dominates, but unpacking and

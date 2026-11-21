@@ -45,7 +45,6 @@ DEPS_LOCK = "deps/.fetch.lock"
 CONTAINER_PROJECT = "/root/workspace/nextui-music-player"
 DIST_DIR = ROOT / "dist"
 DIST_PAK = DIST_DIR / PAK_NAME
-DIST_ZIP = DIST_DIR / "Music.Player.pak.zip"
 # Each platform folder holds the tree that its .pakz package puts at the root
 # of the SD card.
 DIST_PAKZ_DIR = DIST_DIR / "pakz"
@@ -2969,13 +2968,25 @@ def command_clean(args):
     return 0
 
 
-def remove_packages():
-    """Remove the packages of an earlier run, thus dist/ holds only the
-    packages of this run."""
-    if DIST_ZIP.exists():
-        DIST_ZIP.unlink()
-    for archive in DIST_DIR.glob("Music.Player-*.pakz"):
-        archive.unlink()
+def dist_archive_name(kind, platform=None):
+    """Return the file name of a package in dist/: the pak zip when `platform` is
+    None, otherwise the .pakz package of `platform`. A debug package has "-debug"
+    in its name, thus it cannot replace a release package."""
+    base = "Music.Player" if kind == "release" else "Music.Player-" + kind
+    if platform is None:
+        return base + ".pak.zip"
+    return "{}-{}.pakz".format(base, platform)
+
+
+def remove_packages(kind):
+    """Remove the packages of `kind` of an earlier run, thus dist/ holds only the
+    packages of this run, and the packages of the other kind."""
+    names = [dist_archive_name(kind)]
+    names += [dist_archive_name(kind, platform) for platform in DEVICE_PLATFORMS]
+    for name in names:
+        archive = DIST_DIR / name
+        if archive.exists():
+            archive.unlink()
     if DIST_PAKZ_DIR.exists():
         shutil.rmtree(DIST_PAKZ_DIR)
 
@@ -2990,15 +3001,15 @@ def command_dist(args):
     check_dependencies(strict=args.strict and not args.allow_unpinned)
     runtime = container_runtime(args)
     build_platforms(platforms, runtime, args.kind, args.version)
-    remove_packages()
+    remove_packages(args.kind)
     package = stage_package(platforms, DIST_PAK, strict=args.strict)
     print("Created " + str(package.relative_to(ROOT)))
-    archive = create_zip(package, DIST_ZIP)
+    archive = create_zip(package, DIST_DIR / dist_archive_name(args.kind))
     print("Created " + str(archive.relative_to(ROOT)))
     for platform in platforms:
         source = DIST_PAKZ_DIR / platform
         stage_package((platform,), source / "Tools" / platform / PAK_NAME, strict=args.strict)
-        archive = create_zip(source, DIST_DIR / "Music.Player-{}.pakz".format(platform))
+        archive = create_zip(source, DIST_DIR / dist_archive_name(args.kind, platform))
         print("Created " + str(archive.relative_to(ROOT)))
     return 0
 
