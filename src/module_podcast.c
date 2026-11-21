@@ -438,7 +438,7 @@ ModuleExitReason PodcastModule_run(DisplayContext* display) {
                             dirty = 1;
                             break;
                         }
-                        char* query = Keyboard_open("Search podcasts", sizeof(podcast_search_query) - 1);
+                        char* query = Keyboard_open("Search podcasts", podcast_search_query, sizeof(podcast_search_query) - 1);
                         if (query && query[0]) {
                             strncpy(podcast_search_query, query, sizeof(podcast_search_query) - 1);
                             Podcast_startSearch(podcast_search_query);
