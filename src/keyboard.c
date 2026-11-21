@@ -177,7 +177,7 @@ static void backspace(KeyboardState *state) {
     state->text_version++;
 }
 
-char *Keyboard_open(const char *prompt, const char *initial_text, size_t max_bytes) {
+char *Keyboard_open(const char *prompt, size_t max_bytes) {
     DisplayContext *display = DisplayHelper_current();
 
     size_t limit = KEYBOARD_MAX_INPUT - 1;
@@ -199,7 +199,6 @@ char *Keyboard_open(const char *prompt, const char *initial_text, size_t max_byt
         .shift = SHIFT_OFF,
         .pressed = false,
     };
-    UTF8_copy(state.text, state.text_limit + 1, initial_text);
     update_current_key(&state);
 
     bool confirmed = false;

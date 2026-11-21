@@ -1,3 +1,6 @@
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -9,7 +12,9 @@
 #include "db.h"
 #include "file_utils.h"
 #include "player.h"
+#include "error_stub.h"
 #include "filedb.h"
+#include "filedb_test.h"
 
 #ifndef TEST_TEMP_DIR
 #define TEST_TEMP_DIR "."
@@ -60,11 +65,14 @@ static void reset_test_tree(void) {
 
 static bool start_test(void) {
     reset_test_tree();
+    FileDb_setCardFunctions(NULL, NULL, NULL);
+    ErrorStub_clear();
     return Db_initInternal(FILEDB_DATABASE_PATH);
 }
 
 static void stop_test(void) {
     FileDb_quit();
+    FileDb_setCardFunctions(NULL, NULL, NULL);
     Db_quit();
     rm_rf(FILEDB_MUSIC_PATH);
     rm_rf(FILEDB_DATABASE_PATH);
@@ -255,6 +263,7 @@ TEST(symlink_is_not_listed) {
     CHECK(!outside_file);
     Db_freeResult(link);
     Db_freeResult(outside_file);
+    CHECK_EQ_INT(ErrorStub_count(ERROR_CLASS_FILE_SYSTEM), 0);
     rm_rf(outside);
     stop_test();
 }
@@ -364,6 +373,269 @@ TEST(directory_that_is_gone_loses_its_rows) {
     Db_freeResult(child);
     Db_freeResult(one);
     Db_freeResult(two);
+    CHECK_EQ_INT(ErrorStub_count(ERROR_CLASS_FILE_SYSTEM), 0);
+    stop_test();
+}
+
+// The reads of the card that a test makes fail. The fakes run on the thread of the worker, and
+// the test sets them only while the worker is idle.
+static const char* stat_error_name;  // fstatat() gives EIO for this name
+static const char* stat_gone_name;   // fstatat() gives ENOENT for this name
+static const char* const* listed_names;  // readdir() gives these names, then EIO
+
+static int fake_stat(int directory, const char* name, struct stat* status, int flags) {
+    if (stat_error_name && strcmp(name, stat_error_name) == 0) {
+        errno = EIO;
+        return -1;
+    }
+    if (stat_gone_name && strcmp(name, stat_gone_name) == 0) {
+        errno = ENOENT;
+        return -1;
+    }
+    return fstatat(directory, name, status, flags);
+}
+
+static bool is_listed_name(const char* name) {
+    for (int i = 0; listed_names[i]; i++) {
+        if (strcmp(listed_names[i], name) == 0) return true;
+    }
+    return false;
+}
+
+// Gives only the names of listed_names, then fails as a card that stops in the middle.
+static struct dirent* fake_read_dir(DIR* directory) {
+    struct dirent* item;
+    while ((item = readdir(directory)) != NULL) {
+        if (item->d_name[0] == '.' || is_listed_name(item->d_name)) return item;
+    }
+    errno = EIO;
+    return NULL;
+}
+
+static int fake_stream_error(FILE* file) {
+    (void)file;
+    return 1;
+}
+
+static void wait_for_idle(void) {
+    for (int i = 0; i < 5000 && !FileDb_isIdle(); i++) usleep(1000);
+}
+
+// Sets the fakes of the card. Pass NULL to keep the read of the system.
+static void use_fakes(const char* error_name, const char* gone_name,
+                      const char* const* names) {
+    stat_error_name = error_name;
+    stat_gone_name = gone_name;
+    listed_names = names;
+    FileDb_setCardFunctions(error_name || gone_name ? fake_stat : NULL,
+                            names ? fake_read_dir : NULL, NULL);
+}
+
+// Returns: true when the store holds the absolute path of `relative` as a file system error
+static bool has_card_error(const char* relative) {
+    char path[1024];
+    return get_music_abspath(relative, path, sizeof(path)) &&
+           ErrorStub_has(ERROR_CLASS_FILE_SYSTEM, path);
+}
+
+static bool has_dir_row(const char* path) {
+    DbDirResult* result = Db_getDirByPath(path);
+    bool found = result != NULL;
+    Db_freeResult(result);
+    return found;
+}
+
+TEST(unreadable_entry_of_an_empty_root_does_not_hide_the_others) {
+    CHECK(start_test());
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Album A"));
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Album B"));
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Broken"));
+    use_fakes("Broken", NULL, NULL);
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(has_dir_row("Album A"));
+    CHECK(has_dir_row("Album B"));
+    CHECK(!has_dir_row("Broken"));
+    CHECK(has_card_error("Broken"));
+    stop_test();
+}
+
+TEST(unreadable_entry_keeps_its_row) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Track.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    int track_id = file_id_at("Track.flac");
+    CHECK(track_id > 0);
+
+    use_fakes("Track.flac", NULL, NULL);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK_EQ_INT(file_id_at("Track.flac"), track_id);
+    CHECK(has_card_error("Track.flac"));
+    stop_test();
+}
+
+TEST(entry_removed_during_the_listing_loses_its_row) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Old.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(file_id_at("Old.flac") > 0);
+
+    use_fakes(NULL, "Old.flac", NULL);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK_EQ_INT(file_id_at("Old.flac"), 0);
+    CHECK_EQ_INT(ErrorStub_count(ERROR_CLASS_FILE_SYSTEM), 0);
+    stop_test();
+}
+
+TEST(partial_listing_adds_and_deletes_nothing_unseen) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "One.flac"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Two.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    int one_id = file_id_at("One.flac");
+    int two_id = file_id_at("Two.flac");
+    CHECK(one_id > 0 && two_id > 0);
+
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Three.flac"));
+    static const char* const names[] = {"Three.flac", NULL};
+    use_fakes(NULL, NULL, names);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(file_id_at("Three.flac") > 0);
+    CHECK_EQ_INT(file_id_at("One.flac"), one_id);
+    CHECK_EQ_INT(file_id_at("Two.flac"), two_id);
+    CHECK(has_card_error(""));
+    stop_test();
+}
+
+TEST(partial_listing_replaces_a_file_with_a_directory) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Live.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(file_id_at("Live.flac") > 0);
+
+    remove(FILEDB_MUSIC_PATH "/Live.flac");
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Live.flac"));
+    static const char* const names[] = {"Live.flac", NULL};
+    use_fakes(NULL, NULL, names);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK_EQ_INT(file_id_at("Live.flac"), 0);
+    CHECK(has_dir_row("Live.flac"));
+    stop_test();
+}
+
+TEST(partial_listing_replaces_a_directory_with_a_file) {
+    CHECK(start_test());
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Bonus"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH "/Bonus", "Extra.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), true));
+    CHECK(has_dir_row("Bonus"));
+    CHECK(file_id_at("Bonus/Extra.flac") > 0);
+
+    rm_rf(FILEDB_MUSIC_PATH "/Bonus");
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Bonus"));
+    static const char* const names[] = {"Bonus", NULL};
+    use_fakes(NULL, NULL, names);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(!has_dir_row("Bonus"));
+    CHECK_EQ_INT(file_id_at("Bonus/Extra.flac"), 0);
+    CHECK(file_id_at("Bonus") > 0);
+    stop_test();
+}
+
+TEST(partial_listing_deletes_an_entry_that_it_saw_gone) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Old.flac"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Keep.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    int keep_id = file_id_at("Keep.flac");
+    CHECK(file_id_at("Old.flac") > 0 && keep_id > 0);
+
+    static const char* const names[] = {"Old.flac", NULL};
+    use_fakes(NULL, "Old.flac", names);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK_EQ_INT(file_id_at("Old.flac"), 0);
+    CHECK_EQ_INT(file_id_at("Keep.flac"), keep_id);
+    stop_test();
+}
+
+TEST(partial_listing_deletes_a_file_that_is_a_symbolic_link_now) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Live.flac"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Target.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK(file_id_at("Live.flac") > 0);
+
+    remove(FILEDB_MUSIC_PATH "/Live.flac");
+    CHECK(symlink("Target.flac", FILEDB_MUSIC_PATH "/Live.flac") == 0);
+    static const char* const names[] = {"Live.flac", NULL};
+    use_fakes(NULL, NULL, names);
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    CHECK_EQ_INT(file_id_at("Live.flac"), 0);
+    stop_test();
+}
+
+TEST(partial_listing_continues_the_walk) {
+    CHECK(start_test());
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Album A"));
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH "/Album A", "Track.flac"));
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Album B"));
+    static const char* const names[] = {"Album A", "Track.flac", NULL};
+    use_fakes(NULL, NULL, names);
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), true));
+    CHECK(has_dir_row("Album A"));
+    CHECK(file_id_at("Album A/Track.flac") > 0);
+    CHECK(!has_dir_row("Album B"));
+    stop_test();
+}
+
+TEST(recursive_scan_continues_after_a_failed_folder) {
+    // Root opens each directory, thus the error cannot occur.
+    if (geteuid() == 0) return;
+    CHECK(start_test());
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Albums/A Broken"));
+    CHECK(mkdir_p(FILEDB_MUSIC_PATH "/Albums/Blue"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), true));
+    wait_for_idle();
+    DbDirResult* albums = Db_getDirByPath("Albums");
+    CHECK(albums);
+    int albums_id = albums ? albums->dir.id : 0;
+    Db_freeResult(albums);
+
+    // The track arrives after the first walk, thus only the recursive scan below can find it
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH "/Albums/Blue", "song.mp3"));
+    CHECK_EQ_INT(file_id_at("Albums/Blue/song.mp3"), 0);
+    CHECK(chmod(FILEDB_MUSIC_PATH "/Albums/A Broken", 0) == 0);
+    bool scanned = wait_for_directory_scan(albums_id, true);
+    chmod(FILEDB_MUSIC_PATH "/Albums/A Broken", 0755);
+    CHECK(scanned);
+    CHECK(file_id_at("Albums/Blue/song.mp3") > 0);
+    CHECK(has_card_error("Albums/A Broken"));
+    stop_test();
+}
+
+TEST(file_check_keeps_the_row_on_a_read_error) {
+    CHECK(start_test());
+    CHECK(write_audio_file(FILEDB_MUSIC_PATH, "Track.flac"));
+    FileDb_start();
+    CHECK(wait_for_directory_scan(Db_getRootDirId(), false));
+    wait_for_idle();
+    int track_id = file_id_at("Track.flac");
+    CHECK(track_id > 0);
+
+    use_fakes("Track.flac", NULL, NULL);
+    int request = FileDb_scanFile(track_id);
+    CHECK(request > 0 && wait_for_request(request));
+    CHECK_EQ_INT(file_id_at("Track.flac"), track_id);
+    CHECK(has_card_error("Track.flac"));
     stop_test();
 }
 
@@ -665,6 +937,44 @@ TEST(playlist_check_keeps_the_row_on_a_stat_error) {
     stop_test();
 }
 
+TEST(playlist_read_error_reports_the_playlist) {
+    CHECK(start_test());
+    CHECK(write_playlist("mix.m3u"));
+    FileDb_start();
+    wait_for_idle();
+    int playlist_id = playlist_id_of("mix.m3u");
+    CHECK(playlist_id > 0);
+
+    FileDb_setCardFunctions(NULL, NULL, fake_stream_error);
+    int request = FileDb_scanPlaylist(playlist_id);
+    CHECK(request > 0 && wait_for_request(request));
+    FileDb_setCardFunctions(NULL, NULL, NULL);
+    CHECK_EQ_INT(playlist_id_of("mix.m3u"), playlist_id);
+    char path[512];
+    CHECK(userdata_snpath("playlists/mix.m3u", path, sizeof(path)) >= 0);
+    CHECK(ErrorStub_has(ERROR_CLASS_FILE_SYSTEM, path));
+    stop_test();
+}
+
+TEST(playlists_listing_error_reports_the_directory) {
+    CHECK(start_test());
+    CHECK(write_playlist("mix.m3u"));
+    FileDb_start();
+    wait_for_idle();
+    CHECK(playlist_id_of("mix.m3u") > 0);
+
+    static const char* const names[] = {NULL};
+    use_fakes(NULL, NULL, names);
+    int request = FileDb_scanPlaylists();
+    CHECK(request > 0 && wait_for_request(request));
+    FileDb_setCardFunctions(NULL, NULL, NULL);
+    CHECK(playlist_id_of("mix.m3u") > 0);
+    char path[512];
+    CHECK(userdata_snpath("playlists", path, sizeof(path)) >= 0);
+    CHECK(ErrorStub_has(ERROR_CLASS_FILE_SYSTEM, path));
+    stop_test();
+}
+
 TEST(playlist_check_lists_the_directories_of_its_entries) {
     CHECK(start_test());
     FileDb_start();
@@ -849,6 +1159,19 @@ int main(void) {
     RUN(failed_directory_listing_keeps_its_row);
     RUN(entry_read_error_keeps_the_rows);
     RUN(directory_that_is_gone_loses_its_rows);
+    RUN(unreadable_entry_of_an_empty_root_does_not_hide_the_others);
+    RUN(unreadable_entry_keeps_its_row);
+    RUN(entry_removed_during_the_listing_loses_its_row);
+    RUN(partial_listing_adds_and_deletes_nothing_unseen);
+    RUN(partial_listing_replaces_a_file_with_a_directory);
+    RUN(partial_listing_replaces_a_directory_with_a_file);
+    RUN(partial_listing_deletes_an_entry_that_it_saw_gone);
+    RUN(partial_listing_deletes_a_file_that_is_a_symbolic_link_now);
+    RUN(partial_listing_continues_the_walk);
+    RUN(recursive_scan_continues_after_a_failed_folder);
+    RUN(file_check_keeps_the_row_on_a_read_error);
+    RUN(playlist_read_error_reports_the_playlist);
+    RUN(playlists_listing_error_reports_the_directory);
     RUN(start_lists_playlists_and_counts_tracks);
     RUN(walk_lists_directories_breadth_first);
     RUN(walk_starts_at_last_played_directory);

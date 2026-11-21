@@ -82,7 +82,7 @@ BIN      = bin
 TESTS    = $(BIN)/test_list_nav $(BIN)/test_toast_state \
            $(BIN)/test_file_utils $(BIN)/test_keyboard_map $(BIN)/test_ui_theme \
            $(BIN)/test_utf8 $(BIN)/test_spectrum_ceiling $(BIN)/test_screen_title \
-           $(BIN)/test_stopwatch \
+           $(BIN)/test_stopwatch $(BIN)/test_error \
            $(BIN)/test_podcast_episode_layout $(BIN)/test_frame_state \
            $(BIN)/test_lyric_window $(BIN)/test_db $(BIN)/test_settings \
            $(BIN)/test_seek_scan $(BIN)/test_mp3_seek
@@ -247,6 +247,9 @@ $(BIN)/test_toast_state: test_toast_state.c $(SRC)/toast_state.c $(SRC)/toast_st
 $(BIN)/test_stopwatch: test_stopwatch.cpp $(SRC)/stopwatch.cpp $(SRC)/stopwatch.h test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_stopwatch.cpp $(SRC)/stopwatch.cpp
 
+$(BIN)/test_error: test_error.cpp $(SRC)/error.cpp $(SRC)/error.h $(BIN)/obj/utf8.o test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -o $@ test_error.cpp $(SRC)/error.cpp $(BIN)/obj/utf8.o
+
 $(BIN)/test_screen_title: test_screen_title.c $(SRC)/screen_title.c $(SRC)/screen_title.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_screen_title.c $(SRC)/screen_title.c
 
@@ -300,27 +303,29 @@ DB_INC = -I$(SQLITE_DIR) $(INC) -I../NextUI/workspace/all/common -I../NextUI/wor
 TEST_TEMP_DIR ?= $(abspath ../.codex_tmp/tests/data)
 
 $(BIN)/test_db: test_db.c $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                 $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/db-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/db-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
-	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  -o $@ test_db.c $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
 	  $(SQLITE_LIBS) -lzip
 
 $(BIN)/test_settings: test_settings.c $(SRC)/settings.c $(SRC)/settings.h \
                       $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                      $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                      $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                       $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/settings-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/settings-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_settings.c $(SRC)/settings.c $(SRC)/db.c $(SRC)/db_schema.c \
-	  $(SRC)/db_statement.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
+	  $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
 
 M3U_TEST_MUSIC = $(TEST_TEMP_DIR)/playlist-music
 M3U_TEST_DB = $(TEST_TEMP_DIR)/playlist-m3u.db
@@ -330,19 +335,20 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
                           $(SRC)/filedb.c $(SRC)/filedb.h \
                           $(SRC)/browser.h $(SRC)/db.c $(SRC)/db.h \
                           $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                          $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                          $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                           $(SRC)/file_utils.c $(SRC)/file_utils.h \
                           $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DMUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -DTEST_MUSIC_PATH='"$(M3U_TEST_MUSIC)"' \
 	  -DTEST_DATABASE_PATH='"$(M3U_TEST_DB)"' \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/playlist-userdata"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_playlist_m3u.c $(SRC)/playlist_m3u.c $(SRC)/filedb.c $(SRC)/db.c \
-	  $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
 	  $(SRC)/utf8.c \
 	  $(SQLITE_LIBS) -lzip
 
@@ -368,19 +374,20 @@ $(BIN)/test_resume: test_resume.c $(SRC)/resume.c $(SRC)/resume.h \
                      $(SRC)/playlist_m3u.c $(SRC)/playlist_m3u.h \
                      $(SRC)/playlist.h $(SRC)/browser.h $(SRC)/db.c \
                      $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                     $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                      $(SRC)/file_utils.c $(SRC)/file_utils.h \
                      $(SRC)/utf8.c $(SRC)/utf8.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DMUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DTEST_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -DTEST_MUSIC_PATH='"$(RESUME_TEST_MUSIC)"' \
 	  -DTEST_DATABASE_PATH='"$(RESUME_TEST_DB)"' \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/resume-userdata"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_resume.c $(SRC)/resume.c $(SRC)/filedb.c $(SRC)/playlist_m3u.c \
-	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c \
 	  $(SRC)/file_utils.c $(SRC)/utf8.c $(SQLITE_LIBS) -lzip
 
 FILEDB_TEST_MUSIC = $(TEST_TEMP_DIR)/filedb-music
@@ -389,17 +396,18 @@ FILEDB_TEST_DB = $(TEST_TEMP_DIR)/filedb.db
 $(BIN)/test_filedb: test_filedb.c $(SRC)/filedb.c $(SRC)/filedb.h \
                      $(SRC)/browser.c $(SRC)/browser.h \
                      $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                     $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                     $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                      $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/filedb-userdata"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -DMUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DFILEDB_MUSIC_PATH='"$(FILEDB_TEST_MUSIC)"' \
 	  -DFILEDB_DATABASE_PATH='"$(FILEDB_TEST_DB)"' \
 	  -o $@ test_filedb.c $(SRC)/filedb.c $(SRC)/browser.c $(SRC)/db.c $(SRC)/db_schema.c \
-	  $(SRC)/db_statement.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
+	  $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c $(SQLITE_LIBS) -lzip
 
 PLAYLIST_TEST_MUSIC = $(TEST_TEMP_DIR)/queue-music
 PLAYLIST_TEST_DB = $(TEST_TEMP_DIR)/queue.db
@@ -408,17 +416,18 @@ $(BIN)/test_playlist: test_playlist.c $(SRC)/playlist.c $(SRC)/playlist.h \
                        $(SRC)/filedb.c $(SRC)/filedb.h \
                        $(SRC)/browser.c $(SRC)/browser.h \
                        $(SRC)/db.c $(SRC)/db.h $(SRC)/db_schema.c $(SRC)/db_schema.h \
-                       $(SRC)/db_statement.c $(SRC)/db_statement.h \
+                       $(SRC)/db_statement.c $(SRC)/db_statement.h error_stub.c error_stub.h \
                        $(SRC)/file_utils.c $(SRC)/file_utils.h test.h $(SQLITE_OBJ) | $(BIN)
 	mkdir -p "$(TEST_TEMP_DIR)"
 	$(CC) $(CFLAGS) $(DB_INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/queue-userdata"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -DMUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DPLAYLIST_MUSIC_PATH='"$(PLAYLIST_TEST_MUSIC)"' \
 	  -DPLAYLIST_DATABASE_PATH='"$(PLAYLIST_TEST_DB)"' \
 	  -o $@ test_playlist.c $(SRC)/playlist.c $(SRC)/filedb.c $(SRC)/browser.c \
-	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c $(SRC)/file_utils.c \
+	  $(SRC)/db.c $(SRC)/db_schema.c $(SRC)/db_statement.c error_stub.c $(SRC)/file_utils.c \
 	  $(SQLITE_LIBS) -lzip
 
 DESKTOP_RPATH = -Wl,-rpath,$(abspath ../NextUI/workspace/desktop/libmsettings) \
@@ -489,6 +498,7 @@ $(BIN)/test_file_utils: test_file_utils.c $(SRC)/file_utils.c $(SRC)/file_utils.
 	$(CC) $(CFLAGS) $(INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/file-utils-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/file-utils-music"' \
+	  -DFILE_UTILS_CARD_PATH='"/card"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_file_utils.c $(SRC)/file_utils.c -lzip
 
@@ -509,5 +519,6 @@ $(BIN)/test_selfupdate_install: test_selfupdate_install.c $(SRC)/selfupdate_inst
 	$(CC) $(CFLAGS) $(INC) \
 	  -DFILE_UTILS_USERDATA_DIR='"$(TEST_TEMP_DIR)/selfupdate-install-userdata"' \
 	  -DMUSIC_PATH='"$(TEST_TEMP_DIR)/selfupdate-install-music"' \
+	  -DFILE_UTILS_CARD_PATH='"$(TEST_TEMP_DIR)"' \
 	  -DFILE_UTILS_TEMP_DIR='"$(TEST_TEMP_DIR)"' \
 	  -o $@ test_selfupdate_install.c $(SRC)/selfupdate_install.c $(SRC)/file_utils.c -lzip

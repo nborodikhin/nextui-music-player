@@ -1,4 +1,5 @@
 #include "db.h"
+#include "error.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -47,6 +48,13 @@ static void increment_data_version(void) {
     atomic_increment(&data_version);
 }
 
+// Reports a failed call of SQLite to the error store, as "<operation>: <message>".
+static void report_sqlite_error(const char* operation, const char* message) {
+    char text[256];
+    snprintf(text, sizeof(text), "%s: %s", operation, message);
+    Error_report(ERROR_CLASS_DATABASE, text);
+}
+
 static void connection_destroy(void* value) {
     sqlite3* database = (sqlite3*)value;
     if (!database) return;
@@ -54,6 +62,7 @@ static void connection_destroy(void* value) {
     int result = sqlite3_close(database);
     if (result != SQLITE_OK) {
         LOG_error("[Db] failed to close connection: %s\n", sqlite3_errstr(result));
+        report_sqlite_error("close", sqlite3_errstr(result));
     }
     atomic_decrement(&open_connection_count);
 }
@@ -94,8 +103,9 @@ static sqlite3* connection(void) {
 
     int result = sqlite3_open(database_path, &database);
     if (result != SQLITE_OK) {
-        LOG_error("[Db] failed to open %s: %s\n", database_path,
-                  database ? sqlite3_errmsg(database) : sqlite3_errstr(result));
+        const char* message = database ? sqlite3_errmsg(database) : sqlite3_errstr(result);
+        LOG_error("[Db] failed to open %s: %s\n", database_path, message);
+        report_sqlite_error("open", message);
         if (database) sqlite3_close(database);
         return NULL;
     }
@@ -104,6 +114,7 @@ static sqlite3* connection(void) {
     if (result != SQLITE_OK) {
         LOG_error("[Db] failed to set up the connection to %s: busy handler: %s\n",
                   database_path, sqlite3_errmsg(database));
+        report_sqlite_error("busy handler", sqlite3_errmsg(database));
         sqlite3_close(database);
         return NULL;
     }
@@ -174,8 +185,9 @@ static bool execute(sqlite3* database, const char* sql) {
         return true;
     }
 
-    LOG_error("[Db] SQL failed: %s: %s\n", sql ? sql : "(null)",
-              error ? error : sqlite3_errmsg(database));
+    const char* message = error ? error : sqlite3_errmsg(database);
+    LOG_error("[Db] SQL failed: %s: %s\n", sql ? sql : "(null)", message);
+    report_sqlite_error("exec", message);
     sqlite3_free(error);
     return false;
 }

@@ -15,6 +15,7 @@
 #include "db_schema.h"
 #include "db_statement.h"
 #include "defines.h"
+#include "error_stub.h"
 #include "file_utils.h"
 #include "test.h"
 
@@ -896,6 +897,30 @@ TEST(failed_listing_count_returns_no_result) {
     stop_test();
 }
 
+TEST(a_failed_statement_reports_a_database_error) {
+    CHECK(start_test());
+    CHECK(Db_initInternal(database_path));
+    CHECK(Db_execute("ALTER TABLE files RENAME TO files_moved"));
+    ErrorStub_clear();
+    DbReadDirResult* contents = Db_readDir(Db_getRootDirId());
+    CHECK(contents == NULL);
+    Db_freeResult(contents);
+    CHECK(ErrorStub_count(ERROR_CLASS_DATABASE) > 0);
+    CHECK_EQ_INT(ErrorStub_count(ERROR_CLASS_FILE_SYSTEM), 0);
+    stop_test();
+}
+
+TEST(a_read_of_an_absent_row_reports_no_error) {
+    CHECK(start_test());
+    CHECK(Db_initInternal(database_path));
+    ErrorStub_clear();
+    DbDirResult* directory = Db_getDir(999999);
+    CHECK(directory == NULL);
+    Db_freeResult(directory);
+    CHECK_EQ_INT(ErrorStub_count(ERROR_CLASS_DATABASE), 0);
+    stop_test();
+}
+
 TEST(settings_read_skips_unknown_types) {
     CHECK(start_test());
     CHECK(Db_initInternal(database_path));
@@ -1289,6 +1314,8 @@ int main(void) {
     RUN(listing_reads_leave_data_version_and_nest_in_transactions);
     RUN(file_pages_walk_directories_depth_first);
     RUN(failed_listing_count_returns_no_result);
+    RUN(a_failed_statement_reports_a_database_error);
+    RUN(a_read_of_an_absent_row_reports_no_error);
     RUN(settings_read_skips_unknown_types);
     RUN(missing_rows_read_as_absent);
     RUN(index_writes_and_silent_position_update);

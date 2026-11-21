@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "background.h"
+#include "error.h"
 #include "resume.h"
 #include "selfupdate.h"
 #include "toast.h"
@@ -154,6 +155,7 @@ public:
         updateLabels();
         list.start();
         getScheduler().postRepeating([this] { refreshRows(); }, kRowRefreshMs);
+        Error_showToast();
     }
 
     void setContext(UiContext& context) override { screenView.setContext(context); }
@@ -184,6 +186,7 @@ private:
     void refreshRows() {
         updateRowMap();
         updateLabels();
+        Error_showToast();
     }
 
     /** Returns the items of the rows, in order. */

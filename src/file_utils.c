@@ -28,6 +28,10 @@
 #define MUSIC_PATH SDCARD_PATH "/Music"
 #endif
 
+#ifndef FILE_UTILS_CARD_PATH
+#define FILE_UTILS_CARD_PATH SDCARD_PATH
+#endif
+
 void shell_escape(const char* src, char* dst, int dst_size) {
     int j = 0;
     for (int i = 0; src[i] && j < dst_size - 2; i++) {
@@ -96,6 +100,15 @@ bool get_music_relpath(const char* path, char* out, size_t out_size) {
     const char* relative = path + root_length;
     if (relative[0] == '/') relative++;
     int length = snprintf(out, out_size, "%s", relative);
+    return length >= 0 && (size_t)length < out_size;
+}
+
+bool get_card_display_path(const char* path, char* out, size_t out_size) {
+    size_t card_length = strlen(FILE_UTILS_CARD_PATH);
+    bool on_card = strncmp(path, FILE_UTILS_CARD_PATH, card_length) == 0 &&
+                   (path[card_length] == '/' || path[card_length] == '\0');
+    int length = on_card ? snprintf(out, out_size, "<SDCARD>%s", path + card_length)
+                         : snprintf(out, out_size, "%s", path);
     return length >= 0 && (size_t)length < out_size;
 }
 
