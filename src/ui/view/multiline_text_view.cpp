@@ -174,13 +174,34 @@ bool MultilineTextView::setText(const SpannedText& newText) {
     return true;
 }
 
+void MultilineTextView::setLineHeight(int height) {
+    if (height == fixedLineHeight) return;
+    fixedLineHeight = height;
+    dirty           = true;
+}
+
+void MultilineTextView::setMaxLines(int count) {
+    if (count == maxLines) return;
+    maxLines = count;
+    dirty    = true;
+}
+
+void MultilineTextView::setCutToSpace(bool newCutToSpace) {
+    if (newCutToSpace == cutToSpace) return;
+    cutToSpace = newCutToSpace;
+    dirty      = true;
+}
+
 void MultilineTextView::setContext(UiContext& context) {
     UiView::setContext(context);
     wrapStale = true;
     dirty     = true;
 }
 
-int MultilineTextView::getLineHeight() const { return Fonts_getMetric(font, FONT_METRIC_LINE_HEIGHT); }
+int MultilineTextView::getLineHeight() const {
+    if (fixedLineHeight > 0) return fixedLineHeight;
+    return Fonts_getMetric(font, FONT_METRIC_LINE_HEIGHT);
+}
 
 void MultilineTextView::freeRuns() {
     for (const Run& run : runs) {
@@ -212,7 +233,15 @@ void MultilineTextView::layout(UiLayoutContext& context) {
         wrap(width);
         dirty = true;
     }
-    context.setSize(UiSize{width, lineCount * getLineHeight()});
+    const int lineHeight = getLineHeight();
+    int shown            = lineCount;
+    if (maxLines > 0) shown = std::min(shown, maxLines);
+    if (cutToSpace) shown = std::min(shown, context.getMaxSize().h / lineHeight);
+    if (shown != shownLineCount) {
+        shownLineCount = shown;
+        dirty          = true;
+    }
+    context.setSize(UiSize{width, shownLineCount * lineHeight});
 }
 
 void MultilineTextView::draw(UiDrawContext& context) {
@@ -222,7 +251,7 @@ void MultilineTextView::draw(UiDrawContext& context) {
     const int lineHeight = getLineHeight();
     const int textTop    = (lineHeight - TTF_FontHeight(font)) / 2;
     for (const Run& run : runs) {
-        if (!run.bitmap) continue;
+        if (!run.bitmap || run.line >= shownLineCount) continue;
         const SDL_Color color = Theme_getColor(run.role, false);
         SDL_SetSurfaceBlendMode(run.bitmap, SDL_BLENDMODE_BLEND);
         SDL_SetSurfaceColorMod(run.bitmap, color.r, color.g, color.b);

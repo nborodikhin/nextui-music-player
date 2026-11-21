@@ -6,6 +6,7 @@
 #include "ui/view/button_hints_view.hpp"
 #include "ui/view/list_view.hpp"
 #include "ui/view/scroll_indicator_view.hpp"
+#include "ui/view/screen_view.hpp"
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/title_text_view.hpp"
 #include "ui/view/ui_layout.hpp"
@@ -21,13 +22,6 @@ struct ListScreenParts {
 };
 
 /**
- * Lays out the frame of a full screen: the title view and the status view at the top, and the
- * button hints at the bottom. Returns the rectangle of the body between them.
- */
-SDL_Rect layoutScreenFrame(UiLayoutContext& context, UiView& titleView, UiView& statusView,
-                           UiView& buttonHintsView);
-
-/**
  * Lays out the parts of a list screen:
  * - top of the screen - title view + status view
  * - body - list and scroll indicators
@@ -39,25 +33,19 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts);
  * A menu screen with a list. It owns its views. The page gives the list its adapter and keeps
  * the adapter.
  */
-class ListScreenView : public UiLayout {
+class ListScreenView : public ScreenView {
 public:
-    explicit ListScreenView(TTF_Font* titleFont) : titleView(titleFont) {}
+    explicit ListScreenView(TTF_Font* titleFont) : ScreenView(titleFont) {}
 
-    TitleTextView& getTitleView() { return titleView; }
-    StatusGroupView& getStatusView() { return statusView; }
     ListView& getListView() { return listView; }
-    ButtonHintsView& getButtonHintsView() { return buttonHintsView; }
 
     void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:
-    TitleTextView titleView;
-    StatusGroupView statusView;
     ListView listView;
     ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
     ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
-    ButtonHintsView buttonHintsView;
 };
 
 #endif

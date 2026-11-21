@@ -12,12 +12,14 @@
 #include <vector>
 
 #include "test.h"
+#include "ui/view/bitmap_view.hpp"
 #include "ui/view/box_view.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_view.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/multiline_text_view.hpp"
+#include "ui/view/progress_bar_view.hpp"
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
@@ -508,6 +510,96 @@ TEST(test_edge_pixel_on_the_surface_is_premultiplied) {
         }
     }
     CHECK(found);
+}
+
+TEST(test_bitmap_is_scaled_into_the_view) {
+    Fixture f;
+    BitmapView view;
+    SDL_Surface* bitmap = SDL_CreateRGBSurfaceWithFormat(0, 2, 2, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_FillRect(bitmap, nullptr, SDL_MapRGBA(bitmap->format, 255, 0, 0, 255));
+    view.setBitmap(bitmap);
+    const SDL_Rect rect = {10, 10, 20, 20};
+    f.frame(view, rect);
+    CHECK_EQ_SZ(f.surfaceAt(10, 10), 0xFFFF0000);
+    CHECK_EQ_SZ(f.surfaceAt(29, 29), 0xFFFF0000);
+    CHECK_EQ_SZ(f.surfaceAt(30, 30), 0u);
+}
+
+TEST(test_bitmap_view_loads_an_image_from_memory) {
+    SDL_Surface* image = SDL_CreateRGBSurfaceWithFormat(0, 3, 2, 32, SDL_PIXELFORMAT_ARGB8888);
+    std::vector<uint8_t> buffer(1024);
+    SDL_RWops* out = SDL_RWFromMem(buffer.data(), static_cast<int>(buffer.size()));
+    CHECK(SDL_SaveBMP_RW(image, out, 0) == 0);
+    const size_t size = static_cast<size_t>(SDL_RWtell(out));
+    SDL_RWclose(out);
+    SDL_FreeSurface(image);
+
+    BitmapView view;
+    CHECK(view.loadMemory(buffer.data(), size));
+    CHECK(view.hasBitmap());
+    const uint8_t garbage[] = {1, 2, 3, 4};
+    CHECK(!view.loadMemory(garbage, sizeof(garbage)));
+    CHECK(!view.hasBitmap());
+}
+
+TEST(test_bitmap_view_does_not_load_a_missing_file) {
+    BitmapView view;
+    CHECK(!view.loadFile("no-such-image.png"));
+    CHECK(!view.hasBitmap());
+}
+
+TEST(test_bitmap_view_frees_its_bitmap) {
+    SDL_Surface* bitmap = SDL_CreateRGBSurfaceWithFormat(0, 2, 2, 32, SDL_PIXELFORMAT_ARGB8888);
+    bitmap->refcount++;
+    {
+        BitmapView view;
+        view.setBitmap(bitmap);
+    }
+    CHECK_EQ_SZ(bitmap->refcount, 1);
+    bitmap->refcount++;
+    {
+        BitmapView view;
+        view.setBitmap(bitmap);
+        view.setBitmap(nullptr);
+        CHECK_EQ_SZ(bitmap->refcount, 1);
+        CHECK(!view.hasBitmap());
+    }
+    SDL_FreeSurface(bitmap);
+}
+
+uint32_t opaque(SDL_Color color) {
+    return 0xFF000000u | (static_cast<uint32_t>(color.r) << 16) | (static_cast<uint32_t>(color.g) << 8) | color.b;
+}
+
+TEST(test_progress_bar_fills_its_percent) {
+    Fixture f;
+    ProgressBarView view(testFont, 10);
+    view.setContext(f.context);
+    const SDL_Rect rect = {0, 0, 200, 10};
+    const uint32_t fillColor  = opaque(Theme_getColor(THEME_ROLE_PROGRESS_FILL, false));
+    const uint32_t trackColor = opaque(Theme_getColor(THEME_ROLE_PROGRESS_TRACK, false));
+
+    f.frame(view, rect);
+    const int middle = view.getSize().h / 2;
+    CHECK(view.getSize().h >= 10);
+    CHECK_EQ_SZ(f.surfaceAt(1, middle), trackColor);
+
+    view.setPercent(50);
+    f.frame(view, rect);
+    CHECK_EQ_SZ(f.surfaceAt(1, middle), fillColor);
+    CHECK_EQ_SZ(f.surfaceAt(198, middle), trackColor);
+
+    view.setPercent(100);
+    f.frame(view, rect);
+    CHECK_EQ_SZ(f.surfaceAt(198, middle), fillColor);
+}
+
+TEST(test_progress_bar_clamps_a_value_out_of_the_range) {
+    ProgressTrackView track;
+    track.setPercent(150);
+    CHECK_EQ_SZ(track.getPercent(), 100);
+    track.setPercent(-5);
+    CHECK_EQ_SZ(track.getPercent(), 0);
 }
 
 // Returns the highest alpha in the column x of the rectangle
@@ -1457,6 +1549,50 @@ TEST(test_multiline_same_text_is_not_dirty) {
     CHECK(!view.isDirty());
 }
 
+TEST(test_multiline_fixed_line_height_sets_the_height) {
+    Fixture f(kScreenW, 200);
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("one\ntwo\nthree");
+    view.setLineHeight(30);
+    f.frame(view, SDL_Rect{0, 0, 200, 200});
+    CHECK_EQ_SZ(view.getSize().h, 90);
+}
+
+TEST(test_multiline_max_lines_shows_the_first_lines) {
+    Fixture f(kScreenW, 200);
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("one\ntwo\nthree");
+    view.setLineHeight(30);
+    view.setMaxLines(2);
+    f.frame(view, SDL_Rect{0, 0, 200, 200});
+    CHECK_EQ_SZ(view.getSize().h, 60);
+    CHECK(f.surfaceHasPixels(SDL_Rect{0, 30, 200, 30}));
+    CHECK(!f.surfaceHasPixels(SDL_Rect{0, 60, 200, 30}));
+}
+
+TEST(test_multiline_cut_shows_the_lines_that_fit) {
+    Fixture f(kScreenW, 200);
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("one\ntwo\nthree");
+    view.setLineHeight(30);
+    view.setCutToSpace(true);
+    f.frame(view, SDL_Rect{0, 0, 200, 70});
+    CHECK_EQ_SZ(view.getSize().h, 60);
+}
+
+TEST(test_multiline_without_a_cut_shows_each_line) {
+    Fixture f(kScreenW, 200);
+    MultilineTextView view(testFont);
+    view.setContext(f.context);
+    view.setText("one\ntwo\nthree");
+    view.setLineHeight(30);
+    UiLayoutContext& root = f.compositor.beginLayout();
+    CHECK_EQ_SZ(root.layoutChild(view, SDL_Rect{0, 0, 200, 70}).getSize().h, 90);
+}
+
 // The dialog makes the space of its content as high as the layout of the content
 TEST(test_dialog_takes_the_height_of_its_content) {
     Fixture f(kScreenW, 200);
@@ -1526,6 +1662,10 @@ int main() {
     RUN(test_multiline_long_word_breaks_at_a_character);
     RUN(test_multiline_spans_share_a_line);
     RUN(test_multiline_same_text_is_not_dirty);
+    RUN(test_multiline_fixed_line_height_sets_the_height);
+    RUN(test_multiline_max_lines_shows_the_first_lines);
+    RUN(test_multiline_cut_shows_the_lines_that_fit);
+    RUN(test_multiline_without_a_cut_shows_each_line);
     RUN(test_dialog_takes_the_height_of_its_content);
     RUN(test_dialog_pages_give_the_earphone_buttons_to_the_playback);
     RUN(test_controls_help_ignores_start_with_a_volume_button);
@@ -1550,5 +1690,11 @@ int main() {
     RUN(test_scrolling_title_frame_changes_the_layer_only);
     RUN(test_hints_change_keeps_the_down_indicator_over_them);
     RUN(test_new_status_width_moves_the_title);
+    RUN(test_bitmap_is_scaled_into_the_view);
+    RUN(test_bitmap_view_frees_its_bitmap);
+    RUN(test_bitmap_view_loads_an_image_from_memory);
+    RUN(test_bitmap_view_does_not_load_a_missing_file);
+    RUN(test_progress_bar_fills_its_percent);
+    RUN(test_progress_bar_clamps_a_value_out_of_the_range);
     return test_summary();
 }

@@ -6,7 +6,7 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs the legacy module of About and the app update. Closes when the module returns. */
+/** The name and the version of the app, the state of the update check, and a QR code of the project. */
 class AboutPage final : public UiPage {
 public:
     using Result = std::monostate;

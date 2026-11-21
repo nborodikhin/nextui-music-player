@@ -3,6 +3,7 @@
 #include <iterator>
 #include <memory>
 
+#include "downloader.h"
 #include "ui/downloader_page.hpp"
 #include "ui/file_browser_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
@@ -10,6 +11,8 @@
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
 #include "ui/view/list_screen_view.hpp"
+#include "ui/wifi_dialog_page.hpp"
+#include "ui/ytdlp_install_page.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
 
@@ -94,8 +97,30 @@ private:
         switch (kRows[index].item) {
             case LibraryItem::Files:      getNavigator().open(FileBrowserPage{}); break;
             case LibraryItem::Playlists:  getNavigator().open(PlaylistsPage{}); break;
-            case LibraryItem::Downloader: getNavigator().open(DownloaderPage{}); break;
+            case LibraryItem::Downloader: openDownloader(); break;
         }
+    }
+
+    /** Waits for Wi-Fi, installs the helpers where they are missing, and opens the Downloader */
+    void openDownloader() {
+        Downloader_init();
+        getNavigator().openForResult(WifiDialogPage{}, [this](const bool& connected) {
+            if (!connected) {
+                Downloader_cleanup();
+                return;
+            }
+            if (Downloader_isAvailable()) {
+                getNavigator().open(DownloaderPage{});
+                return;
+            }
+            getNavigator().openForResult(YtdlpInstallPage{}, [this](const bool& installed) {
+                if (installed && Downloader_init() == 0) {
+                    getNavigator().open(DownloaderPage{});
+                    return;
+                }
+                Downloader_cleanup();
+            });
+        });
     }
 
     LibraryListAdapter rows;
