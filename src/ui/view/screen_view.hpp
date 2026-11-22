@@ -49,7 +49,6 @@ public:
     /** Lays out `content` in the body. The view stays with the caller. Pass null for no content. */
     void setContent(UiView* content) { this->content = content; }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

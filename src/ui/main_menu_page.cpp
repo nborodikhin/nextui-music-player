@@ -158,8 +158,6 @@ public:
         Error_showToast();
     }
 
-    void setContext(UiContext& context) override { screenView.setContext(context); }
-
     void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
     /** A legacy module can change the playback, and with it the rows and their labels */

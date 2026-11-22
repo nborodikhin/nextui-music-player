@@ -106,11 +106,6 @@ public:
         : UiPageImpl<Page>(page.kind), page(page), root(page.name, page.color) {}
 
     HelpId getHelpId() const override { return page.helpId; }
-    void setContext(UiContext& context) override {
-        add("setContext");
-        root.setContext(context);
-        if (second) second->setContext(context);
-    }
     void onEnter() override {
         add("enter");
         if (page.onEnterHook) page.onEnterHook(*this);
@@ -237,7 +232,7 @@ PlainPage makeOpener(const PlainPage& page, const PlainPage& dialog) {
 
 TEST(new_page_gets_its_context_before_enter) {
     StackFixture f(makePage("main"));
-    CHECK(isLog({"main setContext", "main enter"}));
+    CHECK(isLog({"main enter"}));
 }
 
 TEST(open_puts_the_page_on_the_top_at_the_end_of_the_frame) {
@@ -247,8 +242,7 @@ TEST(open_puts_the_page_on_the_top_at_the_end_of_the_frame) {
     f.release(Button::A);
     CHECK(isLog({"main pressed A", "main short A", "main reset"}));
     f.endFrame();
-    CHECK(isLog({"main pressed A", "main short A", "main reset", "main pause", "next setContext",
-                 "next enter"}));
+    CHECK(isLog({"main pressed A", "main short A", "main reset", "main pause", "next enter"}));
 }
 
 TEST(second_command_of_a_frame_is_ignored) {
@@ -456,8 +450,7 @@ TEST(covered_page_pauses_and_resumes) {
     f.stack.open(next);
     f.endFrame();
     f.tap(Button::B);
-    CHECK(isLog({"main setContext", "main enter", "main reset", "main pause", "next setContext",
-                 "next enter", "next pressed B", "next short B", "next reset", "next exit",
+    CHECK(isLog({"main enter", "main reset", "main pause", "next enter", "next pressed B", "next short B", "next reset", "next exit",
                  "main resume"}));
 }
 
@@ -586,7 +579,6 @@ TEST(uncovered_page_resumes_before_its_first_layout) {
     PlainPage bottom = makePage("main");
     bottom.onEnterHook = [](TestPageImpl<PlainPage>& page) {
         page.second = std::make_unique<TestRootView>("changed", 0u);
-        page.second->setContext(page.context());
         page.layoutSecond = false;
     };
     bottom.onResumeHook = [](TestPageImpl<PlainPage>& page) { page.layoutSecond = true; };
@@ -649,7 +641,7 @@ TEST(legacy_module_takes_the_screen_again_at_the_same_address) {
     f.stack.endFrame();
     pageLog.clear();
     CHECK(runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr));
-    CHECK(isLog({"before module", "after module", "main setContext", "legacy exit",
+    CHECK(isLog({"before module", "after module", "legacy exit",
                  "main resume"}));
     CHECK(f.drawFrame());
     CHECK(!f.drawFrame());
@@ -839,7 +831,6 @@ TEST(page_with_no_view_in_its_layout_ends_each_view_task) {
     TestPageImpl<PlainPage>* main = nullptr;
     LegacyFixture f(makeCapturedPage("main", main));
     main->second = std::make_unique<TestRootView>("second", 0);
-    main->second->setContext(main->context());
     f.drawFrame();
     main->getRoot().countFrames();
     main->second->countFrames();
@@ -855,7 +846,6 @@ TEST(view_that_stays_keeps_its_task_while_another_leaves) {
     TestPageImpl<PlainPage>* main = nullptr;
     LegacyFixture f(makeCapturedPage("main", main));
     main->second = std::make_unique<TestRootView>("second", 0);
-    main->second->setContext(main->context());
     f.drawFrame();
     main->getRoot().countFrames();
     main->second->countFrames();
@@ -924,7 +914,6 @@ TEST(view_destroyed_after_it_left_the_layout_gets_no_call) {
     TestPageImpl<PlainPage>* main = nullptr;
     LegacyFixture f(makeCapturedPage("main", main));
     main->second = std::make_unique<TestRootView>("second", 0);
-    main->second->setContext(main->context());
     f.drawFrame();
     main->second->countFrames();
     main->layoutSecond = false;

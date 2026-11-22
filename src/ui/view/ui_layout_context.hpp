@@ -9,6 +9,7 @@
 #include "ui/view/ui_size.hpp"
 #include "ui/view/ui_target_layer.hpp"
 
+class UiContext;
 class UiView;
 
 /**
@@ -18,8 +19,11 @@ class UiView;
  */
 class UiLayoutContext {
 public:
-    /** Returns a root context at the origin of the screen, with the screen as the clip. */
-    static UiLayoutContext makeRoot(UiSize screenSize, bool surfaceOnly);
+    /**
+     * Returns a root context at the origin of the screen, with the screen as the clip. Each view of
+     * the layout gets `context` as its context.
+     */
+    static UiLayoutContext makeRoot(UiSize screenSize, bool surfaceOnly, UiContext& context);
 
     /**
      * Lays out childView in rect, in the coordinates of this view. The child is clipped to
@@ -71,6 +75,7 @@ private:
     UiLayoutContext& layoutChildIn(UiView& childView, const SDL_Rect& rect, const SDL_Rect* clip);
 
     UiView* view              = nullptr;
+    UiContext* uiContext      = nullptr;
     SDL_Point origin          = {0, 0};
     UiSize maxSize            = {0, 0};
     UiSize size               = {0, 0};

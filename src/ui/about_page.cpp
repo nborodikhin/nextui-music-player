@@ -55,15 +55,6 @@ public:
         qrCode.loadMemory(qr_code_png, sizeof(qr_code_png));
     }
 
-    void setContext(UiContext& context) override {
-        UiView::setContext(context);
-        appName.setContext(context);
-        taglineFirst.setContext(context);
-        taglineSecond.setContext(context);
-        updateStatus.setContext(context);
-        qrCode.setContext(context);
-    }
-
     void layout(UiLayoutContext& context) override {
         const UiSize body     = context.getMaxSize();
         const int smallHeight = TTF_FontHeight(Fonts_getSmall());
@@ -107,7 +98,6 @@ public:
 
     void resume() override { showUpdateState(); }
 
-    void setContext(UiContext& context) override { screen.setContext(context); }
     void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {

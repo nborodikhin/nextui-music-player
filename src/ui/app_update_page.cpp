@@ -103,16 +103,6 @@ public:
         statusText.setColor(Theme_getColor(role, false));
     }
 
-    void setContext(UiContext& context) override {
-        UiView::setContext(context);
-        version.setContext(context);
-        notes.setContext(context);
-        checking.setContext(context);
-        progress.setContext(context);
-        detail.setContext(context);
-        statusText.setContext(context);
-    }
-
     void layout(UiLayoutContext& context) override {
         const UiSize body     = context.getMaxSize();
         const int versionTop  = SCALE1(PADDING * 2 + 5);
@@ -184,7 +174,6 @@ public:
     /** The update continues while a dialog covers the page */
     void resume() override { showStatus(); }
 
-    void setContext(UiContext& context) override { screen.setContext(context); }
     void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {

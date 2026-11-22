@@ -15,7 +15,6 @@ public:
     /** Adds `child` below the last child. */
     void addChild(std::unique_ptr<UiView> child);
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

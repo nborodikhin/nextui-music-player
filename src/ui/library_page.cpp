@@ -74,8 +74,6 @@ public:
         list.start();
     }
 
-    void setContext(UiContext& context) override { screenView.setContext(context); }
-
     void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {

@@ -46,10 +46,12 @@ public:
      */
     void setCutToSpace(bool cutToSpace);
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
+
+protected:
+    void onAttach(UiContext& context) override;
 
 private:
     /** A part of one line in one role, rendered in white */

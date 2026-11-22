@@ -89,11 +89,17 @@ public:
 
     InputTestPageImpl() : UiPageImpl(PageKind::FullScreen) {
         for (int index = 0; index < kEntryCount; index++) {
-            logLines.push_back(std::make_unique<TextView>(Fonts_getSmall(), true));
+            auto line = std::make_unique<TextView>(Fonts_getSmall(), true);
+            line->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+            logLines.push_back(std::move(line));
         }
+        title.setText("Input test");
+        title.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+        hintLine.setText("MENU + SELECT: back");
+        hintLine.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+        heldLine.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:
@@ -132,21 +138,6 @@ void InputTestPageImpl::addEntry(uint32_t time, const std::string &stream, const
     snprintf(text, sizeof(text), "%-6s  %-6s  %-12s  +%u ms", stream.c_str(), type.c_str(),
              name.c_str(), delta);
     entries[newest].text = text;
-}
-
-void InputTestPageImpl::setContext(UiContext& context) {
-    title.setContext(context);
-    statusGroup.setContext(context);
-    heldLine.setContext(context);
-    hintLine.setContext(context);
-    for (auto& line : logLines) line->setContext(context);
-
-    title.setText("Input test");
-    title.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-    hintLine.setText("MENU + SELECT: back");
-    hintLine.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-    heldLine.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-    for (auto& line : logLines) line->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
 
 // Each line is a view that draws only when its text changes. The page draws no layer.

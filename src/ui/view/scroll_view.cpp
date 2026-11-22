@@ -24,7 +24,6 @@ constexpr std::array<ButtonRequest, 4> kRequests = {
 void ScrollView::setContent(UiView* newContent) {
     content = newContent;
     offset  = 0;
-    if (content && hasContext()) content->setContext(getContext());
 }
 
 void ScrollView::scrollBy(int pixels) {
@@ -53,11 +52,6 @@ bool ScrollView::handleButton(const ButtonEvent& event) {
         return false;
     }
     return true;
-}
-
-void ScrollView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    if (content) content->setContext(context);
 }
 
 int ScrollView::getMaxOffset() const {

@@ -28,7 +28,6 @@ public:
     /** Returns the height of all rows, in pixels. */
     int getHeight() const;
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:
@@ -63,14 +62,6 @@ int ControlsHelpView::getHeight() const {
     return static_cast<int>(rows.size()) * getRowHeight();
 }
 
-void ControlsHelpView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    for (Row& row : rows) {
-        row.button->setContext(context);
-        row.action->setContext(context);
-    }
-}
-
 void ControlsHelpView::layout(UiLayoutContext& context) {
     const int width = context.getMaxSize().w;
     int y           = 0;
@@ -103,7 +94,6 @@ public:
         dialog.setHint("Press any button to close");
     }
 
-    void setContext(UiContext& context) override { dialog.setContext(context); }
     void layout(UiLayoutContext& context) override { context.layoutChild(dialog, context.getMaxRect()); }
 
     bool onRawEvent(const RawEvent& event) override {

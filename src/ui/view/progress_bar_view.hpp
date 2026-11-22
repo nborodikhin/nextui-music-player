@@ -11,9 +11,6 @@ public:
     void setPercent(int percent);
     int getPercent() const { return percent; }
 
-    /** Draws the bar again with the colors of the theme. */
-    void invalidate() { dirty = true; }
-
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
 
@@ -34,7 +31,6 @@ public:
     /** A value outside 0 to 100 is clamped. */
     void setPercent(int percent);
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

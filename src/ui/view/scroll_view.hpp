@@ -37,7 +37,6 @@ public:
     bool canScrollUp() const { return offset > 0; }
     bool canScrollDown() const { return offset < getMaxOffset(); }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

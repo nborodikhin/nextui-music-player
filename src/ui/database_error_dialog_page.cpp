@@ -48,7 +48,6 @@ public:
         dialog.setHint("Press any button to exit");
     }
 
-    void setContext(UiContext& context) override { dialog.setContext(context); }
     void layout(UiLayoutContext& context) override { context.layoutChild(dialog, context.getMaxRect()); }
 
     bool onRawEvent(const RawEvent& event) override {

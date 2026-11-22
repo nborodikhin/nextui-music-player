@@ -78,15 +78,6 @@ public:
 
     std::span<const ButtonRequest> getButtonRequests() const override { return ScrollView::getButtonRequests(); }
 
-    void setContext(UiContext& context) override {
-        titleView.setContext(context);
-        statusView.setContext(context);
-        scrollView.setContext(context);
-        scrollUpView.setContext(context);
-        scrollDownView.setContext(context);
-        buttonHintsView.setContext(context);
-    }
-
     void layout(UiLayoutContext& context) override {
         SDL_Rect body = layoutScreenFrame(context, titleView, statusView, buttonHintsView);
         // The foot of a screen with button hints holds one margin above the hints

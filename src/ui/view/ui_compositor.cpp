@@ -117,8 +117,8 @@ UiSize UiCompositor::getScreenSize() const {
     return UiSize{screen->w, screen->h};
 }
 
-UiLayoutContext& UiCompositor::beginLayout() {
-    root.emplace(UiLayoutContext::makeRoot(getScreenSize(), surfaceOnly));
+UiLayoutContext& UiCompositor::beginLayout(UiContext& context) {
+    root.emplace(UiLayoutContext::makeRoot(getScreenSize(), surfaceOnly, context));
     return *root;
 }
 
@@ -241,7 +241,8 @@ void UiCompositor::prepareEntries() {
     for (Entry& entry : entries) {
         if (!entry.shown) continue;
         const auto bitmap = bitmaps.find(entry.viewId);
-        entry.needsDraw   = entry.view->isDirty() || bitmap == bitmaps.end() || !bitmap->second.drawn ||
+        entry.needsDraw   = entry.view->isDirty() || entry.view->attachDirty || bitmap == bitmaps.end() ||
+                          !bitmap->second.drawn ||
                           bitmap->second.drawnSize != UiSize{entry.screenRect.w, entry.screenRect.h};
     }
     drawViews();
@@ -254,6 +255,7 @@ void UiCompositor::drawViews() {
         const UiSize size = {entry.screenRect.w, entry.screenRect.h};
         BitmapDrawContext context(bitmap.surface, size);
         entry.view->draw(context);
+        entry.view->attachDirty = false;
         SDL_Surface* drawn = context.getBitmap();
         if (bitmap.surface && bitmap.surface != drawn) SDL_FreeSurface(bitmap.surface);
         bitmap.surface     = drawn;

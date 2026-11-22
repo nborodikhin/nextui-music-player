@@ -16,11 +16,12 @@ class PlatformGroupView : public UiView {
 public:
     ~PlatformGroupView() override;
 
-    void setContext(UiContext& context) override;
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
 
 protected:
+    void onAttach(UiContext& context) override;
+
     /**
      * Returns the scratch surface, transparent, or null where it cannot exist. Only the part of
      * the last render is cleared, thus a render draws inside the rectangle that it gives to

@@ -58,14 +58,6 @@ int layoutCentered(UiLayoutContext& context, UiView& view, int y, int maxHeight)
     return size.h;
 }
 
-void ScreenView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    titleView.setContext(context);
-    statusView.setContext(context);
-    buttonHintsView.setContext(context);
-    if (content) content->setContext(context);
-}
-
 void ScreenView::layout(UiLayoutContext& context) {
     const int bodyTop    = layoutScreenTop(context, titleView, statusView);
     const int bodyBottom = layoutScreenBottom(context, buttonHintsView);

@@ -11,8 +11,6 @@ class DialogFrameView : public UiView {
 public:
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
-    /** Draws the frame again with the colors of the theme. */
-    void invalidate() { dirty = true; }
 
 private:
     bool dirty = true;
@@ -35,7 +33,6 @@ public:
     /** Shows content between the title and the hint, as high as its layout makes it. */
     void setContent(UiView* content) { this->content = content; }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

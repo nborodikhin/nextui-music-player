@@ -12,8 +12,9 @@ SDL_Rect intersect(const SDL_Rect& a, const SDL_Rect& b) {
 
 }  // namespace
 
-UiLayoutContext UiLayoutContext::makeRoot(UiSize screenSize, bool surfaceOnly) {
+UiLayoutContext UiLayoutContext::makeRoot(UiSize screenSize, bool surfaceOnly, UiContext& context) {
     UiLayoutContext root;
+    root.uiContext   = &context;
     root.maxSize     = screenSize;
     root.size        = screenSize;
     root.clipRect    = SDL_Rect{0, 0, screenSize.w, screenSize.h};
@@ -34,6 +35,7 @@ UiLayoutContext& UiLayoutContext::layoutChildIn(UiView& childView, const SDL_Rec
                                                 const SDL_Rect* clip) {
     UiLayoutContext& child = children.emplace_back();
     child.view             = &childView;
+    child.uiContext        = uiContext;
     child.origin           = SDL_Point{origin.x + rect.x, origin.y + rect.y};
     child.maxSize          = UiSize{rect.w, rect.h};
     child.size             = child.maxSize;
@@ -44,6 +46,7 @@ UiLayoutContext& UiLayoutContext::layoutChildIn(UiView& childView, const SDL_Rec
         const SDL_Rect screenClip = {origin.x + clip->x, origin.y + clip->y, clip->w, clip->h};
         child.clipRect            = intersect(child.clipRect, screenClip);
     }
+    if (uiContext) childView.prepareLayout(*uiContext);
     childView.layout(child);
     childView.size = child.size;
     return child;
@@ -53,6 +56,7 @@ UiLayoutContext UiLayoutContext::createMeasuringContext() const {
     // The measuring context is not a child of this one, thus the compositor never reads it
     UiLayoutContext measuring;
     measuring.view        = view;
+    measuring.uiContext   = uiContext;
     measuring.origin      = origin;
     measuring.maxSize     = maxSize;
     measuring.size        = size;

@@ -39,7 +39,6 @@ public:
 
     ListView& getListView() { return listView; }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

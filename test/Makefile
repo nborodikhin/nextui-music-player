@@ -216,8 +216,9 @@ $(BIN)/test_input_events: test_input_events.cpp $(INPUT_EVENTS_SRC) $(SRC)/input
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_input_events.cpp $(INPUT_EVENTS_SRC)
 
 $(BIN)/test_page_context: test_page_context.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/page/page_context.hpp \
-                          $(SRC)/ui/view/ui_context.hpp $(SRC)/ui/view/ui_task_scheduler.hpp test.h | $(BIN)
-	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_page_context.cpp $(SRC)/ui/page/page_context.cpp
+                          $(SRC)/ui/view/ui_context.hpp $(SRC)/ui/view/ui_task_scheduler.hpp \
+                          $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_view.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_page_context.cpp $(SRC)/ui/page/page_context.cpp $(SRC)/ui/view/ui_view.cpp
 
 $(BIN)/test_activity_clock: test_activity_clock.cpp $(SRC)/ui/page/activity_clock.hpp test.h | $(BIN)
 	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_activity_clock.cpp
@@ -233,7 +234,7 @@ $(BIN)/test_page_stack: test_page_stack.cpp $(PAGE_STACK_SRC) $(SRC)/ui/page/pag
 	  $(shell pkg-config --libs sdl2)
 
 UI_COMPOSITOR_SRC = $(SRC)/ui/view/ui_view.cpp $(SRC)/ui/view/ui_layout_context.cpp \
-                    $(SRC)/ui/view/ui_compositor.cpp
+                    $(SRC)/ui/view/ui_compositor.cpp $(SRC)/ui/page/page_context.cpp
 
 $(BIN)/test_ui_compositor: test_ui_compositor.cpp $(UI_COMPOSITOR_SRC) $(SRC)/ui/view/ui_view.hpp \
                            $(SRC)/ui/view/ui_layout_context.hpp $(SRC)/ui/view/ui_compositor.hpp $(SRC)/ui_layers.h test.h | $(BIN)

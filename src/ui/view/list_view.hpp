@@ -50,7 +50,6 @@ public:
     /** Returns the id that the adapter gave for the item at `index`. */
     long getItemId(int index) const { return items[static_cast<size_t>(index)].id; }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
 
 private:

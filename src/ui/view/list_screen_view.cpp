@@ -36,13 +36,6 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
     parts.scrollDownView.setVisible(last >= 0 && last < parts.listView.getItemCount() - 1);
 }
 
-void ListScreenView::setContext(UiContext& context) {
-    ScreenView::setContext(context);
-    listView.setContext(context);
-    scrollUpView.setContext(context);
-    scrollDownView.setContext(context);
-}
-
 void ListScreenView::layout(UiLayoutContext& context) {
     // The scroll indicators sit over the pill rows, thus the list screen lays out the whole screen
     layoutListScreen(context, ListScreenParts{

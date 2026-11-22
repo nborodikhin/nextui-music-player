@@ -30,9 +30,8 @@ class UiPageImpl;
  * subclass of UiPageImpl, is hidden in the .cpp file of the page.
  *
  * The stack calls the callbacks of an implementation in this order:
- * 1. setContext() and then onEnter(), one time, when the page becomes the top for the first time.
- *    Both come before the first layout of the page. setContext() comes again at each new screen,
- *    with the same context.
+ * 1. onEnter(), one time, when the page becomes the top for the first time. It comes before the
+ *    first layout of the page. The layout gives each view of the page its context.
  * 2. In each frame while the page is the top: the raw events and the button events, then
  *    onTick().
  * 3. pause() when another page covers it. A covered page gets no event and no tick. It can be
@@ -127,9 +126,6 @@ public:
     /** Called each frame after the events while the page is the top. The context gives the time. */
     virtual void onTick() {}
 
-    /** Gives the views their context. The context drops each cache of the views. */
-    virtual void setContext(UiContext&) {}
-
     /** Lays out the views of the page in context, which is the whole screen. */
     virtual void layout(UiLayoutContext& context) = 0;
 
@@ -143,7 +139,7 @@ protected:
     /** Returns the navigator of the stack that holds the page. Valid from onEnter() to onExit(). */
     PageNavigator& getNavigator() const { return *navigator; }
 
-    /** Returns the context of the page. Valid from setContext() to the destruction of the page. */
+    /** Returns the context of the page. Valid from onEnter() to the destruction of the page. */
     UiContext& getContext() const { return *context; }
 
     /** Returns the scheduler of the page. Its tasks end with the page. */

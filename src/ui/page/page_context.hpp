@@ -30,6 +30,12 @@ public:
 
     /** Cancels each task whose owner is not in `owners`. */
     virtual void updateActiveOwners(const std::vector<TaskOwner>& owners) = 0;
+
+    /** Starts a layout of the page. Each view that the layout lays out or measures stays attached. */
+    virtual void startLayout() = 0;
+
+    /** Ends the layout of the page, and detaches each view that the layout did not reach. */
+    virtual void finishLayout() = 0;
 };
 
 #endif
