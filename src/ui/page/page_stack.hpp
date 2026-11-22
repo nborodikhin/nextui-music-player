@@ -107,8 +107,12 @@ public:
     /** Returns the legacy module that the top page asked to run, and forgets it. */
     std::function<ModuleExitReason(DisplayContext*)> takeLegacyModule();
 
-    /** Closes the legacy page after its module returned, and resumes the page under it. */
-    void completeLegacyModule();
+    /**
+     * Closes the legacy page after its module returned with `reason`, and resumes the page under
+     * it. The page that opened the legacy page gets its result before it resumes, except after
+     * MODULE_EXIT_QUIT.
+     */
+    void completeLegacyModule(ModuleExitReason reason);
 
     void exit() override;
     void runLegacyModule(std::function<ModuleExitReason(DisplayContext*)> module) override;

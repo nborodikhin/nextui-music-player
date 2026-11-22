@@ -54,14 +54,20 @@ typedef enum {
     RADIO_STATE_ERROR
 } RadioState;
 
-// Initialize radio module
+// Initialize radio module. Returns 0 when the radio is ready, and -1 when it is not.
 int Radio_init(void);
 
-// Cleanup
+// Stops the radio and frees it. Does nothing when the radio is not ready.
 void Radio_quit(void);
 
 // Get list of preset stations
 int Radio_getStations(RadioStation** stations);
+
+// Returns the index in `stations` of the station to play after the station of `url`, or before it
+// when `next` is false, or -1 when no other station can play. The step wraps at each end. A `url`
+// that is not in the list, or NULL, steps to the first station, or to the last one when `next` is
+// false.
+int Radio_pickStation(const RadioStation* stations, int count, const char* url, bool next);
 
 // Add a custom station
 int Radio_addStation(const char* name, const char* url, const char* genre, const char* slogan);
@@ -90,9 +96,6 @@ const char* Radio_getCurrentUrl(void);
 // Take away the title, the artist and the bitrate of the station that played.
 // A station that the user leaves keeps none of them on the screen of the next.
 void Radio_clearMetadata(void);
-
-// Find the index of the currently playing station in the station list (-1 if not found)
-int Radio_findCurrentStationIndex(void);
 
 // Get current metadata
 const RadioMetadata* Radio_getMetadata(void);

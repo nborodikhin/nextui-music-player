@@ -126,7 +126,7 @@ public:
     /** Each item keeps its view while the menu runs, thus the Resume row keeps its scrolling. */
     std::shared_ptr<ListItemView> getView(int index) override {
         std::shared_ptr<ListRowView>& row = rowViews[static_cast<size_t>(getItem(index))];
-        if (!row) row = std::make_shared<ListRowView>(Fonts_getLarge());
+        if (!row) row = std::make_shared<ListRowView>(Fonts_getMedium());
         return row;
     }
 
@@ -226,13 +226,22 @@ private:
 
     void openItem() {
         switch (selectedItem) {
-            case MenuItem::NowPlaying: getNavigator().open(NowPlayingPage{}); break;
+            case MenuItem::NowPlaying: openNowPlaying(); break;
             case MenuItem::Resume:     getNavigator().open(ResumePage{}); break;
             case MenuItem::Library:    getNavigator().open(LibraryPage{}); break;
             case MenuItem::Radio:      getNavigator().open(RadioPage{}); break;
             case MenuItem::Podcast:    getNavigator().open(PodcastPage{}); break;
             case MenuItem::Settings:   getNavigator().open(SettingsPage{}); break;
             case MenuItem::None:       break;
+        }
+    }
+
+    /** The radio opens its station list, which opens the playing screen at once */
+    void openNowPlaying() {
+        if (Background_getActive() == BG_RADIO) {
+            getNavigator().open(RadioPage{});
+        } else {
+            getNavigator().open(NowPlayingPage{});
         }
     }
 

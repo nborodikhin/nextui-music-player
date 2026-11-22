@@ -48,8 +48,9 @@ void DialogView::layout(UiLayoutContext& context) {
     const int textWidth       = width - 2 * padding;
     const int titleHeight = measuring.layoutChild(title, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
     const int hintHeight  = measuring.layoutChild(hint, SDL_Rect{0, 0, textWidth, space.h}).getSize().h;
-    const int contentHeight =
-        content ? measuring.layoutChild(*content, SDL_Rect{0, 0, textWidth, space.h}).getSize().h : 0;
+    const UiSize contentSize =
+        content ? measuring.layoutChild(*content, SDL_Rect{0, 0, textWidth, space.h}).getSize() : UiSize{};
+    const int contentHeight = contentSize.h;
     const int bodyHeight = content ? contentHeight + gap : 0;
     const int height      = top + titleHeight + gap + bodyHeight + hintHeight + gap;
 
@@ -58,7 +59,10 @@ void DialogView::layout(UiLayoutContext& context) {
     layoutText(context, measuring, title, surface, surface.y + top);
     int y = surface.y + top + titleHeight + gap;
     if (content) {
-        context.layoutChild(*content, SDL_Rect{surface.x + padding, y, textWidth, contentHeight});
+        const int x = alignment == Alignment::Center ? surface.x + (surface.w - contentSize.w) / 2
+                                                     : surface.x + padding;
+        // The same width as the measure, thus a text with an ellipsis does not render again
+        context.layoutChild(*content, SDL_Rect{x, y, textWidth, contentHeight});
         y += contentHeight + gap;
     }
     layoutText(context, measuring, hint, surface, y);

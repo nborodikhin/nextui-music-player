@@ -37,6 +37,11 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
 }
 
 void ListScreenView::layout(UiLayoutContext& context) {
+    if (emptyState && listView.getItemCount() == 0) {
+        const SDL_Rect body = layoutScreenFrame(context, getTitleView(), getStatusView(), getButtonHintsView());
+        context.layoutChild(*emptyState, body);
+        return;
+    }
     // The scroll indicators sit over the pill rows, thus the list screen lays out the whole screen
     layoutListScreen(context, ListScreenParts{
                                   .titleView       = getTitleView(),

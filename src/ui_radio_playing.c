@@ -62,14 +62,14 @@ static bool sound_is_running(void) {
 static RadioStation* get_station_by_index(int index) {
     RadioStation* stations;
     int count = Radio_getStations(&stations);
-    if (count > 0 && index < count) {
+    if (index >= 0 && index < count) {
         return &stations[index];
     }
     return NULL;
 }
 
 // Render the radio playing screen
-void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selected) {
+void render_radio_playing(SDL_Surface* screen, int show_setting, int station_index) {
     GFX_clear(screen);
 
     // Render album art as triangular background (if available and not being fetched)
@@ -87,7 +87,7 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
 
     RadioState state = Radio_getState();
     const RadioMetadata* meta = Radio_getMetadata();
-    RadioStation* current_station = get_station_by_index(radio_selected);
+    RadioStation* current_station = get_station_by_index(station_index);
     RadioStation* stations;
     int station_count = Radio_getStations(&stations);
 
@@ -98,11 +98,12 @@ void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selec
     const char* chip_text = "RADIO";
     SDL_Rect chip = draw_chip(screen, chip_text, SCALE1(PADDING), top_y);
 
-    // Station counter "01 - 12" (like track counter in local player)
+    // Station counter "01 - 12" (like track counter in local player). A station that is not in
+    // the list has no position.
     char station_str[32];
-    snprintf(station_str, sizeof(station_str), "%02d - %02d", radio_selected + 1, station_count);
-    SDL_Surface* station_surf = TTF_RenderUTF8_Blended(
-        Fonts_getTiny(), station_str, Theme_getColor(THEME_ROLE_SECONDARY, false));
+    snprintf(station_str, sizeof(station_str), "%02d - %02d", station_index + 1, station_count);
+    SDL_Surface* station_surf = current_station ? TTF_RenderUTF8_Blended(
+        Fonts_getTiny(), station_str, Theme_getColor(THEME_ROLE_SECONDARY, false)) : NULL;
     if (station_surf) {
         int station_x = chip.x + chip.w + SCALE1(8);
         int station_y = top_y + (chip.h - station_surf->h) / 2;

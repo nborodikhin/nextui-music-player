@@ -30,7 +30,10 @@ public:
     void setTitle(const std::string& text) { title.setText(text); }
     void setHint(const std::string& text) { hint.setText(text); }
 
-    /** Shows content between the title and the hint, as high as its layout makes it. */
+    /**
+     * Shows content between the title and the hint, as high as its layout makes it. A centered
+     * dialog puts the content in the middle, as wide as its layout makes it.
+     */
     void setContent(UiView* content) { this->content = content; }
 
     void layout(UiLayoutContext& context) override;
