@@ -47,20 +47,13 @@ void PageStack::setDialogOpeners(std::function<void(HelpId)> help, std::function
 }
 
 void PageStack::start(std::unique_ptr<UiPageImplBase> page, const UiScreenInfo& newScreen) {
-    screen       = &newScreen;
-    stackContext = PageContext::create(newScreen);
-    snapshot.setContext(*stackContext);
+    screen = &newScreen;
     push(std::move(page));
 }
 
 void PageStack::setScreen(const UiScreenInfo& newScreen) {
     screen = &newScreen;
-    stackContext->setScreen(newScreen);
-    snapshot.setContext(*stackContext);
-    for (PageEntry& entry : entries) {
-        entry.context->setScreen(newScreen);
-        entry.page->setContext(*entry.context);
-    }
+    for (PageEntry& entry : entries) entry.context->setScreen(newScreen);
     snapshotStale = true;
 }
 
@@ -112,10 +105,12 @@ void PageStack::layout(UiCompositor& compositor) {
         takeSnapshot(compositor);
     }
 
-    UiLayoutContext& root = compositor.beginLayout();
+    PageEntry& top        = entries.back();
+    UiLayoutContext& root = compositor.beginLayout(*top.context);
+    top.context->startLayout();
     if (dialogOnTop) root.layoutChild(snapshot, root.getMaxRect());
-    PageEntry& top = entries.back();
     top.page->layout(root);
+    top.context->finishLayout();
 
     // A view that left the layout loses its tasks. The layout of a snapshot does not count, thus
     // the views of a covered page keep their tasks.
@@ -132,7 +127,8 @@ void PageStack::takeSnapshot(UiCompositor& compositor) {
         snapshot.clear();
         return;
     }
-    entries[entries.size() - 2].page->layout(compositor.beginLayout());
+    PageEntry& under = entries[entries.size() - 2];
+    under.page->layout(compositor.beginLayout(*under.context));
     snapshot.setImage(compositor.drawSnapshot(), dimColor);
 }
 
@@ -243,7 +239,6 @@ void PageStack::push(std::unique_ptr<UiPageImplBase> page) {
     added.navigator = this;
     added.context   = context.get();
     added.scheduler.setContext(*context);
-    added.setContext(*context);
     entries.push_back(PageEntry{
         .context = std::move(context),
         .clock   = {},

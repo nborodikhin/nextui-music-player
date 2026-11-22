@@ -74,15 +74,6 @@ public:
         detail.setText(status.status_detail);
     }
 
-    void setContext(UiContext& context) override {
-        UiView::setContext(context);
-        current.setContext(context);
-        statusText.setContext(context);
-        latest.setContext(context);
-        progress.setContext(context);
-        detail.setContext(context);
-    }
-
     void layout(UiLayoutContext& context) override {
         const UiSize body      = context.getMaxSize();
         const int middle       = body.h / 2;
@@ -144,7 +135,6 @@ public:
         if (isWorking(shownState)) Downloader_cancelUpdate();
     }
 
-    void setContext(UiContext& context) override { screen.setContext(context); }
     void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {

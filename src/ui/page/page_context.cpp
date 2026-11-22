@@ -13,13 +13,20 @@ class PageContextImpl final : public PageContext {
 public:
     explicit PageContextImpl(const UiScreenInfo& screen) : screen(&screen) {}
 
+    ~PageContextImpl() override;
+
     PageContextImpl(const PageContextImpl&)            = delete;
     PageContextImpl& operator=(const PageContextImpl&) = delete;
 
-    void setScreen(const UiScreenInfo& newScreen) override { screen = &newScreen; }
+    void setScreen(const UiScreenInfo& newScreen) override {
+        screen = &newScreen;
+        screenCount++;
+    }
     void startFrame(uint32_t newElapsedTime, uint32_t newActiveTime) override;
     void runFrameTasks() override;
     void updateActiveOwners(const std::vector<TaskOwner>& owners) override;
+    void startLayout() override { layoutNumber++; }
+    void finishLayout() override;
 
     SDL_PixelFormat* getPixelFormat() const override { return screen->getPixelFormat(); }
     UiSize getScreenSize() const override { return screen->getScreenSize(); }
@@ -31,6 +38,13 @@ public:
     TaskId runEachFrame(TaskOwner owner, std::function<void()> callback) override;
     void cancelTask(TaskId id) override;
     bool isTaskPending(TaskId id) const override;
+    void cancelOwnerTasks(TaskOwner owner) override;
+
+protected:
+    void addView(UiView& view) override { views.push_back(&view); }
+    void removeView(UiView& view) override { std::erase(views, &view); }
+    uint32_t getScreenCount() const override { return screenCount; }
+    uint32_t getLayoutNumber() const override { return layoutNumber; }
 
 private:
     struct Task {
@@ -54,7 +68,31 @@ private:
     uint32_t activeTime  = 0;
     std::vector<std::unique_ptr<Task>> tasks;
     bool running = false;
+    /** The views that attached to this context */
+    std::vector<UiView*> views;
+    uint32_t screenCount  = 0;
+    uint32_t layoutNumber = 0;
 };
+
+PageContextImpl::~PageContextImpl() {
+    // A view that outlives the context, such as the snapshot of the stack, keeps no pointer to it
+    while (!views.empty()) detachView(*views.back());
+}
+
+void PageContextImpl::finishLayout() {
+    // A detach removes the view from the list, thus the loop reads a copy
+    const std::vector<UiView*> attached = views;
+    for (UiView* view : attached) {
+        if (!isLaidOut(*view, layoutNumber)) detachView(*view);
+    }
+}
+
+void PageContextImpl::cancelOwnerTasks(TaskOwner owner) {
+    for (const auto& task : tasks) {
+        if (task->owner == owner) task->done = true;
+    }
+    if (!running) removeDone();
+}
 
 TaskId PageContextImpl::post(TaskOwner owner, std::function<void()> task, uint32_t delayMs) {
     return add(owner, std::move(task), delayMs, 0, false);

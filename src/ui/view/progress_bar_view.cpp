@@ -36,13 +36,6 @@ void ProgressBarView::setPercent(int percent) {
     label.setText(text);
 }
 
-void ProgressBarView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    track.setContext(context);
-    label.setContext(context);
-    track.invalidate();
-}
-
 void ProgressBarView::layout(UiLayoutContext& context) {
     const UiSize space        = context.getMaxSize();
     UiLayoutContext measuring = context.createMeasuringContext();

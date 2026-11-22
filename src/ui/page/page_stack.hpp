@@ -158,8 +158,6 @@ private:
     std::unique_ptr<input::ButtonDetector> detector;
     RawEventFanOut rawInput;
     const UiScreenInfo* screen = nullptr;
-    /** The context of the stack, for the snapshot */
-    std::unique_ptr<PageContext> stackContext;
     std::vector<PageEntry> entries;
     std::optional<Command> pending;
     /** The frame has a command, thus the stack ignores a later one */

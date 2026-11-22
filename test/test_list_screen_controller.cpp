@@ -90,7 +90,6 @@ struct Fixture {
     explicit Fixture(std::vector<long> ids = {1, 2, 3, 4, 5, 6}) {
         compositor.setScreen(screen);
         scheduler.setContext(*context);
-        view.setContext(*context);
         adapter.ids = std::move(ids);
         list().setAdapter(adapter);
         layout();
@@ -103,7 +102,7 @@ struct Fixture {
 
     // Lays out the list alone, thus a page move knows the heights of the items
     void layout() {
-        UiLayoutContext& root = compositor.beginLayout();
+        UiLayoutContext& root = compositor.beginLayout(*context);
         root.layoutChild(list(), kList);
         compositor.drawFrame();
     }

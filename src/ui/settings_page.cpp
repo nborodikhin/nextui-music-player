@@ -276,8 +276,6 @@ public:
         getScheduler().postRepeating([this] { refreshLabels(); }, kLabelRefreshMs);
     }
 
-    void setContext(UiContext& context) override { screenView.setContext(context); }
-
     void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
     /** A page over Settings can change the labels: the size of the cache, the helpers, the update */

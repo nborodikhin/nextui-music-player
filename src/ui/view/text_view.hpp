@@ -49,12 +49,13 @@ public:
     int getScrollOffset() const { return offset; }
 
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
 
 protected:
+    void onAttach(UiContext& context) override;
+
     /** Changes the pixels of the drawn text in the bitmap. The base does nothing. */
     virtual void finishDraw(SDL_Surface*) {}
 
@@ -87,6 +88,8 @@ private:
     bool scrolling       = false;
     bool dirty           = true;
     int32_t speedSpPerSecond = 0;
+    /** A start of the scroll came before the attach */
+    bool startPending = false;
     /** The offset with its fraction */
     double exactOffset = 0;
     /** The active time of the last step of the scroll */

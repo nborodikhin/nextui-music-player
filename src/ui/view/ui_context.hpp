@@ -9,6 +9,8 @@
 #include "ui/view/ui_size.hpp"
 #include "ui/view/ui_task_scheduler.hpp"
 
+class UiView;
+
 /** The facts of the screen that a view draws for. */
 class UiScreenInfo {
 public:
@@ -46,8 +48,32 @@ public:
     virtual void cancelTask(TaskId id) = 0;
     virtual bool isTaskPending(TaskId id) const = 0;
 
+    /** Cancels each task of `owner`. */
+    virtual void cancelOwnerTasks(TaskOwner owner) = 0;
+
 protected:
     ~UiContext() = default;
+
+    /** Keeps `view`, which attached to this context, until it detaches. */
+    virtual void addView(UiView& view) = 0;
+
+    /** Forgets `view`, which detached from this context or was destroyed. */
+    virtual void removeView(UiView& view) = 0;
+
+    /** Returns the count of new screens of this context. A view attaches again after a new screen. */
+    virtual uint32_t getScreenCount() const = 0;
+
+    /** Returns the number of the current layout of the page. */
+    virtual uint32_t getLayoutNumber() const = 0;
+
+    /** Detaches `view` from this context. */
+    static void detachView(UiView& view);
+
+    /** Returns true when the layout with `layoutNumber` laid out or measured `view`. */
+    static bool isLaidOut(const UiView& view, uint32_t layoutNumber);
+
+private:
+    friend class UiView;
 };
 
 /** The scheduler of one owner on a context. It schedules nothing before it has a context. */
@@ -56,6 +82,7 @@ public:
     explicit OwnerScheduler(TaskOwner owner) : owner(owner) {}
 
     void setContext(UiContext& newContext) { context = &newContext; }
+    void clearContext() { context = nullptr; }
 
     TaskId post(std::function<void()> task) override { return postDelayed(std::move(task), 0); }
     TaskId postDelayed(std::function<void()> task, uint32_t delayMs) override {

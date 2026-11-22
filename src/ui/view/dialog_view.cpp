@@ -39,14 +39,6 @@ DialogView::DialogView(int width, Alignment alignment, TTF_Font* titleFont, TTF_
     hint.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
 }
 
-void DialogView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    title.setContext(context);
-    hint.setContext(context);
-    if (content) content->setContext(context);
-    frame.invalidate();
-}
-
 void DialogView::layout(UiLayoutContext& context) {
     const UiSize space        = context.getMaxSize();
     const int padding         = SCALE1(15);

@@ -192,8 +192,7 @@ void MultilineTextView::setCutToSpace(bool newCutToSpace) {
     dirty      = true;
 }
 
-void MultilineTextView::setContext(UiContext& context) {
-    UiView::setContext(context);
+void MultilineTextView::onAttach(UiContext&) {
     wrapStale = true;
     dirty     = true;
 }

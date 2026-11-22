@@ -3,13 +3,7 @@
 #include <algorithm>
 
 void VerticalLayout::addChild(std::unique_ptr<UiView> child) {
-    if (hasContext()) child->setContext(getContext());
     children.push_back(std::move(child));
-}
-
-void VerticalLayout::setContext(UiContext& context) {
-    UiView::setContext(context);
-    for (const std::unique_ptr<UiView>& child : children) child->setContext(context);
 }
 
 void VerticalLayout::layout(UiLayoutContext& context) {

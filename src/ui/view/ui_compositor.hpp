@@ -29,8 +29,11 @@ public:
     SDL_PixelFormat* getPixelFormat() const override;
     UiSize getScreenSize() const override;
 
-    /** Returns the root context of a new frame. It stays valid until the next call. */
-    UiLayoutContext& beginLayout();
+    /**
+     * Returns the root context of a new frame, with `context` as the context of each view of the
+     * layout. It stays valid until the next call.
+     */
+    UiLayoutContext& beginLayout(UiContext& context);
 
     /** Draws the views that changed, and composes the damage of the frame. */
     void drawFrame();

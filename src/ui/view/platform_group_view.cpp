@@ -7,8 +7,7 @@ PlatformGroupView::~PlatformGroupView() {
     if (scratch) SDL_FreeSurface(scratch);
 }
 
-void PlatformGroupView::setContext(UiContext& context) {
-    UiView::setContext(context);
+void PlatformGroupView::onAttach(UiContext& context) {
     if (scratch) SDL_FreeSurface(scratch);
     const UiSize size = context.getScreenSize();
     scratch           = SDL_CreateRGBSurfaceWithFormat(0, size.w, size.h, 32, SDL_PIXELFORMAT_ARGB8888);

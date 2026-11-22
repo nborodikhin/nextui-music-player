@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "ui_utils.h"
@@ -42,7 +43,10 @@ void TextView::startScrolling(int32_t spPerSecond) {
         return;
     }
     speedSpPerSecond = spPerSecond;
-    if (!hasContext()) return;
+    if (!hasContext()) {
+        startPending = true;
+        return;
+    }
     // The new speed counts from now, also for a text that moves
     stepTime = getContext().getActiveTime();
     if (!getScheduler().isTaskPending(scrollTask)) {
@@ -55,6 +59,7 @@ void TextView::startScrolling() { startScrolling(SCROLLING_SPEED_SP); }
 
 void TextView::stopScrolling() {
     speedSpPerSecond = 0;
+    startPending     = false;
     getScheduler().cancelTask(scrollTask);
     scrollTask = 0;
     updateScrolling();
@@ -92,10 +97,12 @@ void TextView::setOffset(double newOffset) {
     dirty  = true;
 }
 
-void TextView::setContext(UiContext& context) {
-    UiView::setContext(context);
+void TextView::onAttach(UiContext&) {
     renderStale = true;
     dirty       = true;
+    // Only a start from before the attach starts the scroll. A view that comes back to the layout
+    // scrolls again after a new start only.
+    if (std::exchange(startPending, false)) startScrolling(speedSpPerSecond);
 }
 
 int TextView::getFontHeight() const { return TTF_FontHeight(font); }

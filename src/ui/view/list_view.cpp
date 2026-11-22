@@ -27,7 +27,6 @@ void ListView::notifyDataChanged() {
             kept.erase(it);
         } else {
             view = adapter->getView(index);
-            if (hasContext()) view->setContext(getContext());
         }
         items.push_back(Item{id, std::move(view), 0});
     }
@@ -83,11 +82,6 @@ bool ListView::movePage(int direction) {
 
 void ListView::setSelectedIndex(int index) {
     select(items.empty() ? -1 : std::clamp(index, 0, getItemCount() - 1));
-}
-
-void ListView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    for (Item& item : items) item.view->setContext(context);
 }
 
 int ListView::getTop(int index) const {

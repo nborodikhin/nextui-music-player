@@ -9,22 +9,13 @@
 class UiView {
 public:
     UiView();
-    virtual ~UiView() = default;
+    virtual ~UiView();
 
     UiView(const UiView&)            = delete;
     UiView& operator=(const UiView&) = delete;
 
     /** Returns an id that no other view of the run has. */
     int getId() const { return id; }
-
-    /**
-     * Drops each cache of the view. An override calls the base and forwards the call to the
-     * children.
-     */
-    virtual void setContext(UiContext& newContext) {
-        context = &newContext;
-        scheduler.setContext(newContext);
-    }
 
     /**
      * Sets the size and the content rectangle of the view, and lays out its children. A view
@@ -49,6 +40,12 @@ public:
     virtual void draw(UiDrawContext&) {}
 
 protected:
+    /**
+     * Called when the view attaches to `newContext`, before its layout. An override drops each
+     * cache that depends on the screen.
+     */
+    virtual void onAttach([[maybe_unused]] UiContext& newContext) {}
+
     UiContext& getContext() const { return *context; }
     bool hasContext() const { return context != nullptr; }
 
@@ -60,12 +57,29 @@ protected:
 
 private:
     friend class UiLayoutContext;
+    friend class UiContext;
+    friend class UiCompositor;
+
+    /** Attaches the view to `layoutContext` where it is not attached to it for the current screen. */
+    void prepareLayout(UiContext& layoutContext);
+
+    /** Gives the view `newContext`, marks the view dirty, and calls onAttach(). */
+    void attach(UiContext& newContext);
+
+    /** Cancels each task of the view, and takes its context away. */
+    void detach();
 
     int id;
     UiContext* context = nullptr;
     OwnerScheduler scheduler{id};
     UiSize size        = {0, 0};
     bool ownerVisible  = true;
+    /** The view attached after its last draw */
+    bool attachDirty = false;
+    /** The count of new screens of the context at the attach */
+    uint32_t screenCount = 0;
+    /** The number of the last layout of the page that reached the view */
+    uint32_t layoutNumber = 0;
 };
 
 #endif

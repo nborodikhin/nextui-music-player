@@ -120,7 +120,7 @@ struct Fixture {
     uint32_t elapsed = 0;
 
     void frame(UiView& view, const SDL_Rect& rect) {
-        UiLayoutContext& root = compositor.beginLayout();
+        UiLayoutContext& root = compositor.beginLayout(context);
         root.layoutChild(view, rect);
         std::vector<TaskOwner> owners;
         root.collectViewIds(owners);
@@ -134,7 +134,6 @@ const SDL_Rect kRow = {0, 0, 200, 40};
 TEST(test_text_that_fits_is_not_clipped_and_does_not_scroll) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText("short");
     f.frame(view, kRow);
     CHECK(!view.isClipped());
@@ -155,7 +154,6 @@ int scrolledBy(int speedSp, uint32_t ms) { return SCALE1(speedSp) * static_cast<
 TEST(test_scroll_moves_at_its_speed_on_the_active_time) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -170,7 +168,6 @@ TEST(test_scroll_moves_at_its_speed_on_the_active_time) {
 TEST(test_stop_keeps_the_offset_and_a_new_speed_continues_from_it) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -200,7 +197,6 @@ TEST(test_stop_keeps_the_offset_and_a_new_speed_continues_from_it) {
 TEST(test_a_new_speed_in_a_frame_does_not_count_the_time_before_it) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -217,12 +213,40 @@ TEST(test_a_new_speed_in_a_frame_does_not_count_the_time_before_it) {
     CHECK_EQ_INT(view.getScrollOffset(), before + scrolledBy(80, 250));
 }
 
+TEST(test_a_start_before_the_first_layout_scrolls_after_the_attach) {
+    Fixture f;
+    TextView view(testFont, false);
+    view.setText(kLongText);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), scrolledBy(40, 500));
+}
+
+TEST(test_a_text_that_leaves_the_page_layout_stops_until_the_next_start) {
+    Fixture f;
+    TextView view(testFont, false);
+    TextView other(testFont, false);
+    view.setText(kLongText);
+    view.startScrolling(40);
+    f.frame(view, kRow);
+    f.tick(500);
+    const int before = view.getScrollOffset();
+
+    // The page layout detaches the view, and the next one attaches it again
+    f.context.startLayout();
+    f.frame(other, kRow);
+    f.context.finishLayout();
+    f.tick(5000);
+    f.frame(view, kRow);
+    f.tick(500);
+    CHECK_EQ_INT(view.getScrollOffset(), before);
+}
+
 TEST(test_a_text_that_leaves_the_layout_stops_until_the_next_start) {
     Fixture f;
     TextView view(testFont, false);
     TextView other(testFont, false);
-    view.setContext(f.context);
-    other.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -247,7 +271,6 @@ TEST(test_a_text_that_leaves_the_layout_stops_until_the_next_start) {
 TEST(test_reset_puts_the_text_at_its_start_and_keeps_the_speed) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -262,7 +285,6 @@ TEST(test_reset_puts_the_text_at_its_start_and_keeps_the_speed) {
 TEST(test_new_text_puts_the_offset_at_zero_and_keeps_the_speed) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -278,7 +300,6 @@ TEST(test_new_text_puts_the_offset_at_zero_and_keeps_the_speed) {
 TEST(test_text_that_fits_does_not_move) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText("short");
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -292,7 +313,6 @@ TEST(test_text_that_fits_does_not_move) {
 TEST(test_start_moves_the_text_from_the_next_frame) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     f.tick(1000);
@@ -305,7 +325,6 @@ TEST(test_start_moves_the_text_from_the_next_frame) {
 TEST(test_row_forwards_the_scroll_to_its_whole_text) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText(kLongText);
     row.setSelected(true);
     f.frame(row, kRow);
@@ -323,7 +342,6 @@ TEST(test_row_forwards_the_scroll_to_its_whole_text) {
 TEST(test_row_scrolls_again_when_its_whole_text_comes_back) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText(kLongText);
     row.setSelected(true);
     f.frame(row, kRow);
@@ -377,7 +395,6 @@ TEST(test_text_takes_no_less_than_the_font_height) {
 TEST(test_long_text_with_ellipsis_keeps_one_width) {
     Fixture f;
     TextView view(testFont, true);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     CHECK(view.isClipped());
@@ -413,7 +430,6 @@ TEST(test_color_change_draws_the_view_again) {
 TEST(test_scrolling_text_moves_to_the_layer_and_back) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     CHECK(f.surfaceHasPixels(kRow));
@@ -433,7 +449,6 @@ TEST(test_scrolling_text_moves_to_the_layer_and_back) {
 TEST(test_same_offset_in_whole_pixels_is_not_dirty) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling(40);
@@ -449,7 +464,6 @@ TEST(test_same_offset_in_whole_pixels_is_not_dirty) {
 TEST(test_surface_only_mode_shows_the_text_at_its_offset) {
     Fixture f;
     TextView view(testFont, false);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, kRow);
     view.startScrolling();
@@ -574,7 +588,6 @@ uint32_t opaque(SDL_Color color) {
 TEST(test_progress_bar_fills_its_percent) {
     Fixture f;
     ProgressBarView view(testFont, 10);
-    view.setContext(f.context);
     const SDL_Rect rect = {0, 0, 200, 10};
     const uint32_t fillColor  = opaque(Theme_getColor(THEME_ROLE_PROGRESS_FILL, false));
     const uint32_t trackColor = opaque(Theme_getColor(THEME_ROLE_PROGRESS_TRACK, false));
@@ -636,7 +649,6 @@ TEST(test_title_fades_at_the_cut_and_not_when_it_fits) {
 TEST(test_row_shows_long_text_only_when_selected) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText(kLongText);
     row.startScrolling();
     f.frame(row, kRow);
@@ -653,7 +665,6 @@ TEST(test_row_shows_long_text_only_when_selected) {
 
     Fixture g;
     ListRowView shortRow(testFont);
-    shortRow.setContext(g.context);
     shortRow.setText("short");
     shortRow.setSelected(true);
     shortRow.startScrolling();
@@ -908,7 +919,6 @@ TEST(test_status_group_refresh_with_the_same_pixels_changes_nothing) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     CHECK(f.compositor.hasSurfaceChanged());
     status.refresh();
@@ -921,7 +931,6 @@ TEST(test_status_group_refresh_gives_the_same_pixels) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     const uint32_t once = f.surfaceAt(10, 10);
     CHECK((once >> 24) > 0);
@@ -951,7 +960,6 @@ TEST(test_status_group_renders_when_a_value_settles) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws = 0;
     for (uint32_t now = 1100; now < 1600; now += 100) {
@@ -973,7 +981,6 @@ TEST(test_status_group_renders_again_after_a_change_during_the_render) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readValuesThatChangeInTheDraw);
-    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws = 0;
     statusFrame(f, status, 1100);
@@ -990,7 +997,6 @@ TEST(test_status_group_ignores_a_value_that_comes_back) {
     fakeGroupWidth = 200;
     fakeValues     = StatusValues{};
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.context);
     statusFrame(f, status, 1000);
     fakeGroupDraws        = 0;
     fakeValues.connection = -1;
@@ -1005,7 +1011,6 @@ TEST(test_shorter_status_group_leaves_no_old_pixels) {
     Fixture f(kBigW, kBigH);
     fakeGroupWidth = 200;
     StatusGroupView status(drawFakeGroup, readFakeValues);
-    status.setContext(f.context);
     f.frame(status, SDL_Rect{0, 0, kBigW, SCALE1(PILL_SIZE)});
     CHECK_EQ_INT(status.getSize().w, 200);
     fakeGroupWidth = 100;
@@ -1054,7 +1059,6 @@ SDL_Rect rightViewRect() {
 TEST(test_right_view_shows_at_the_right_edge_of_the_row) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText("short");
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1066,7 +1070,6 @@ TEST(test_right_view_shows_at_the_right_edge_of_the_row) {
 TEST(test_long_text_ends_before_the_right_view) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText(kLongText);
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1076,29 +1079,29 @@ TEST(test_long_text_ends_before_the_right_view) {
     CHECK(!f.surfaceHasPixels(SDL_Rect{right.x - padding * 2, 0, padding * 2, kRow.h}));
 }
 
-TEST(test_right_view_set_after_the_context_gets_the_context) {
+TEST(test_right_view_set_after_the_first_layout_attaches_at_the_next_layout) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
+    f.frame(row, kRow);
     // Records that it got a context
     class ContextView : public SizedView {
     public:
         ContextView() : SizedView(kRightColor, kRightSize) {}
-        void setContext(UiContext& context) override {
-            SizedView::setContext(context);
-            gotContext = true;
-        }
         bool gotContext = false;
+
+    protected:
+        void onAttach(UiContext&) override { gotContext = true; }
     };
     auto right = std::make_shared<ContextView>();
     row.setRightView(right);
+    CHECK(!right->gotContext);
+    f.frame(row, kRow);
     CHECK(right->gotContext);
 }
 
 TEST(test_removed_right_view_makes_the_row_dirty) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText("short");
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1112,7 +1115,6 @@ TEST(test_removed_right_view_makes_the_row_dirty) {
 TEST(test_new_right_view_of_a_selected_row_draws_the_row_again) {
     Fixture f;
     ListRowView row(testFont);
-    row.setContext(f.context);
     row.setText("short");
     row.setSelected(true);
     f.frame(row, kRow);
@@ -1161,7 +1163,6 @@ struct ScreenFixture {
         for (long id = 1; id <= 60; id++) adapter.ids.push_back(id);
         list.setAdapter(adapter);
         list.setSelectedIndex(0);
-        list.setContext(f.context);
         f.frame(listScreen, SDL_Rect{0, 0, kBigW, kBigH});
     }
     void frame() { f.frame(listScreen, SDL_Rect{0, 0, kBigW, kBigH}); }
@@ -1230,7 +1231,6 @@ TEST(test_new_status_width_moves_the_title) {
 TEST(test_dialog_draws_again_only_for_a_change) {
     Fixture f(kScreenW, kScreenH);
     DialogView dialog(200, DialogView::Alignment::Center, testFont, testFont);
-    dialog.setContext(f.context);
     dialog.setTitle("Quit?");
     dialog.setHint("A: Yes");
     const SDL_Rect screen = {0, 0, kScreenW, kScreenH};
@@ -1465,7 +1465,6 @@ int getMultilineHeight(int lines) {
 TEST(test_multiline_text_wraps_at_a_space) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText(kLongText);
     f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
     CHECK(view.getSize().w == 100);
@@ -1479,7 +1478,6 @@ TEST(test_multiline_text_wraps_at_a_space) {
 TEST(test_multiline_text_starts_a_line_at_a_line_break) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("a\n\nb");
     f.frame(view, SDL_Rect{0, 0, 200, kScreenH});
     const int line = getMultilineHeight(1);
@@ -1493,7 +1491,6 @@ TEST(test_multiline_text_starts_a_line_at_a_line_break) {
 TEST(test_multiline_word_wrap_moves_a_long_word_to_the_next_line) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("- abcdefghijklmnopqrstuvwxyz");
     f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
     CHECK(!f.surfaceHasPixels(SDL_Rect{50, 0, 50, getMultilineHeight(1)}));
@@ -1503,7 +1500,6 @@ TEST(test_multiline_word_wrap_moves_a_long_word_to_the_next_line) {
 TEST(test_multiline_character_wrap_fills_the_line) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setWrap(MultilineTextView::Wrap::Characters);
     view.setText("- abcdefghijklmnopqrstuvwxyz");
     f.frame(view, SDL_Rect{0, 0, 100, kScreenH});
@@ -1516,7 +1512,6 @@ TEST(test_multiline_character_wrap_fills_the_line) {
 TEST(test_multiline_long_word_breaks_at_a_character) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("abcdefghijklmnopqrstuvwxyz");
     f.frame(view, SDL_Rect{0, 0, 40, kScreenH});
     CHECK(view.getSize().h > getMultilineHeight(1));
@@ -1527,7 +1522,6 @@ TEST(test_multiline_long_word_breaks_at_a_character) {
 TEST(test_multiline_spans_share_a_line) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText(SpannedText().add("ab ").add("cd", THEME_ROLE_SECONDARY));
     f.frame(view, SDL_Rect{0, 0, 200, kScreenH});
     int firstWidth = 0;
@@ -1540,7 +1534,6 @@ TEST(test_multiline_spans_share_a_line) {
 TEST(test_multiline_same_text_is_not_dirty) {
     Fixture f;
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     CHECK(view.setText("text"));
     f.frame(view, kRow);
     CHECK(!view.isDirty());
@@ -1552,7 +1545,6 @@ TEST(test_multiline_same_text_is_not_dirty) {
 TEST(test_multiline_fixed_line_height_sets_the_height) {
     Fixture f(kScreenW, 200);
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("one\ntwo\nthree");
     view.setLineHeight(30);
     f.frame(view, SDL_Rect{0, 0, 200, 200});
@@ -1562,7 +1554,6 @@ TEST(test_multiline_fixed_line_height_sets_the_height) {
 TEST(test_multiline_max_lines_shows_the_first_lines) {
     Fixture f(kScreenW, 200);
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("one\ntwo\nthree");
     view.setLineHeight(30);
     view.setMaxLines(2);
@@ -1575,7 +1566,6 @@ TEST(test_multiline_max_lines_shows_the_first_lines) {
 TEST(test_multiline_cut_shows_the_lines_that_fit) {
     Fixture f(kScreenW, 200);
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("one\ntwo\nthree");
     view.setLineHeight(30);
     view.setCutToSpace(true);
@@ -1586,10 +1576,9 @@ TEST(test_multiline_cut_shows_the_lines_that_fit) {
 TEST(test_multiline_without_a_cut_shows_each_line) {
     Fixture f(kScreenW, 200);
     MultilineTextView view(testFont);
-    view.setContext(f.context);
     view.setText("one\ntwo\nthree");
     view.setLineHeight(30);
-    UiLayoutContext& root = f.compositor.beginLayout();
+    UiLayoutContext& root = f.compositor.beginLayout(f.context);
     CHECK_EQ_SZ(root.layoutChild(view, SDL_Rect{0, 0, 200, 70}).getSize().h, 90);
 }
 
@@ -1598,12 +1587,177 @@ TEST(test_dialog_takes_the_height_of_its_content) {
     Fixture f(kScreenW, 200);
     DialogView dialog(200, DialogView::Alignment::Left, testFont, testFont);
     MultilineTextView message(testFont);
-    dialog.setContext(f.context);
     dialog.setTitle("Title");
     dialog.setContent(&message);
     message.setText("one\ntwo\nthree");
     f.frame(dialog, SDL_Rect{0, 0, kScreenW, 200});
     CHECK(message.getSize().h == getMultilineHeight(3));
+}
+
+
+namespace {
+
+// A view that counts its attaches and its draws, and posts a task on demand
+class AttachProbeView final : public UiView {
+public:
+    void layout(UiLayoutContext& context) override { context.setSize(UiSize{4, 4}); }
+    void draw(UiDrawContext&) override { draws++; }
+    bool isAttached() const { return hasContext(); }
+    TaskId postTask() { return getScheduler().postDelayed([] {}, 1000); }
+    bool isPending(TaskId task) { return getScheduler().isTaskPending(task); }
+
+    int attaches = 0;
+    int draws    = 0;
+
+protected:
+    void onAttach(UiContext&) override { attaches++; }
+};
+
+// A composite view that lays out its child, or only measures it
+class AttachParentView final : public UiLayout {
+public:
+    explicit AttachParentView(UiView& child) : child(child) {}
+    void layout(UiLayoutContext& context) override {
+        if (measureOnly) {
+            context.createMeasuringContext().layoutChild(child, context.getMaxRect());
+        } else {
+            context.layoutChild(child, context.getMaxRect());
+        }
+    }
+    bool measureOnly = false;
+
+private:
+    UiView& child;
+};
+
+}  // namespace
+
+const SDL_Rect kProbe = {0, 0, 4, 4};
+
+// Lays out `view` as the layout of a page: the views that the layout does not reach detach
+void pageFrame(Fixture& f, UiView& view, bool layOut = true) {
+    f.context.startLayout();
+    UiLayoutContext& root = f.compositor.beginLayout(f.context);
+    if (layOut) root.layoutChild(view, kProbe);
+    f.context.finishLayout();
+    f.compositor.drawFrame();
+}
+
+TEST(test_child_attaches_at_its_first_layout_with_no_forward) {
+    Fixture f;
+    AttachProbeView child;
+    AttachParentView parent(child);
+    CHECK(!child.isAttached());
+    pageFrame(f, parent);
+    CHECK(child.isAttached());
+    CHECK_EQ_INT(child.attaches, 1);
+}
+
+TEST(test_measure_attaches_the_view) {
+    Fixture f;
+    AttachProbeView child;
+    AttachParentView parent(child);
+    parent.measureOnly = true;
+    pageFrame(f, parent);
+    CHECK(child.isAttached());
+    pageFrame(f, parent);
+    CHECK(child.isAttached());
+    CHECK_EQ_INT(child.attaches, 1);
+}
+
+TEST(test_attach_runs_one_time_over_several_frames) {
+    Fixture f;
+    AttachProbeView view;
+    for (int frame = 0; frame < 5; frame++) pageFrame(f, view);
+    CHECK_EQ_INT(view.attaches, 1);
+}
+
+TEST(test_attached_view_draws_again) {
+    Fixture f;
+    AttachProbeView view;
+    pageFrame(f, view);
+    CHECK_EQ_INT(view.draws, 1);
+    pageFrame(f, view);
+    CHECK_EQ_INT(view.draws, 1);
+    f.context.setScreen(f.compositor);
+    pageFrame(f, view);
+    CHECK_EQ_INT(view.attaches, 2);
+    CHECK_EQ_INT(view.draws, 2);
+}
+
+TEST(test_view_that_leaves_the_page_layout_detaches_and_loses_its_tasks) {
+    Fixture f;
+    AttachProbeView view;
+    pageFrame(f, view);
+    const TaskId task = view.postTask();
+    CHECK(view.isPending(task));
+    pageFrame(f, view, false);
+    CHECK(!view.isAttached());
+    CHECK(!f.context.isTaskPending(task));
+    pageFrame(f, view);
+    CHECK(view.isAttached());
+    CHECK_EQ_INT(view.attaches, 2);
+}
+
+TEST(test_layout_outside_a_page_layout_detaches_no_view) {
+    Fixture f;
+    AttachProbeView view;
+    AttachProbeView other;
+    pageFrame(f, view);
+    // A snapshot lays out a covered page with no start and no finish
+    f.compositor.beginLayout(f.context).layoutChild(other, kProbe);
+    f.compositor.drawFrame();
+    CHECK(view.isAttached());
+}
+
+TEST(test_new_screen_attaches_again_with_no_detach) {
+    Fixture f;
+    AttachProbeView view;
+    pageFrame(f, view);
+    const TaskId task = view.postTask();
+    f.context.setScreen(f.compositor);
+    pageFrame(f, view);
+    CHECK_EQ_INT(view.attaches, 2);
+    CHECK(view.isPending(task));
+}
+
+TEST(test_view_that_moves_to_another_context_loses_its_tasks) {
+    Fixture f;
+    std::unique_ptr<PageContext> other = PageContext::create(f.compositor);
+    AttachProbeView view;
+    pageFrame(f, view);
+    const TaskId task = view.postTask();
+    f.compositor.beginLayout(*other).layoutChild(view, kProbe);
+    CHECK(!f.context.isTaskPending(task));
+    CHECK_EQ_INT(view.attaches, 2);
+    // The old context no longer holds the view, thus its next page layout does not detach it
+    pageFrame(f, view, false);
+    CHECK(view.isAttached());
+}
+
+TEST(test_destroyed_view_leaves_its_context) {
+    Fixture f;
+    TaskId task = 0;
+    {
+        AttachProbeView view;
+        pageFrame(f, view);
+        task = view.postTask();
+    }
+    CHECK(!f.context.isTaskPending(task));
+    // The context no longer holds the view, thus its next page layout reads nothing of it
+    AttachProbeView next;
+    pageFrame(f, next);
+    CHECK(next.isAttached());
+}
+
+TEST(test_destroyed_context_detaches_its_views) {
+    Fixture f;
+    std::unique_ptr<PageContext> other = PageContext::create(f.compositor);
+    AttachProbeView view;
+    f.compositor.beginLayout(*other).layoutChild(view, kProbe);
+    CHECK(view.isAttached());
+    other.reset();
+    CHECK(!view.isAttached());
 }
 
 int main() {
@@ -1623,6 +1777,8 @@ int main() {
     RUN(test_scroll_moves_at_its_speed_on_the_active_time);
     RUN(test_stop_keeps_the_offset_and_a_new_speed_continues_from_it);
     RUN(test_a_new_speed_in_a_frame_does_not_count_the_time_before_it);
+    RUN(test_a_start_before_the_first_layout_scrolls_after_the_attach);
+    RUN(test_a_text_that_leaves_the_page_layout_stops_until_the_next_start);
     RUN(test_a_text_that_leaves_the_layout_stops_until_the_next_start);
     RUN(test_reset_puts_the_text_at_its_start_and_keeps_the_speed);
     RUN(test_new_text_puts_the_offset_at_zero_and_keeps_the_speed);
@@ -1682,7 +1838,7 @@ int main() {
     RUN(test_shorter_status_group_leaves_no_old_pixels);
     RUN(test_right_view_shows_at_the_right_edge_of_the_row);
     RUN(test_long_text_ends_before_the_right_view);
-    RUN(test_right_view_set_after_the_context_gets_the_context);
+    RUN(test_right_view_set_after_the_first_layout_attaches_at_the_next_layout);
     RUN(test_removed_right_view_makes_the_row_dirty);
     RUN(test_new_right_view_of_a_selected_row_draws_the_row_again);
     RUN(test_up_indicator_shows_over_the_title_with_no_title_draw);
@@ -1696,5 +1852,15 @@ int main() {
     RUN(test_bitmap_view_does_not_load_a_missing_file);
     RUN(test_progress_bar_fills_its_percent);
     RUN(test_progress_bar_clamps_a_value_out_of_the_range);
+    RUN(test_child_attaches_at_its_first_layout_with_no_forward);
+    RUN(test_measure_attaches_the_view);
+    RUN(test_attach_runs_one_time_over_several_frames);
+    RUN(test_attached_view_draws_again);
+    RUN(test_view_that_leaves_the_page_layout_detaches_and_loses_its_tasks);
+    RUN(test_layout_outside_a_page_layout_detaches_no_view);
+    RUN(test_new_screen_attaches_again_with_no_detach);
+    RUN(test_view_that_moves_to_another_context_loses_its_tasks);
+    RUN(test_destroyed_view_leaves_its_context);
+    RUN(test_destroyed_context_detaches_its_views);
     return test_summary();
 }

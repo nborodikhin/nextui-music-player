@@ -36,15 +36,6 @@ void ListRowView::setSelected(bool newSelected) {
 void ListRowView::setRightView(std::shared_ptr<UiView> view) {
     if (view == rightView) return;
     rightView = std::move(view);
-    if (rightView && hasContext()) rightView->setContext(getContext());
-    dirty = true;
-}
-
-void ListRowView::setContext(UiContext& context) {
-    UiView::setContext(context);
-    shortText.setContext(context);
-    longText.setContext(context);
-    if (rightView) rightView->setContext(context);
     dirty = true;
 }
 

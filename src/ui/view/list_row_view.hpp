@@ -41,7 +41,6 @@ public:
     }
     void resetScrolling() override { longText.resetScrolling(); }
 
-    void setContext(UiContext& context) override;
     void layout(UiLayoutContext& context) override;
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override;
