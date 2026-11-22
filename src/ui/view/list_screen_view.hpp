@@ -46,11 +46,15 @@ public:
      */
     void setEmptyState(EmptyStateView* emptyState) { this->emptyState = emptyState; }
 
+    /** Pass true in `forced` to show the empty state also while the list has items. */
+    void setEmptyStateForced(bool forced) { emptyStateForced = forced; }
+
     void layout(UiLayoutContext& context) override;
 
 private:
     ListView listView;
     EmptyStateView* emptyState = nullptr;
+    bool emptyStateForced      = false;
     ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
     ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
 };

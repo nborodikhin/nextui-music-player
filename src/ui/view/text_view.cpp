@@ -138,6 +138,11 @@ static SDL_Surface* toPremultiplied(SDL_Surface* surface) {
     return converted;
 }
 
+SDL_Surface* TextView::renderBitmap(const std::string& line) const {
+    const SDL_Color opaque = {color.r, color.g, color.b, 255};
+    return toPremultiplied(TTF_RenderUTF8_Blended(font, line.c_str(), opaque));
+}
+
 void TextView::render() {
     freeRender();
     renderStale      = false;

@@ -23,7 +23,7 @@ public:
     ~TextView() override;
 
     /** Returns: true when the text changed */
-    bool setText(const std::string& text);
+    virtual bool setText(const std::string& text);
     void setColor(SDL_Color color);
 
     /** Returns true when the text is wider than the space of the last layout. */
@@ -61,6 +61,14 @@ protected:
 
     bool isScrolling() const { return scrolling; }
     int getFontHeight() const;
+    TTF_Font* getFont() const { return font; }
+    SDL_Color getColor() const { return color; }
+    /** Returns the top of the text in the view, from the last layout. */
+    int getTextTop() const { return textTop; }
+    /** Marks the view drawn, for a subclass that draws its text in a way of its own. */
+    void clearDirty() { dirty = false; }
+    /** Returns `text` in the font and the color of the view, premultiplied. The caller frees it. */
+    SDL_Surface* renderBitmap(const std::string& text) const;
 
 private:
     void render();

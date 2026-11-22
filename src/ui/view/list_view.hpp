@@ -28,7 +28,9 @@ public:
     bool moveBackward();
 
     /**
-     * Moves the selection by the items that fit in the height of the list.
+     * Moves the window of visible items one page, and keeps the selection at the same place on
+     * the screen. A window at the end of the list does not move, and the selection goes to the
+     * last or the first item.
      * Returns: true when the selection moved, and false also when the heights of the items are
      * not known, until the next layout
      */
@@ -64,6 +66,7 @@ private:
 
     int getTop(int index) const;
     int findLastFullyVisible(int first, int height) const;
+    int findFirstFullyVisible(int last, int height) const;
     bool movePage(int direction);
 
     ListAdapter* adapter = nullptr;

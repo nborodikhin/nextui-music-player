@@ -2,6 +2,7 @@
 #define __UI_VIEW_LIST_ROW_VIEW_HPP__
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -17,6 +18,8 @@
  *
  * A row can have a right view at its right edge, and the text then takes the space to the left of
  * it. A selected row with a right view shows a band under the whole row.
+ *
+ * A row can have an icon at its left edge, before the text.
  */
 class ListRowView : public ListItemView {
 public:
@@ -25,6 +28,12 @@ public:
     /** Returns: true when the text changed */
     bool setText(const std::string& text);
     void setSelected(bool selected) override;
+
+    /**
+     * Shows an icon before the text. The row calls `getIcon` with its selection in each draw, and
+     * does not keep the surface. Pass an empty function in `getIcon` to remove the icon.
+     */
+    void setLeftIcon(std::function<SDL_Surface*(bool selected)> getIcon);
 
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
     void setRightView(std::shared_ptr<UiView> view);
@@ -46,6 +55,18 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
+    /** The icon that the getter of the row returns for its selection */
+    class IconView : public UiView {
+    public:
+        std::function<SDL_Surface*(bool selected)> getIcon;
+        bool selected = false;
+        bool dirty    = true;
+
+        bool isDirty() const override { return dirty; }
+        void draw(UiDrawContext& context) override;
+    };
+
+    IconView icon;
     TextView shortText;
     TextView longText;
     std::shared_ptr<UiView> rightView;

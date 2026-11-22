@@ -37,7 +37,7 @@ void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts) {
 }
 
 void ListScreenView::layout(UiLayoutContext& context) {
-    if (emptyState && listView.getItemCount() == 0) {
+    if (emptyState && (emptyStateForced || listView.getItemCount() == 0)) {
         const SDL_Rect body = layoutScreenFrame(context, getTitleView(), getStatusView(), getButtonHintsView());
         context.layoutChild(*emptyState, body);
         return;
