@@ -23,6 +23,10 @@ public:
 
     bool setText(const std::string& text) override;
 
+    using TextView::startScrolling;
+    /** A title in the follow mode moves by itself, thus a start does nothing. */
+    void startScrolling(int32_t spPerSecond) override;
+
     /** Returns the texts that the title shows and will show, in the follow mode. */
     const ScreenTitle& getFollowTape() const { return tape; }
 

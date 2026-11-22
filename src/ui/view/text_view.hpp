@@ -34,7 +34,7 @@ public:
      * is. A text that fits does not move. A view without a context does not move. A view that
      * leaves the layout stops, and moves again at the next start.
      */
-    void startScrolling(int32_t spPerSecond);
+    virtual void startScrolling(int32_t spPerSecond);
 
     /** Moves the text at the speed of each scrolling text of the app. */
     void startScrolling();

@@ -68,6 +68,10 @@ bool TitleTextView::setText(const std::string& text) {
     return changed;
 }
 
+void TitleTextView::startScrolling(int32_t spPerSecond) {
+    if (!follow) TextView::startScrolling(spPerSecond);
+}
+
 uint32_t TitleTextView::getNow() const { return hasContext() ? getContext().getActiveTime() : 0; }
 
 void TitleTextView::restartTape() {

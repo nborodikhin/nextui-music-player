@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,6 +29,7 @@
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/controls_help_page.hpp"
 #include "ui/database_error_dialog_page.hpp"
+#include "ui/file_browser_page.hpp"
 #include "ui/quit_dialog_page.hpp"
 #include "ui/page/page_stack.hpp"
 #include "ui/view/dialog_view.hpp"
@@ -1044,6 +1046,42 @@ TEST(test_right_keeps_the_cursor_under_a_taller_row) {
     p.checkWindow(6, 9, 6);
 }
 
+// The ids of the rows of the file browser
+
+FileEntry makeEntry(const char* name, int dbId, bool isDir, bool isPlayAll = false) {
+    FileEntry entry{};
+    std::snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.db_id       = dbId;
+    entry.is_dir      = isDir;
+    entry.is_play_all = isPlayAll;
+    return entry;
+}
+
+TEST(test_folder_and_file_with_one_database_id_have_different_row_ids) {
+    const long folder  = getFolderRowId(makeEntry("Album", 7, true));
+    const long file    = getFolderRowId(makeEntry("song.mp3", 7, false));
+    const long parent  = getFolderRowId(makeEntry("..", 7, true));
+    const long playAll = getFolderRowId(makeEntry("Play All", -1, false, true));
+    CHECK(folder != file);
+    CHECK(parent != folder);
+    CHECK(playAll != file && playAll != folder && playAll != parent);
+    CHECK_EQ_INT(static_cast<int>(getFolderRowId(makeEntry("Album", 7, true))), static_cast<int>(folder));
+}
+
+TEST(test_refresh_keeps_the_cursor_on_the_file_with_the_id_of_a_folder) {
+    TestAdapter adapter;
+    const FileEntry folder = makeEntry("Album", 3, true);
+    const FileEntry file   = makeEntry("song.mp3", 3, false);
+    adapter.ids            = {getFolderRowId(folder), getFolderRowId(file)};
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(1);
+    // A new file comes before the folder: the cursor stays on the file, not on the folder
+    adapter.ids = {getFolderRowId(makeEntry("a.mp3", 9, false)), getFolderRowId(folder), getFolderRowId(file)};
+    list.notifyDataChanged();
+    CHECK_EQ_INT(list.getSelectedIndex(), 2);
+}
+
 TEST(test_move_past_an_end_wraps_to_the_other_end) {
     TestAdapter adapter;
     adapter.ids = {1, 2, 3};
@@ -1996,6 +2034,8 @@ int main() {
     RUN(test_move_past_the_last_visible_row_scrolls);
     RUN(test_row_that_the_clip_cuts_is_hidden);
     RUN(test_page_needs_the_layout_after_a_data_change);
+    RUN(test_folder_and_file_with_one_database_id_have_different_row_ids);
+    RUN(test_refresh_keeps_the_cursor_on_the_file_with_the_id_of_a_folder);
     RUN(test_right_moves_one_page);
     RUN(test_right_shows_the_last_row);
     RUN(test_right_when_the_last_row_shows_selects_it);
