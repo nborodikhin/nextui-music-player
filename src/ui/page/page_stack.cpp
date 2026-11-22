@@ -164,8 +164,10 @@ std::function<ModuleExitReason(DisplayContext*)> PageStack::takeLegacyModule() {
     return std::exchange(legacyModule, nullptr);
 }
 
-void PageStack::completeLegacyModule() {
-    pop(nullptr);
+void PageStack::completeLegacyModule(ModuleExitReason reason) {
+    if (entries.empty()) return;
+    // No callback runs while the app quits
+    pop(reason == MODULE_EXIT_QUIT ? nullptr : entries.back().page->takeLegacyResultDelivery());
 }
 
 void PageStack::exit() {

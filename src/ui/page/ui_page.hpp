@@ -135,6 +135,12 @@ public:
     /** Called when this page is the top again, and after a sleep of the device. */
     virtual void resume() {}
 
+    /**
+     * Returns the delivery of the result of a legacy page after its module returned, or nullptr
+     * when no caller waits for a result.
+     */
+    virtual std::function<void()> takeLegacyResultDelivery() { return nullptr; }
+
 protected:
     /** Returns the navigator of the stack that holds the page. Valid from onEnter() to onExit(). */
     PageNavigator& getNavigator() const { return *navigator; }
@@ -173,6 +179,15 @@ protected:
     /** Closes the page. A page opened for a result gives Result{}. */
     void close() { finishWith(Result{}); }
 
+    /**
+     * Returns the call of the callback of the caller with `result`, or nullptr when no caller
+     * waits for a result. Call it one time.
+     */
+    std::function<void()> takeResultDelivery(Result result) {
+        if (!onResult) return nullptr;
+        return [callback = std::move(onResult), result = std::move(result)] { callback(result); };
+    }
+
     /** Closes the page and gives result to the page that opened it. */
     void finish(Result result)
         requires(!std::is_same_v<Result, std::monostate>)
@@ -183,13 +198,7 @@ protected:
 private:
     friend class PageNavigator;
 
-    void finishWith(Result result) {
-        if (!onResult) {
-            requestClose(nullptr);
-            return;
-        }
-        requestClose([callback = std::move(onResult), result = std::move(result)] { callback(result); });
-    }
+    void finishWith(Result result) { requestClose(takeResultDelivery(std::move(result))); }
 
     std::function<void(const Result&)> onResult;
 };

@@ -19,8 +19,10 @@ extern "C" {
 // of the station that played before. Pass false once the stream starts.
 void RadioUI_setWaitingToStart(bool waiting);
 
-// Renders the screen on the surface, and records where each layer element goes.
-void render_radio_playing(SDL_Surface* screen, int show_setting, int radio_selected);
+// Renders the screen on the surface, and records where each layer element goes. Pass the index
+// of the station of the screen in the station list in `station_index`, or -1 for a station that
+// is not in the list.
+void render_radio_playing(SDL_Surface* screen, int show_setting, int station_index);
 
 // Paints each layer of the screen. Call after each render of the surface, thus
 // the frame that presents the surface holds every element.

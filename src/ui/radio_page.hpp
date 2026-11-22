@@ -6,7 +6,10 @@
 
 #include "ui/page/ui_page.hpp"
 
-/** Runs the legacy module of the Radio row of Main. Closes when the module returns. */
+/**
+ * The station list of Online Radio. Opens on the playing screen of the radio while a station plays
+ * in the background.
+ */
 class RadioPage final : public UiPage {
 public:
     using Result = std::monostate;

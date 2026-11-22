@@ -1391,6 +1391,23 @@ static void* stream_thread_func(void* arg) {
 
 static bool radio_initialized = false;
 
+// Destroys the mutexes of the radio and frees its buffers.
+static void free_radio_context(void) {
+    pthread_mutex_destroy(&radio.audio_mutex);
+    pthread_mutex_destroy(&radio.hls_mutex);
+
+    free(radio.stream_buffer);
+    radio.stream_buffer = NULL;
+    free(radio.audio_ring);
+    radio.audio_ring = NULL;
+    free(radio.hls_segment_buf);
+    radio.hls_segment_buf = NULL;
+    free(radio.hls_aac_buf);
+    radio.hls_aac_buf = NULL;
+    free(radio.hls_prefetch_buf);
+    radio.hls_prefetch_buf = NULL;
+}
+
 int Radio_init(void) {
     if (radio_initialized) return 0;  // Already initialized
 
@@ -1417,7 +1434,7 @@ int Radio_init(void) {
     if (!radio.stream_buffer || !radio.audio_ring ||
         !radio.hls_segment_buf || !radio.hls_aac_buf || !radio.hls_prefetch_buf) {
         LOG_error("Radio_init: Failed to allocate buffers\n");
-        Radio_quit();
+        free_radio_context();
         return -1;
     }
 
@@ -1439,6 +1456,8 @@ int Radio_init(void) {
 }
 
 void Radio_quit(void) {
+    if (!radio_initialized) return;
+
     Radio_stop();
 
     // Cleanup curated stations module
@@ -1447,29 +1466,7 @@ void Radio_quit(void) {
     // Cleanup album art module
     album_art_cleanup();
 
-    pthread_mutex_destroy(&radio.audio_mutex);
-    pthread_mutex_destroy(&radio.hls_mutex);
-
-    if (radio.stream_buffer) {
-        free(radio.stream_buffer);
-        radio.stream_buffer = NULL;
-    }
-    if (radio.audio_ring) {
-        free(radio.audio_ring);
-        radio.audio_ring = NULL;
-    }
-    if (radio.hls_segment_buf) {
-        free(radio.hls_segment_buf);
-        radio.hls_segment_buf = NULL;
-    }
-    if (radio.hls_aac_buf) {
-        free(radio.hls_aac_buf);
-        radio.hls_aac_buf = NULL;
-    }
-    if (radio.hls_prefetch_buf) {
-        free(radio.hls_prefetch_buf);
-        radio.hls_prefetch_buf = NULL;
-    }
+    free_radio_context();
 
     radio_initialized = false;
 }
@@ -1549,7 +1546,8 @@ void Radio_loadStations(void) {
         char* genre = strtok(NULL, "|");
         char* slogan = strtok(NULL, "|");
 
-        if (name && url) {
+        // A hand-edited file can hold a URL two times: the first station with the URL stays
+        if (name && url && !Radio_stationExists(url)) {
             Radio_addStation(name, url, genre, slogan);
         }
     }
@@ -1867,20 +1865,6 @@ RadioState Radio_getState(void) {
 
 const char* Radio_getCurrentUrl(void) {
     return radio.current_url;
-}
-
-int Radio_findCurrentStationIndex(void) {
-    const char* current_url = Radio_getCurrentUrl();
-    if (!current_url || current_url[0] == '\0') return -1;
-
-    RadioStation* stations;
-    int station_count = Radio_getStations(&stations);
-    for (int i = 0; i < station_count; i++) {
-        if (strcmp(stations[i].url, current_url) == 0) {
-            return i;
-        }
-    }
-    return -1;
 }
 
 const RadioMetadata* Radio_getMetadata(void) {

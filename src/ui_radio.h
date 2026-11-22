@@ -12,10 +12,6 @@ extern "C" {
 // The lists and the setup screens of the radio. The playing screen is in
 // ui_radio_playing.h.
 
-// Render the radio station list
-void render_radio_list(SDL_Surface* screen, int show_setting,
-                       int radio_selected, int* radio_scroll);
-
 // Render add stations - country selection screen
 void render_radio_add(SDL_Surface* screen, int show_setting,
                       int add_country_selected, int* add_country_scroll);

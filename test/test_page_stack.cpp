@@ -381,6 +381,25 @@ TEST(callback_runs_before_the_page_under_resumes) {
                  "main resume"}));
 }
 
+TEST(page_that_opens_a_page_at_enter_gets_the_result_before_it_resumes) {
+    ResultPage child;
+    child.name         = "child";
+    child.onShortPress = [](TestPageImpl<ResultPage>& impl, Button) { impl.doFinish(3); };
+    PlainPage main   = makePage("main");
+    main.onEnterHook = [child](TestPageImpl<PlainPage>& impl) {
+        impl.navigator().openForResult(child, [](const int& result) {
+            pageLog.push_back("callback " + std::to_string(result));
+        });
+    };
+    StackFixture f(main);
+    f.endFrame();
+    CHECK(isLog({"main enter", "main reset", "main pause", "child enter"}));
+    pageLog.clear();
+    f.tap(Button::A);
+    CHECK(isLog({"child pressed A", "child short A", "child reset", "child exit", "callback 3",
+                 "main resume"}));
+}
+
 TEST(callback_that_calls_exit_ends_the_stack) {
     StackFixture f(makePage("main"));
     ResultPage page;
@@ -502,6 +521,32 @@ private:
 
 std::unique_ptr<UiPageImplBase> LegacyTestPage::createPageImpl() const {
     return std::make_unique<LegacyTestPageImpl>(*this);
+}
+
+/** A legacy page whose module calls run, and whose result is the text that run wrote */
+struct LegacyResultPage final : public UiPage {
+    using Result = std::string;
+    std::function<ModuleExitReason(std::string&)> run;
+
+    std::unique_ptr<UiPageImplBase> createPageImpl() const override;
+};
+
+class LegacyResultPageImpl final : public LegacyModulePageImpl<LegacyResultPage> {
+public:
+    explicit LegacyResultPageImpl(const LegacyResultPage& page) : page(page) {}
+    void onExit() override { pageLog.push_back("legacy exit"); }
+
+protected:
+    ModuleExitReason runModule(DisplayContext*) override { return page.run(text); }
+    std::string getModuleResult() override { return text; }
+
+private:
+    LegacyResultPage page;
+    std::string text;
+};
+
+std::unique_ptr<UiPageImplBase> LegacyResultPage::createPageImpl() const {
+    return std::make_unique<LegacyResultPageImpl>(*this);
 }
 
 class TestLegacyHost : public LegacyModuleHost {
@@ -675,6 +720,46 @@ TEST(legacy_module_that_quits_requests_the_quit) {
     f.stack.open(page);
     f.stack.endFrame();
     runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr);
+    CHECK(f.host.quitRequested);
+}
+
+TEST(legacy_module_gives_its_typed_result_before_the_page_under_resumes) {
+    LegacyFixture f;
+    LegacyResultPage page;
+    page.run = [](std::string& text) {
+        text = "station";
+        return MODULE_EXIT_BACK;
+    };
+    f.stack.openForResult(page, [](const std::string& result) { pageLog.push_back("callback " + result); });
+    f.stack.endFrame();
+    pageLog.clear();
+    CHECK(runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr));
+    CHECK(isLog({"before module", "after module", "legacy exit", "callback station", "main resume"}));
+}
+
+TEST(legacy_page_with_no_result_gets_its_callback) {
+    LegacyFixture f;
+    LegacyTestPage page;
+    page.run = [](DisplayContext*) { return MODULE_EXIT_TO_MENU; };
+    f.stack.openForResult(page, [](const std::monostate&) { pageLog.push_back("callback"); });
+    f.stack.endFrame();
+    pageLog.clear();
+    CHECK(runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr));
+    CHECK(isLog({"before module", "after module", "legacy exit", "callback", "main resume"}));
+}
+
+TEST(legacy_module_that_quits_gives_no_result) {
+    LegacyFixture f;
+    LegacyResultPage page;
+    page.run = [](std::string& text) {
+        text = "station";
+        return MODULE_EXIT_QUIT;
+    };
+    f.stack.openForResult(page, [](const std::string& result) { pageLog.push_back("callback " + result); });
+    f.stack.endFrame();
+    pageLog.clear();
+    CHECK(runLegacyModuleOfStack(f.stack, f.compositor, f.host, nullptr));
+    CHECK(!hasLine("callback station"));
     CHECK(f.host.quitRequested);
 }
 
@@ -935,6 +1020,7 @@ int main(void) {
     RUN(dialog_gets_no_event_of_the_opening_gesture);
     RUN(close_of_a_page_with_a_result_gives_the_default);
     RUN(callback_runs_before_the_page_under_resumes);
+    RUN(page_that_opens_a_page_at_enter_gets_the_result_before_it_resumes);
     RUN(callback_that_calls_exit_ends_the_stack);
     RUN(open_then_exit_in_one_frame_opens_and_does_not_quit);
     RUN(exit_then_open_in_one_frame_quits);
@@ -950,6 +1036,9 @@ int main(void) {
     RUN(legacy_module_takes_the_screen_again_at_the_same_address);
     RUN(legacy_module_leaves_no_pixels_on_the_layers);
     RUN(legacy_module_that_quits_requests_the_quit);
+    RUN(legacy_module_gives_its_typed_result_before_the_page_under_resumes);
+    RUN(legacy_page_with_no_result_gets_its_callback);
+    RUN(legacy_module_that_quits_gives_no_result);
     RUN(context_is_ready_at_enter_and_a_task_from_enter_runs_in_the_next_frame);
     RUN(active_time_advances_for_the_top_page_only);
     RUN(covered_page_runs_no_task_and_no_frame_callback);

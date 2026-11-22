@@ -36,7 +36,6 @@ extern "C" {
 #include "ui/page/page_stack.hpp"
 #include "module_file_browser.h"
 #include "music_session.h"
-#include "module_radio.h"
 #include "module_podcast.h"
 #include "downloader.h"
 #include "settings.h"

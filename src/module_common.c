@@ -136,11 +136,8 @@ bool ModuleCommon_skipTrack(bool next) {
         // Radio is active - switch stations
         RadioStation* stations;
         int station_count = Radio_getStations(&stations);
-        if (station_count <= 1) return false;
-        int current_idx = Radio_findCurrentStationIndex();
-        if (current_idx < 0) return false;
-        int new_idx = next ? (current_idx + 1) % station_count
-                           : (current_idx - 1 + station_count) % station_count;
+        int new_idx = Radio_pickStation(stations, station_count, Radio_getCurrentUrl(), next);
+        if (new_idx < 0) return false;
         Radio_stop();
         Radio_play(stations[new_idx].url);
         return true;

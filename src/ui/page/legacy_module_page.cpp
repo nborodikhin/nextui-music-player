@@ -14,7 +14,8 @@ bool runLegacyModuleOfStack(PageStack& stack, UiCompositor& compositor, LegacyMo
     compositor.clearUsedLayers();
     host.beforeModule();
     // A module that quits through a self-update restart does not set the quit flag
-    if (module(display) == MODULE_EXIT_QUIT) host.requestQuit();
+    const ModuleExitReason reason = module(display);
+    if (reason == MODULE_EXIT_QUIT) host.requestQuit();
     UiLayer_clear(UI_LAYER_STATUS);
     UiLayer_clear(UI_LAYER_ANIMATION);
     host.afterModule();
@@ -23,6 +24,6 @@ bool runLegacyModuleOfStack(PageStack& stack, UiCompositor& compositor, LegacyMo
     // each case, and draws the whole screen
     compositor.setScreen(host.getScreen());
     stack.setScreen(compositor);
-    stack.completeLegacyModule();
+    stack.completeLegacyModule(reason);
     return true;
 }

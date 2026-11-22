@@ -223,7 +223,7 @@ LOCAL_SRC = \
     http_download.c wget_fetch.c file_utils.c wifi.c keyboard.c settings.c resume.c \
     add_to_playlist.c background.c \
     module_common.c module_file_browser.c music_session.c module_music_playing.c \
-    module_playlist.c module_radio.c module_podcast.c module_downloader.c \
+    module_playlist.c module_radio_playing.c module_radio_manage.c radio_step.c module_podcast.c module_downloader.c \
     frame_state.c ui_layers.c lyric_window.c \
     ui_music_playing.c ui_radio_playing.c ui_podcast_playing.c \
     list_nav.c list_nav_pad.c mp3_seek.c seek_scan.c toast.c toast_state.c screen_title.c stopwatch.cpp error.cpp podcast_episode_layout.c \
@@ -236,7 +236,7 @@ LOCAL_SRC = \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
     input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
     ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
-    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/podcast_page.cpp \
+    ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/podcast_page.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp \
     ui/playlists_page.cpp ui/downloader_page.cpp \
     ui/main_menu_page.cpp \
@@ -244,7 +244,7 @@ LOCAL_SRC = \
     ui/view/text_view.cpp ui/view/title_text_view.cpp ui/view/list_row_view.cpp ui/view/list_view.cpp \
     ui/view/scroll_indicator_view.cpp ui/view/scroll_view.cpp ui/view/vertical_layout.cpp ui/view/platform_group_view.cpp ui/view/status_group_view.cpp \
     ui/view/button_hints_view.cpp ui/view/list_screen_view.cpp ui/view/screen_view.cpp ui/view/box_view.cpp \
-    ui/view/dialog_view.cpp ui/view/multiline_text_view.cpp ui/view/snapshot_view.cpp ui/view/bitmap_view.cpp ui/view/progress_bar_view.cpp \
+    ui/view/dialog_view.cpp ui/view/multiline_text_view.cpp ui/view/snapshot_view.cpp ui/view/bitmap_view.cpp ui/view/progress_bar_view.cpp ui/view/empty_state_view.cpp \
     audio/kiss_fft.c audio/kiss_fftr.c audio/sonic.c \
     include/yxml/yxml.c \
     include/parson/parson.c

@@ -4,6 +4,7 @@
 #include <SDL2/SDL_ttf.h>
 
 #include "ui/view/button_hints_view.hpp"
+#include "ui/view/empty_state_view.hpp"
 #include "ui/view/list_view.hpp"
 #include "ui/view/scroll_indicator_view.hpp"
 #include "ui/view/screen_view.hpp"
@@ -39,10 +40,17 @@ public:
 
     ListView& getListView() { return listView; }
 
+    /**
+     * Shows `emptyState` in place of the list and the scroll indicators while the list has no
+     * item. The view stays with the caller. Pass null for no empty state.
+     */
+    void setEmptyState(EmptyStateView* emptyState) { this->emptyState = emptyState; }
+
     void layout(UiLayoutContext& context) override;
 
 private:
     ListView listView;
+    EmptyStateView* emptyState = nullptr;
     ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
     ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
 };

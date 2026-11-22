@@ -26,9 +26,16 @@ public:
     /** A legacy page has no views: the module draws the screen. */
     void layout(UiLayoutContext&) override {}
 
+    std::function<void()> takeLegacyResultDelivery() override {
+        return this->takeResultDelivery(getModuleResult());
+    }
+
 protected:
     /** Runs the module until it exits, and returns its exit reason. */
     virtual ModuleExitReason runModule(DisplayContext* display) = 0;
+
+    /** Returns the result of the page after its module returned. */
+    virtual typename Page::Result getModuleResult() { return {}; }
 };
 
 /** The work around a legacy module that depends on the platform. */
@@ -49,7 +56,8 @@ protected:
  * Runs the legacy module that the top page of stack asked for, and returns false when it asked
  * for none. The module draws the screen and writes the status layer and the animation layer with
  * no record in the compositor. Thus after the module, the stack clears these layers, takes the
- * screen again, and draws the whole screen. Then it closes the legacy page.
+ * screen again, and draws the whole screen. Then it closes the legacy page, and gives its result
+ * to the page that opened it, except after MODULE_EXIT_QUIT.
  */
 bool runLegacyModuleOfStack(PageStack& stack, UiCompositor& compositor, LegacyModuleHost& host,
                             DisplayContext* display);

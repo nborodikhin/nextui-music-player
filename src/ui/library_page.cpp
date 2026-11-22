@@ -49,7 +49,7 @@ public:
     int getCount() const override { return kRowCount; }
     long getItemId(int index) const override { return index; }
     std::shared_ptr<ListItemView> getView(int index) override {
-        auto row = std::make_shared<ListRowView>(Fonts_getLarge());
+        auto row = std::make_shared<ListRowView>(Fonts_getMedium());
         row->setText(kRows[index].label);
         return row;
     }
