@@ -6,14 +6,14 @@
 
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_item_view.hpp"
-#include "ui/view/ui_layout.hpp"
+#include "ui/view/scrolling_view.hpp"
 #include "ui/view/ui_view.hpp"
 
 /**
  * Lays out the items of an adapter in a column, and scrolls to keep the selected item
  * visible. Shows whole items only. Sets the selection of each item view.
  */
-class ListView : public UiLayout {
+class ListView : public ScrollingView {
 public:
     void setAdapter(ListAdapter& adapter);
 
@@ -37,8 +37,11 @@ public:
     bool pageForward();
     bool pageBackward();
 
-    /** Selects index, which the next layout scrolls into view. */
-    void setSelectedIndex(int index);
+    /**
+     * Selects index, which the next layout scrolls into view. Pass true in `center` to put the item
+     * in the middle of the list, as far as the list can scroll.
+     */
+    void setSelectedIndex(int index, bool center = false);
 
     int getItemCount() const { return static_cast<int>(items.size()); }
 
@@ -51,6 +54,10 @@ public:
 
     /** Returns the id that the adapter gave for the item at `index`. */
     long getItemId(int index) const { return items[static_cast<size_t>(index)].id; }
+
+    bool canScrollUp() const override { return getFirstVisibleIndex() > 0; }
+    bool canScrollDown() const override;
+    int getShownBottom() const override;
 
     void layout(UiLayoutContext& context) override;
 
@@ -75,6 +82,8 @@ private:
     // frame still hold them.
     std::vector<std::shared_ptr<ListItemView>> leaving;
     bool measured    = false;
+    /** The next layout puts the selected item in the middle of the list */
+    bool centerPending = false;
     int selected     = -1;
     int firstVisible = 0;
     int lastVisible  = 0;

@@ -8,23 +8,13 @@
 
 #include "error.h"
 #include "file_utils.h"
-#include "ui/view/button_hints_view.hpp"
-#include "ui/view/list_screen_view.hpp"
 #include "ui/view/multiline_text_view.hpp"
-#include "ui/view/scroll_indicator_view.hpp"
+#include "ui/view/screen_view.hpp"
 #include "ui/view/scroll_view.hpp"
 #include "ui/view/spacer_view.hpp"
-#include "ui/view/status_group_view.hpp"
-#include "ui/view/title_text_view.hpp"
 #include "ui/view/vertical_layout.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
-
-// The NextUI headers declare C functions and have no guard of their own
-extern "C" {
-#include "defines.h"
-#include "api.h"
-}
 
 using namespace input;
 
@@ -68,36 +58,18 @@ std::unique_ptr<MultilineTextView> makeTextView(TTF_Font* font, const std::strin
 
 class ErrorsPageImpl final : public UiPageImpl<ErrorsPage> {
 public:
-    ErrorsPageImpl() : UiPageImpl(PageKind::FullScreen), titleView(Fonts_getLarge()) {
-        titleView.setText("Errors");
-        titleView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        buttonHintsView.setHints(nullptr, kRightHints);
+    ErrorsPageImpl() : UiPageImpl(PageKind::FullScreen) {
+        screen.getTitleView().setText("Errors");
+        screen.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+        screen.getButtonHintsView().setHints(nullptr, kRightHints);
         buildContent();
         scrollView.setContent(&content);
+        screen.setScrollingContent(&scrollView, ContentMargins::SidesAndFoot);
     }
 
     std::span<const ButtonRequest> getButtonRequests() const override { return ScrollView::getButtonRequests(); }
 
-    void layout(UiLayoutContext& context) override {
-        SDL_Rect body = layoutScreenFrame(context, titleView, statusView, buttonHintsView);
-        // The foot of a screen with button hints holds one margin above the hints
-        body.h -= SCALE1(PADDING);
-        context.layoutChild(scrollView, body);
-
-        const SDL_Rect wholeScreen = context.getMaxRect();
-        UiLayoutContext upMeasuring   = context.createMeasuringContext();
-        UiLayoutContext downMeasuring = context.createMeasuringContext();
-        const UiSize upSize   = upMeasuring.layoutChild(scrollUpView, wholeScreen).getSize();
-        const UiSize downSize = downMeasuring.layoutChild(scrollDownView, wholeScreen).getSize();
-        const int centerX     = wholeScreen.w / 2;
-        context.layoutChild(scrollUpView, SDL_Rect{centerX - upSize.w / 2, body.y - upSize.h, upSize.w, upSize.h});
-        context.layoutChild(scrollDownView,
-                            SDL_Rect{centerX - downSize.w / 2, body.y + body.h, downSize.w, downSize.h});
-
-        // The compositor reads the visibility after the layout
-        scrollUpView.setVisible(scrollView.canScrollUp());
-        scrollDownView.setVisible(scrollView.canScrollDown());
-    }
+    void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (scrollView.handleButton(event)) return true;
@@ -128,13 +100,9 @@ private:
         }
     }
 
-    TitleTextView titleView;
-    StatusGroupView statusView;
     VerticalLayout content;
     ScrollView scrollView;
-    ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
-    ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
-    ButtonHintsView buttonHintsView;
+    ScreenView screen{Fonts_getLarge()};
 };
 
 }  // namespace

@@ -3,42 +3,21 @@
 
 #include <SDL2/SDL_ttf.h>
 
-#include "ui/view/button_hints_view.hpp"
 #include "ui/view/empty_state_view.hpp"
+#include "ui/view/list_adapter.hpp"
 #include "ui/view/list_view.hpp"
-#include "ui/view/scroll_indicator_view.hpp"
 #include "ui/view/screen_view.hpp"
-#include "ui/view/status_group_view.hpp"
-#include "ui/view/title_text_view.hpp"
-#include "ui/view/ui_layout.hpp"
-
-/** The views of a list screen. */
-struct ListScreenParts {
-    UiView& titleView;
-    UiView& statusView;
-    ListView& listView;
-    UiView& scrollUpView;
-    UiView& scrollDownView;
-    UiView& buttonHintsView;
-};
 
 /**
- * Lays out the parts of a list screen:
- * - top of the screen - title view + status view
- * - body - list and scroll indicators
- * - bottom of the screen - button hints
- */
-void layoutListScreen(UiLayoutContext& context, const ListScreenParts& parts);
-
-/**
- * A menu screen with a list. It owns its views. The page gives the list its adapter and keeps
- * the adapter.
+ * A menu screen with a list as its content. It owns its views. The page gives the list its adapter
+ * and keeps the adapter.
  */
 class ListScreenView : public ScreenView {
 public:
     explicit ListScreenView(TTF_Font* titleFont) : ScreenView(titleFont) {}
 
-    ListView& getListView() { return listView; }
+    /** Shows the items of `adapter`, which the caller keeps alive. */
+    void setAdapter(ListAdapter& adapter) { listView.setAdapter(adapter); }
 
     /**
      * Shows `emptyState` in place of the list and the scroll indicators while the list has no
@@ -52,11 +31,16 @@ public:
     void layout(UiLayoutContext& context) override;
 
 private:
+    // The page reaches the list through the controller, which keeps the selection that it shows
+    friend class ListScreenController;
+
+    // The list is the content, thus a page does not set another one
+    using ScreenView::setContent;
+    using ScreenView::setScrollingContent;
+
     ListView listView;
     EmptyStateView* emptyState = nullptr;
     bool emptyStateForced      = false;
-    ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
-    ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
 };
 
 #endif

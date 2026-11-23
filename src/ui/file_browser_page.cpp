@@ -118,7 +118,7 @@ public:
 
     void onEnter() override {
         mkdir(get_music_path(), 0755);
-        screenView.getListView().setAdapter(rows);
+        screenView.setAdapter(rows);
         list.start();
         loadFolder(Db_getRootDirId(), 0);
         getScheduler().postRepeating([this] { refresh(); }, kRefreshMs);
@@ -165,7 +165,7 @@ public:
 
 private:
     const FileEntry* getSelectedEntry() {
-        const int index = screenView.getListView().getSelectedIndex();
+        const int index = list.getSelectedIndex();
         return index >= 0 && index < browser.entry_count ? &browser.entries[index] : nullptr;
     }
 
@@ -184,13 +184,13 @@ private:
         FileDb_scanDir(dirId, false);
     }
 
-    /** Shows the rows that the browser read, with the cursor on the row `selected`. */
-    void showRows(int selected) {
-        ListView& view = screenView.getListView();
-        view.notifyDataChanged();
-        if (browser.entry_count > 0) view.setSelectedIndex(selected);
-        // The ids stay, thus the list keeps the selection and shows it
+    /**
+     * Shows the rows that the browser read, with the cursor on the row `selected`. Pass true in
+     * `center` to put that row in the middle of the list.
+     */
+    void showRows(int selected, bool center = false) {
         list.notifyDataChanged();
+        if (browser.entry_count > 0) list.setSelectedIndex(selected, center);
         showFolder();
     }
 
@@ -204,7 +204,7 @@ private:
     /** Reads the database again when it changed. The cursor stays on its row. */
     void refresh() {
         if (!Browser_hasUpdate(&browser)) return;
-        browser.selected = screenView.getListView().getSelectedIndex();
+        browser.selected = list.getSelectedIndex();
         if (!Browser_refresh(&browser)) return;
         list.notifyDataChanged();
         showFolder();
@@ -236,7 +236,8 @@ private:
                 if (browser.entries[index].is_dir && browser.entries[index].db_id == childId) selected = index;
             }
         }
-        showRows(selected);
+        // The row of the folder goes to the middle of the list, thus the rows around it show
+        showRows(selected, true);
     }
 
     void openEntry(const FileEntry& entry) {
@@ -246,7 +247,7 @@ private:
         }
         if (entry.is_dir) {
             if (history.size() < kHistoryDepth) {
-                history.push_back(HistoryEntry{browser.dir_id, screenView.getListView().getSelectedIndex()});
+                history.push_back(HistoryEntry{browser.dir_id, list.getSelectedIndex()});
             }
             loadFolder(entry.db_id, 0);
             return;
@@ -271,8 +272,7 @@ private:
         getNavigator().openForResult(ConfirmDialogPage("Delete File?", entry.name),
                                      [this, target = std::string(path)](const bool& yes) {
                                          if (!yes || unlink(target.c_str()) != 0) return;
-                                         ListView& view     = screenView.getListView();
-                                         const int position = view.getSelectedIndex();
+                                         const int position = list.getSelectedIndex();
                                          loadFolder(browser.dir_id, std::min(position, browser.entry_count - 1));
                                      });
     }

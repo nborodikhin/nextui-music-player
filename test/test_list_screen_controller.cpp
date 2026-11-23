@@ -18,6 +18,12 @@
 #include "ui_layers.h"
 #include "ui_utils.h"
 
+// The NextUI headers declare C functions and have no guard of their own
+extern "C" {
+#include "defines.h"
+#include "api.h"
+}
+
 extern "C" void UiLayer_clear(UiLayer) {}
 extern "C" void UiLayer_blit(SDL_Surface*, int, int, UiLayer) {}
 
@@ -42,6 +48,7 @@ public:
     void stopScrolling() override { scrolling = false; }
     void resetScrolling() override { resets++; }
 
+    long id        = 0;
     bool selected  = false;
     bool scrolling = false;
     int resets     = 0;
@@ -52,7 +59,11 @@ public:
     std::vector<long> ids;
     int getCount() const override { return static_cast<int>(ids.size()); }
     long getItemId(int index) const override { return ids[static_cast<size_t>(index)]; }
-    std::shared_ptr<ListItemView> getView(int) override { return std::make_shared<TestItem>(); }
+    std::shared_ptr<ListItemView> getView(int index) override {
+        auto item = std::make_shared<TestItem>();
+        item->id  = getItemId(index);
+        return item;
+    }
 };
 
 class TestListener : public ListScreenListener {
@@ -74,10 +85,14 @@ public:
 };
 
 // Six items of 10 pixels in a list of 35: three whole items show
-const SDL_Rect kList = {0, 0, 100, 35};
+constexpr int kListHeight = 35;
+constexpr int kScreenW    = 640;
+
+// The screen around the list: the two pill rows of the screen and their padding
+int getScreenHeight() { return 2 * SCALE1(PADDING + PILL_SIZE) + kListHeight; }
 
 struct Fixture {
-    SDL_Surface* screen = SDL_CreateRGBSurfaceWithFormat(0, 200, 100, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface* screen = SDL_CreateRGBSurfaceWithFormat(0, kScreenW, getScreenHeight(), 32, SDL_PIXELFORMAT_ARGB8888);
     UiCompositor compositor;
     std::unique_ptr<PageContext> context = PageContext::create(compositor);
     OwnerScheduler scheduler{1};
@@ -91,20 +106,19 @@ struct Fixture {
         compositor.setScreen(screen);
         scheduler.setContext(*context);
         adapter.ids = std::move(ids);
-        list().setAdapter(adapter);
+        view.setAdapter(adapter);
         layout();
         controller.start();
     }
     ~Fixture() { SDL_FreeSurface(screen); }
 
-    ListView& list() { return view.getListView(); }
-    TestItem& item(int index) { return static_cast<TestItem&>(list().getItemView(index)); }
+    TestItem& item(int index) { return static_cast<TestItem&>(controller.getItemView(index)); }
+    int selected() const { return controller.getSelectedIndex(); }
 
-    // Lays out the list alone, thus a page move knows the heights of the items
+    // Lays out the screen, thus a page move knows the heights of the items
     void layout() {
         UiLayoutContext& root = compositor.beginLayout(*context);
-        root.layoutChild(list(), kList);
-        compositor.drawFrame();
+        root.layoutChild(view, SDL_Rect{0, 0, kScreenW, getScreenHeight()});
     }
 
     void tick(uint32_t stepMs) {
@@ -120,20 +134,20 @@ struct Fixture {
 TEST(test_up_and_down_move_one_row_and_wrap) {
     Fixture f;
     CHECK(f.press(Button::DpadDown));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 1);
+    CHECK_EQ_INT(f.selected(), 1);
     CHECK(f.press(Button::AnalogUp));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 0);
+    CHECK_EQ_INT(f.selected(), 0);
     CHECK(f.press(Button::DpadUp));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 5);
+    CHECK_EQ_INT(f.selected(), 5);
     CHECK(f.press(Button::AnalogDown));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 0);
+    CHECK_EQ_INT(f.selected(), 0);
 }
 
 TEST(test_repeat_acts_as_a_press) {
     Fixture f;
     CHECK(f.repeat(Button::DpadDown));
     CHECK(f.repeat(Button::DpadDown));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 2);
+    CHECK_EQ_INT(f.selected(), 2);
 }
 
 TEST(test_left_and_right_go_to_the_page_with_the_selected_position) {
@@ -148,7 +162,7 @@ TEST(test_left_and_right_go_to_the_page_with_the_selected_position) {
     CHECK(f.listener.leftRightCalls[1].direction == HorizontalDirection::Left);
     CHECK(!f.listener.leftRightCalls[0].isRepeat);
     // The page handled them, thus the cursor stays
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 1);
+    CHECK_EQ_INT(f.selected(), 1);
 }
 
 TEST(test_held_left_and_right_go_to_the_page_as_repeats) {
@@ -157,15 +171,15 @@ TEST(test_held_left_and_right_go_to_the_page_as_repeats) {
     CHECK(f.repeat(Button::DpadRight));
     CHECK_EQ_SZ(f.listener.leftRightCalls.size(), 1u);
     CHECK(f.listener.leftRightCalls[0].isRepeat);
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 0);
+    CHECK_EQ_INT(f.selected(), 0);
 }
 
 TEST(test_left_and_right_that_the_page_does_not_handle_move_one_page) {
     Fixture f;
     CHECK(f.press(Button::DpadRight));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 3);
+    CHECK_EQ_INT(f.selected(), 3);
     CHECK(f.press(Button::DpadLeft));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 0);
+    CHECK_EQ_INT(f.selected(), 0);
     CHECK_EQ_SZ(f.listener.leftRightCalls.size(), 2u);
 }
 
@@ -204,7 +218,8 @@ TEST(test_data_change_gives_the_new_selection_when_the_selected_row_goes_away) {
     f.controller.notifyDataChanged();
     CHECK_EQ_SZ(f.listener.selections.size(), 3u);
     CHECK_EQ_INT(f.listener.selections[2], 1);
-    CHECK_EQ_SZ(f.list().getItemId(1), 3u);
+    CHECK_EQ_INT(f.controller.getItemCount(), 2);
+    CHECK_EQ_SZ(f.item(1).id, 3u);
 }
 
 TEST(test_data_change_gives_the_new_position_when_a_row_comes_before_the_selection) {
@@ -229,9 +244,35 @@ TEST(test_other_buttons_are_not_handled) {
     CHECK(!f.press(Button::B));
     CHECK(!f.press(Button::X));
     CHECK(!f.controller.onButtonEvent(ButtonEvent{0, event::LongPress{Button::DpadDown}}));
-    CHECK_EQ_INT(f.list().getSelectedIndex(), 0);
+    CHECK_EQ_INT(f.selected(), 0);
     CHECK_EQ_SZ(f.listener.leftRightCalls.size(), 0u);
     CHECK_EQ_SZ(f.listener.selections.size(), 1u);
+}
+
+TEST(test_set_selection_restarts_the_row_and_gives_the_new_selection) {
+    Fixture f;
+    const int resets = f.item(2).resets;
+    f.controller.setSelectedIndex(2);
+    CHECK_EQ_INT(f.selected(), 2);
+    CHECK_EQ_SZ(f.listener.selections.size(), 2u);
+    CHECK_EQ_INT(f.listener.selections[1], 2);
+    CHECK_EQ_INT(f.item(2).resets, resets + 1);
+    f.tick(SCROLL_START_DELAY);
+    CHECK(f.item(2).scrolling);
+}
+
+TEST(test_set_selection_of_the_shown_selection_gives_nothing) {
+    Fixture f;
+    const int resets = f.item(0).resets;
+    f.controller.setSelectedIndex(0);
+    CHECK_EQ_SZ(f.listener.selections.size(), 1u);
+    CHECK_EQ_INT(f.item(0).resets, resets);
+}
+
+TEST(test_controller_gives_the_items_of_the_list) {
+    Fixture f;
+    CHECK_EQ_INT(f.controller.getItemCount(), 6);
+    CHECK_EQ_SZ(f.item(4).id, 5u);
 }
 
 }  // namespace
@@ -259,6 +300,9 @@ int main() {
     RUN(test_data_change_gives_the_new_position_when_a_row_comes_before_the_selection);
     RUN(test_data_change_with_the_same_selection_gives_nothing);
     RUN(test_other_buttons_are_not_handled);
+    RUN(test_set_selection_restarts_the_row_and_gives_the_new_selection);
+    RUN(test_set_selection_of_the_shown_selection_gives_nothing);
+    RUN(test_controller_gives_the_items_of_the_list);
     TTF_CloseFont(testFont);
     TTF_Quit();
     SDL_Quit();

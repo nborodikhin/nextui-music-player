@@ -102,7 +102,7 @@ public:
             return;
         }
         radioReady = true;
-        screenView.getListView().setAdapter(stations);
+        screenView.setAdapter(stations);
         list.start();
         selectStation(lastSelectedUrl);
         updateHints();
@@ -151,7 +151,7 @@ public:
 private:
     /** Returns the station of the selected row, or nullptr with no station. */
     const RadioStation* getSelectedStation(int& index) {
-        index = screenView.getListView().getSelectedIndex();
+        index = list.getSelectedIndex();
         RadioStation* all;
         const int count = Radio_getStations(&all);
         return index >= 0 && index < count ? &all[index] : nullptr;
@@ -178,9 +178,7 @@ private:
         const int count = Radio_getStations(&all);
         for (int index = 0; index < count; index++) {
             if (url != all[index].url) continue;
-            screenView.getListView().setSelectedIndex(index);
-            // The ids stay, thus the list keeps the new selection and shows it
-            list.notifyDataChanged();
+            list.setSelectedIndex(index);
             return;
         }
     }
@@ -202,12 +200,9 @@ private:
 
     /** Reads the stations again. The cursor keeps its position, or goes to the last row. */
     void reloadStations() {
-        ListView& view     = screenView.getListView();
-        const int position = view.getSelectedIndex();
-        view.notifyDataChanged();
-        if (position >= 0) view.setSelectedIndex(position);
-        // The ids stay, thus the list keeps the selection and shows it
+        const int position = list.getSelectedIndex();
         list.notifyDataChanged();
+        if (position >= 0) list.setSelectedIndex(position);
         updateHints();
     }
 

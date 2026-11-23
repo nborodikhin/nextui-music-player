@@ -57,7 +57,7 @@ bool ListScreenController::onButtonEvent(const ButtonEvent& event) {
     const std::optional<Button> button = getPressedButton(event);
     if (!button) return false;
     const bool isRepeat = std::holds_alternative<event::Repeat>(event.kind);
-    ListView& list      = view.getListView();
+    ListView& list      = view.listView;
     bool moved          = false;
     switch (*button) {
         case Button::DpadUp:
@@ -82,12 +82,29 @@ bool ListScreenController::onButtonEvent(const ButtonEvent& event) {
 }
 
 void ListScreenController::notifyDataChanged() {
-    view.getListView().notifyDataChanged();
+    view.listView.notifyDataChanged();
     showSelection();
 }
 
+int ListScreenController::getSelectedIndex() const {
+    return view.listView.getSelectedIndex();
+}
+
+void ListScreenController::setSelectedIndex(int index, bool center) {
+    view.listView.setSelectedIndex(index, center);
+    showSelection();
+}
+
+int ListScreenController::getItemCount() const {
+    return view.listView.getItemCount();
+}
+
+ListItemView& ListScreenController::getItemView(int index) {
+    return view.listView.getItemView(index);
+}
+
 void ListScreenController::restartRowScrolling() {
-    ListView& list  = view.getListView();
+    ListView& list  = view.listView;
     const int index = list.getSelectedIndex();
     if (index < 0) {
         scheduler.cancelTask(rowStart);
@@ -97,7 +114,7 @@ void ListScreenController::restartRowScrolling() {
 }
 
 void ListScreenController::showSelection() {
-    const ListView& list = view.getListView();
+    const ListView& list = view.listView;
     const int index      = list.getSelectedIndex();
     const long id        = index >= 0 ? list.getItemId(index) : 0;
     if (index == shownIndex && id == shownId) return;

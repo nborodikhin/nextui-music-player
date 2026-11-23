@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,10 +18,12 @@
 #include "ui/view/box_view.hpp"
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_row_view.hpp"
+#include "ui/view/empty_state_view.hpp"
 #include "ui/view/list_view.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/multiline_text_view.hpp"
 #include "ui/view/progress_bar_view.hpp"
+#include "ui/view/scroll_view.hpp"
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/title_text_view.hpp"
@@ -1068,6 +1071,24 @@ TEST(test_left_when_the_first_row_shows_selects_it) {
     CHECK(!p.list.pageBackward());
 }
 
+TEST(test_centered_selection_goes_to_the_middle_of_the_list) {
+    PagingList p(20, 5, 0);
+    p.list.setSelectedIndex(12, true);
+    p.frame();
+    // Two items of 10 fit in the half of the 50 pixels that the selected item leaves
+    p.checkWindow(10, 15, 12);
+}
+
+TEST(test_centered_selection_does_not_scroll_past_an_end) {
+    PagingList p(20, 5, 0);
+    p.list.setSelectedIndex(18, true);
+    p.frame();
+    p.checkWindow(14, 19, 18);
+    p.list.setSelectedIndex(1, true);
+    p.frame();
+    p.checkWindow(0, 5, 1);
+}
+
 TEST(test_page_on_a_list_shorter_than_the_page) {
     PagingList p(4, 3, 1);
     CHECK(p.list.pageForward());
@@ -1408,14 +1429,45 @@ constexpr uint32_t kUpColor    = 0xFF202020;
 constexpr uint32_t kDownColor  = 0xFF303030;
 constexpr uint32_t kHintsColor = 0xFF404040;
 
-// The layout of a list screen over stand-in views of one color each
+/** The views of a list screen, as stand-ins of one color each */
+struct StandInParts {
+    UiView& titleView;
+    UiView& statusView;
+    ListView& listView;
+    UiView& scrollUpView;
+    UiView& scrollDownView;
+    UiView& buttonHintsView;
+};
+
+// The places of a list screen, as ListScreenView gives them, over stand-in views
 class TestListScreen : public UiLayout {
 public:
-    explicit TestListScreen(const ListScreenParts& parts) : parts(parts) {}
-    void layout(UiLayoutContext& context) override { layoutListScreen(context, parts); }
+    explicit TestListScreen(const StandInParts& parts) : parts(parts) {}
+
+    void layout(UiLayoutContext& context) override {
+        const UiSize screen = context.getMaxSize();
+        const int padding   = SCALE1(PADDING);
+        const int top       = layoutScreenTop(context, parts.titleView, parts.statusView);
+        const int bottom    = layoutScreenBottom(context, parts.buttonHintsView);
+        const SDL_Rect body = {padding, top, screen.w - padding * 2, bottom - top};
+
+        const SDL_Rect wholeScreen    = {0, 0, screen.w, screen.h};
+        UiLayoutContext upMeasuring   = context.createMeasuringContext();
+        UiLayoutContext downMeasuring = context.createMeasuringContext();
+        const UiSize upSize           = upMeasuring.layoutChild(parts.scrollUpView, wholeScreen).getSize();
+        const UiSize downSize         = downMeasuring.layoutChild(parts.scrollDownView, wholeScreen).getSize();
+        context.layoutChild(parts.listView, body);
+        context.layoutChild(parts.scrollUpView,
+                            SDL_Rect{(screen.w - upSize.w) / 2, body.y - upSize.h, upSize.w, upSize.h});
+        const SDL_Rect downRect = {(screen.w - downSize.w) / 2, body.y + parts.listView.getShownBottom(), downSize.w,
+                                   downSize.h};
+        context.layoutChild(parts.scrollDownView, downRect);
+        parts.scrollUpView.setVisible(parts.listView.canScrollUp());
+        parts.scrollDownView.setVisible(parts.listView.canScrollDown());
+    }
 
 private:
-    ListScreenParts parts;
+    StandInParts parts;
 };
 
 struct ScreenFixture {
@@ -1427,7 +1479,7 @@ struct ScreenFixture {
     SizedView hints{kHintsColor};
     TestAdapter adapter;
     ListView list;
-    TestListScreen listScreen{ListScreenParts{
+    TestListScreen listScreen{StandInParts{
         .titleView       = title,
         .statusView      = status,
         .listView        = list,
@@ -1499,6 +1551,190 @@ TEST(test_new_status_width_moves_the_title) {
     s.frame();
     CHECK_EQ_INT(s.title.getSize().w, before + 100);
     CHECK_EQ_INT(s.title.draws, 2);
+}
+
+/** Returns the layout of `view` under `context`, or null. */
+const UiLayoutContext* findLayout(const UiLayoutContext& context, const UiView& view) {
+    if (context.getView() == &view) return &context;
+    for (const UiLayoutContext& child : context.getChildren()) {
+        if (const UiLayoutContext* found = findLayout(child, view)) return found;
+    }
+    return nullptr;
+}
+
+/** Lays out `view` on the whole surface of `f` with no draw, and returns the layout of `view`. */
+const UiLayoutContext& layoutOnly(Fixture& f, UiView& view, const SDL_Rect& rect) {
+    UiLayoutContext& root = f.compositor.beginLayout(f.context);
+    return root.layoutChild(view, rect);
+}
+
+class TestScrolling : public ScrollingView {
+public:
+    bool up         = false;
+    bool down       = false;
+    int shownBottom = 0;
+
+    bool canScrollUp() const override { return up; }
+    bool canScrollDown() const override { return down; }
+    int getShownBottom() const override { return shownBottom; }
+    void layout(UiLayoutContext& context) override { context.setSize(context.getMaxSize()); }
+};
+
+const SDL_Rect kWholeBig = {0, 0, kBigW, kBigH};
+
+int screenBodyTop() { return SCALE1(PADDING + PILL_SIZE); }
+int screenBodyBottom() { return kBigH - SCALE1(PADDING + PILL_SIZE); }
+
+bool rectEquals(const SDL_Rect& a, const SDL_Rect& b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+/** Returns the rectangle of the layout of `view` in the screen, or an empty one. */
+SDL_Rect screenRectOf(const UiLayoutContext& screen, const UiView& view) {
+    const UiLayoutContext* found = findLayout(screen, view);
+    return found ? found->getScreenRect() : SDL_Rect{0, 0, 0, 0};
+}
+
+TEST(test_screen_content_gets_the_body_inside_its_margins) {
+    Fixture f(kBigW, kBigH);
+    ScreenView screen(testFont);
+    SizedView content(kTitleColor);
+    const int padding = SCALE1(PADDING);
+    const int top     = screenBodyTop();
+    const int height  = screenBodyBottom() - top;
+
+    screen.setContent(&content);
+    CHECK(rectEquals(screenRectOf(layoutOnly(f, screen, kWholeBig), content), SDL_Rect{0, top, kBigW, height}));
+    screen.setContent(&content, ContentMargins::Sides);
+    CHECK(rectEquals(screenRectOf(layoutOnly(f, screen, kWholeBig), content),
+                     SDL_Rect{padding, top, kBigW - padding * 2, height}));
+    screen.setContent(&content, ContentMargins::SidesAndFoot);
+    CHECK(rectEquals(screenRectOf(layoutOnly(f, screen, kWholeBig), content),
+                     SDL_Rect{padding, top, kBigW - padding * 2, height - padding}));
+}
+
+TEST(test_content_with_no_scroll_has_no_scroll_indicators) {
+    Fixture f(kBigW, kBigH);
+    ScreenView screen(testFont);
+    SizedView content(kTitleColor);
+    screen.setContent(&content);
+    // The status group, the title, the hints and the content
+    CHECK_EQ_SZ(layoutOnly(f, screen, kWholeBig).getChildren().size(), 4u);
+}
+
+TEST(test_scrolling_content_gets_the_scroll_indicators) {
+    Fixture f(kBigW, kBigH);
+    ScreenView screen(testFont);
+    TestScrolling content;
+    content.up          = true;
+    content.shownBottom = 30;
+    screen.setScrollingContent(&content, ContentMargins::Sides);
+    const UiLayoutContext& layout = layoutOnly(f, screen, kWholeBig);
+
+    // The indicators are the last two children, after the content
+    CHECK_EQ_SZ(layout.getChildren().size(), 6u);
+    const UiLayoutContext& up   = *std::next(layout.getChildren().begin(), 4);
+    const UiLayoutContext& down = *std::next(layout.getChildren().begin(), 5);
+    const UiSize size           = {SCALE1(24), SCALE1(6)};
+    const int top               = screenBodyTop();
+    CHECK(rectEquals(up.getScreenRect(), SDL_Rect{(kBigW - size.w) / 2, top - size.h, size.w, size.h}));
+    CHECK(rectEquals(down.getScreenRect(), SDL_Rect{(kBigW - size.w) / 2, top + 30, size.w, size.h}));
+    CHECK(up.getView()->isVisible());
+    CHECK(!down.getView()->isVisible());
+
+    content.up   = false;
+    content.down = true;
+    const UiLayoutContext& again = layoutOnly(f, screen, kWholeBig);
+    CHECK(!std::next(again.getChildren().begin(), 4)->getView()->isVisible());
+    CHECK(std::next(again.getChildren().begin(), 5)->getView()->isVisible());
+}
+
+TEST(test_list_tells_where_it_can_scroll) {
+    Fixture f;
+    TestAdapter adapter;
+    adapter.ids = {1, 2, 3, 4, 5, 6};
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(0);
+    f.frame(list, kList);
+    CHECK(!list.canScrollUp());
+    CHECK(list.canScrollDown());
+    CHECK_EQ_INT(list.getShownBottom(), 30);
+    list.setSelectedIndex(5);
+    f.frame(list, kList);
+    CHECK(list.canScrollUp());
+    CHECK(!list.canScrollDown());
+    CHECK_EQ_INT(list.getShownBottom(), 30);
+}
+
+TEST(test_empty_list_cannot_scroll) {
+    Fixture f;
+    TestAdapter adapter;
+    ListView list;
+    list.setAdapter(adapter);
+    f.frame(list, kList);
+    CHECK(!list.canScrollUp());
+    CHECK(!list.canScrollDown());
+    CHECK_EQ_INT(list.getShownBottom(), 0);
+}
+
+TEST(test_scroll_view_tells_where_it_can_scroll) {
+    Fixture f;
+    SizedView text(kTitleColor, UiSize{100, 100});
+    ScrollView scroll;
+    scroll.setContent(&text);
+    const SDL_Rect rect = {0, 0, 100, 40};
+    f.frame(scroll, rect);
+    CHECK(!scroll.canScrollUp());
+    CHECK(scroll.canScrollDown());
+    CHECK_EQ_INT(scroll.getShownBottom(), 40);
+    scroll.scrollBy(100);
+    f.frame(scroll, rect);
+    CHECK(scroll.canScrollUp());
+    CHECK(!scroll.canScrollDown());
+    CHECK_EQ_INT(scroll.getShownBottom(), 40);
+}
+
+TEST(test_list_screen_lays_out_the_list_inside_the_side_margins) {
+    Fixture f(kBigW, kBigH);
+    TestAdapter adapter;
+    for (long id = 1; id <= 60; id++) adapter.ids.push_back(id);
+    ListScreenView screen(testFont);
+    screen.setAdapter(adapter);
+    const UiLayoutContext& layout = layoutOnly(f, screen, kWholeBig);
+    const int padding             = SCALE1(PADDING);
+    const int top                 = screenBodyTop();
+    // The status group, the title, the hints, the list and the two indicators
+    CHECK_EQ_SZ(layout.getChildren().size(), 6u);
+    const UiLayoutContext& content = *std::next(layout.getChildren().begin(), 3);
+    const ListView& list           = static_cast<const ListView&>(*content.getView());
+    CHECK(rectEquals(content.getScreenRect(), SDL_Rect{padding, top, kBigW - padding * 2, screenBodyBottom() - top}));
+    CHECK_EQ_INT(list.getItemCount(), 60);
+    const UiLayoutContext& down = *std::next(layout.getChildren().begin(), 5);
+    CHECK_EQ_INT(down.getScreenRect().y, top + list.getShownBottom());
+    CHECK(down.getView()->isVisible());
+}
+
+TEST(test_empty_state_replaces_the_list_and_the_indicators) {
+    Fixture f(kBigW, kBigH);
+    TestAdapter adapter;
+    ListScreenView screen(testFont);
+    // The test has no fonts of the app, thus the empty state lays out no text
+    class TestEmptyState : public EmptyStateView {
+    public:
+        void layout(UiLayoutContext& context) override { context.setSize(context.getMaxSize()); }
+    } empty;
+    screen.setAdapter(adapter);
+    screen.setEmptyState(&empty);
+    const UiLayoutContext& layout = layoutOnly(f, screen, kWholeBig);
+    // The status group, the title, the hints and the empty state
+    CHECK_EQ_SZ(layout.getChildren().size(), 4u);
+    CHECK(std::next(layout.getChildren().begin(), 3)->getView() == &empty);
+    adapter.ids = {1};
+    screen.setAdapter(adapter);
+    const UiLayoutContext& filled = layoutOnly(f, screen, kWholeBig);
+    CHECK_EQ_SZ(filled.getChildren().size(), 6u);
+    CHECK(findLayout(filled, empty) == nullptr);
 }
 
 }  // namespace
@@ -2099,6 +2335,8 @@ int main() {
     RUN(test_left_shows_the_first_row);
     RUN(test_left_when_the_first_row_shows_selects_it);
     RUN(test_page_on_a_list_shorter_than_the_page);
+    RUN(test_centered_selection_goes_to_the_middle_of_the_list);
+    RUN(test_centered_selection_does_not_scroll_past_an_end);
     RUN(test_right_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor);
     RUN(test_left_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor);
     RUN(test_right_keeps_the_cursor_under_a_taller_row);
@@ -2141,6 +2379,14 @@ int main() {
     RUN(test_scrolling_title_frame_changes_the_layer_only);
     RUN(test_hints_change_keeps_the_down_indicator_over_them);
     RUN(test_new_status_width_moves_the_title);
+    RUN(test_screen_content_gets_the_body_inside_its_margins);
+    RUN(test_content_with_no_scroll_has_no_scroll_indicators);
+    RUN(test_scrolling_content_gets_the_scroll_indicators);
+    RUN(test_list_tells_where_it_can_scroll);
+    RUN(test_empty_list_cannot_scroll);
+    RUN(test_scroll_view_tells_where_it_can_scroll);
+    RUN(test_list_screen_lays_out_the_list_inside_the_side_margins);
+    RUN(test_empty_state_replaces_the_list_and_the_indicators);
     RUN(test_bitmap_is_scaled_into_the_view);
     RUN(test_bitmap_view_frees_its_bitmap);
     RUN(test_bitmap_view_loads_an_image_from_memory);
