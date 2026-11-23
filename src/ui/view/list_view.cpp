@@ -100,6 +100,19 @@ int ListView::findLastFullyVisible(int first, int listHeight) const {
     return last;
 }
 
+bool ListView::canScrollDown() const {
+    const int last = getLastVisibleIndex();
+    return last >= 0 && last < getItemCount() - 1;
+}
+
+int ListView::getShownBottom() const {
+    int bottom = 0;
+    for (int index = getFirstVisibleIndex(); index >= 0 && index <= getLastVisibleIndex(); index++) {
+        bottom += items[static_cast<size_t>(index)].view->getSize().h;
+    }
+    return bottom;
+}
+
 void ListView::layout(UiLayoutContext& context) {
     leaving.clear();
     const UiSize size = context.getSize();

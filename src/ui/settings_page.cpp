@@ -270,7 +270,7 @@ public:
 
     void onEnter() override {
         rows.setErrorsRowShown(Error_hasReports());
-        screenView.getListView().setAdapter(rows);
+        screenView.setAdapter(rows);
         refreshLabels();
         list.start();
         getScheduler().postRepeating([this] { refreshLabels(); }, kLabelRefreshMs);
@@ -284,7 +284,7 @@ public:
     bool onButtonEvent(const ButtonEvent& event) override {
         if (list.onButtonEvent(event)) return true;
         if (event.isSingleButton(Button::A)) {
-            activate(screenView.getListView().getSelectedIndex());
+            activate(list.getSelectedIndex());
             return true;
         }
         if (event.isSingleButton(Button::B)) {

@@ -70,7 +70,7 @@ public:
     HelpId getHelpId() const override { return HELP_LIBRARY_MENU; }
 
     void onEnter() override {
-        screenView.getListView().setAdapter(rows);
+        screenView.setAdapter(rows);
         list.start();
     }
 
@@ -79,7 +79,7 @@ public:
     bool onButtonEvent(const ButtonEvent& event) override {
         if (list.onButtonEvent(event)) return true;
         if (event.isSingleButton(Button::A)) {
-            openItem(screenView.getListView().getSelectedIndex());
+            openItem(list.getSelectedIndex());
             return true;
         }
         if (event.isSingleButton(Button::B)) {
