@@ -64,6 +64,8 @@ private:
     int followOffset = 0;
     int followCount  = 0;
     TaskId followTask = 0;
+    /** The context whose active time the tape uses */
+    const UiContext* tapeContext = nullptr;
 };
 
 #endif

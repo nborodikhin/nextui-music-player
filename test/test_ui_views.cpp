@@ -724,6 +724,23 @@ TEST(test_follow_title_puts_a_new_text_after_the_text_under_the_edge) {
     CHECK(f.surfaceHasPixels(kTitle));
 }
 
+TEST(test_follow_title_continues_after_a_new_screen) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    runTitle(f, title, SCREEN_TITLE_START_DELAY_MS + 500);
+    ScreenTitle& tape  = const_cast<ScreenTitle&>(title.getFollowTape());
+    const int before   = ScreenTitle_offset(&tape, f.context.getActiveTime());
+    CHECK(before > 0);
+    // A screen over the page closed, and the stack gave the page its screen again
+    f.context.setScreen(f.compositor);
+    f.frame(title, kTitle);
+    CHECK_EQ_INT(ScreenTitle_offset(&tape, f.context.getActiveTime()), before);
+    CHECK(f.layerHasPixels(kTitle));
+}
+
 TEST(test_row_shows_long_text_only_when_selected) {
     Fixture f;
     ListRowView row(testFont);
@@ -2024,6 +2041,7 @@ int main() {
     RUN(test_follow_title_at_rest_takes_a_new_text_at_once);
     RUN(test_follow_title_moves_on_the_layer_after_the_start_delay);
     RUN(test_follow_title_puts_a_new_text_after_the_text_under_the_edge);
+    RUN(test_follow_title_continues_after_a_new_screen);
     RUN(test_row_shows_long_text_only_when_selected);
     RUN(test_selection_change_makes_the_row_dirty);
     RUN(test_cursor_move_draws_only_the_two_changed_rows);

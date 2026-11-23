@@ -88,10 +88,16 @@ void TitleTextView::restartTape() {
 void TitleTextView::onAttach(UiContext& context) {
     TextView::onAttach(context);
     if (!follow) return;
-    // A new screen draws each text again, and the title starts at rest
+    // A new screen draws each text again. The tape keeps its place on the active time of the
+    // page, thus a title that moved continues after a screen over it closes.
     freeSegments();
-    restartTape();
-    followTask = getScheduler().runEachFrame([this] { stepFollow(); });
+    followDirty = true;
+    // The times of the tape belong to the clock of one context
+    if (tape.count == 0 || &context != tapeContext) restartTape();
+    tapeContext = &context;
+    if (!getScheduler().isTaskPending(followTask)) {
+        followTask = getScheduler().runEachFrame([this] { stepFollow(); });
+    }
 }
 
 void TitleTextView::stepFollow() {
