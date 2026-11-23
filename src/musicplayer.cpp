@@ -37,6 +37,7 @@ extern "C" {
 #include "module_file_browser.h"
 #include "music_session.h"
 #include "module_podcast.h"
+#include "audiobook_session.h"
 #include "downloader.h"
 #include "settings.h"
 #include "resume.h"
@@ -225,6 +226,8 @@ int main(int argc, char* argv[]) {
     ScopedInit player{Player_quit};
     ScopedInit musicSession{MusicSession_quit};
     ScopedInit fileBrowser{FileBrowserModule_quit};
+    // Runs after the stop of the background, which saves the place of the book
+    ScopedInit audiobook{AudiobookSession_quit};
     ScopedInit background{Background_stopAll};
 
     // Restore the volume on the mixer of the output, after the audio device is open and stable

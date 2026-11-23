@@ -11,6 +11,8 @@
 #include "resume.h"
 #include "selfupdate.h"
 #include "toast.h"
+#include "ui/audiobook_page.hpp"
+#include "ui/audiobook_playing_page.hpp"
 #include "ui/library_page.hpp"
 #include "ui/now_playing_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
@@ -52,6 +54,7 @@ enum class MenuItem : int8_t {
     NowPlaying,
     Resume,
     Library,
+    Audiobook,
     Radio,
     Podcast,
     Settings,
@@ -79,6 +82,7 @@ const char* getNowPlayingSource() {
         case BG_MUSIC:   return "Music";
         case BG_RADIO:   return "Radio";
         case BG_PODCAST: return "Podcast";
+        case BG_AUDIOBOOK: return "Audiobook";
         default:         return "Audio";
     }
 }
@@ -91,6 +95,7 @@ std::string getRowLabel(MenuItem item) {
             if (const char* label = Resume_getLabel()) return label;
             return "Resume";
         case MenuItem::Library: return "Library";
+        case MenuItem::Audiobook: return "Audiobook";
         case MenuItem::Radio:   return "Online Radio";
         case MenuItem::Podcast: return "Podcasts";
         case MenuItem::Settings:
@@ -189,7 +194,7 @@ private:
 
     /** Returns the items of the rows, in order. */
     static std::vector<MenuItem> getRows() {
-        std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings};
+        std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Audiobook, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings};
         const MenuItem playingItem = getPlayingItem();
         if (playingItem != MenuItem::None) rows.insert(rows.begin(), playingItem);
         return rows;
@@ -228,6 +233,7 @@ private:
             case MenuItem::NowPlaying: openNowPlaying(); break;
             case MenuItem::Resume:     getNavigator().open(ResumePage{}); break;
             case MenuItem::Library:    getNavigator().open(LibraryPage{}); break;
+            case MenuItem::Audiobook:  getNavigator().open(AudiobookPage{}); break;
             case MenuItem::Radio:      getNavigator().open(RadioPage{}); break;
             case MenuItem::Podcast:    getNavigator().open(PodcastPage{}); break;
             case MenuItem::Settings:   getNavigator().open(SettingsPage{}); break;
@@ -239,6 +245,8 @@ private:
     void openNowPlaying() {
         if (Background_getActive() == BG_RADIO) {
             getNavigator().open(RadioPage{});
+        } else if (Background_getActive() == BG_AUDIOBOOK) {
+            getNavigator().open(AudiobookPlayingPage{});
         } else {
             getNavigator().open(NowPlayingPage{});
         }

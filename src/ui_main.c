@@ -208,6 +208,38 @@ static const ControlHelp podcast_playing_controls[] = {
     {NULL, NULL}
 };
 
+// Audiobook library list controls (A/B shown in footer)
+static const ControlHelp audiobook_library_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"X", "Mark Finished/Unfinished"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook chapter list controls (A/B shown in footer)
+static const ControlHelp audiobook_chapters_controls[] = {
+    {"Up/Down", "Navigate"},
+    {"Left/Right", "Navigate"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
+// Audiobook player controls (A/B shown in footer)
+static const ControlHelp audiobook_playing_controls[] = {
+    {"A", "Play/Pause"},
+    {"Left", "Back 10s"},
+    {"Right", "Forward 30s"},
+    {"Up/L1", "Prev Chapter"},
+    {"Down/R1", "Next Chapter"},
+    {"X", "Chapter List"},
+    {"Y", "Sleep Timer"},
+    {"Select", "Screen Off"},
+    {"Select + A", "Wake Screen"},
+    {"Start (hold)", "Exit App"},
+    {NULL, NULL}
+};
+
 // YouTube menu controls (A/B shown in footer)
 static const ControlHelp youtube_menu_controls[] = {
     {"Up/Down", "Navigate"},
@@ -344,6 +376,18 @@ const ControlHelp* get_controls_help(HelpId help_id, const char** title) {
         case HELP_PODCAST_PLAYING:
             controls = podcast_playing_controls;
             page_title = "Podcast Player";
+            break;
+        case HELP_AUDIOBOOK_LIBRARY:
+            controls = audiobook_library_controls;
+            page_title = "Audiobook";
+            break;
+        case HELP_AUDIOBOOK_CHAPTERS:
+            controls = audiobook_chapters_controls;
+            page_title = "Chapters";
+            break;
+        case HELP_AUDIOBOOK_PLAYING:
+            controls = audiobook_playing_controls;
+            page_title = "Audiobook Player";
             break;
         case HELP_DOWNLOADER_MENU:
             controls = youtube_menu_controls;

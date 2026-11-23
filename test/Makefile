@@ -59,6 +59,9 @@
 # ui_layers.c for the layer. The test links SDL for the surfaces only, and gives a test double
 # of ui_layers.c, thus it needs no platform.
 #
+# audiobook/m4b_chapters.cpp is C++ and reads files through libc only, as file_utils.c does
+# below. Its test writes synthetic MP4 files and removes them again.
+#
 # file_utils.c qualifies for a different reason: it talks to the filesystem, but
 # only through libc, so it needs no stubs either. Its test does create files -
 # under its own mk_tempdir(), and removes them again.
@@ -91,6 +94,7 @@ TESTS   += $(BIN)/test_radio_hls
 TESTS   += $(BIN)/test_radio_step
 TESTS   += $(BIN)/test_icy
 TESTS   += $(BIN)/test_background
+TESTS   += $(BIN)/test_m4b_chapters
 TESTS   += $(BIN)/test_playlist_m3u
 TESTS   += $(BIN)/test_resume
 TESTS   += $(BIN)/test_filedb
@@ -152,7 +156,7 @@ check: headers
 # forces into NextUI's config.c is not an interface, thus it is not checked. A
 # check runs again only after a change of a file that the header includes.
 HEADERS       = $(filter-out $(SRC)/config_readonly_shim.h,$(wildcard $(SRC)/*.h $(SRC)/ui/*.h))
-CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/page/*.hpp $(SRC)/ui/view/*.hpp)
+CXX_HEADERS   = $(wildcard $(SRC)/*.hpp $(SRC)/audiobook/*.hpp $(SRC)/input/*.hpp $(SRC)/ui/*.hpp $(SRC)/ui/page/*.hpp $(SRC)/ui/view/*.hpp)
 HEADER_STAMPS = $(patsubst $(SRC)/%.h,$(BIN)/headers/%.ok,$(HEADERS)) \
                 $(patsubst $(SRC)/%.hpp,$(BIN)/headers/%.hpp.ok,$(CXX_HEADERS))
 HEADER_INC    = $(INC) $(DESKTOP_INC) \
@@ -359,9 +363,13 @@ $(BIN)/test_playlist_m3u: test_playlist_m3u.c $(SRC)/playlist_m3u.c \
 	  $(SRC)/utf8.c \
 	  $(SQLITE_LIBS) -lzip
 
-$(BIN)/test_background: test_background.c $(SRC)/background.c $(SRC)/background.h \
+$(BIN)/test_background: test_background.c $(SRC)/background.c $(SRC)/background.h $(SRC)/audiobook_session.h \
                          $(SRC)/music_session.h $(SRC)/module_common.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_background.c $(SRC)/background.c
+
+$(BIN)/test_m4b_chapters: test_m4b_chapters.cpp $(SRC)/audiobook/m4b_chapters.cpp \
+                          $(SRC)/audiobook/m4b_chapters.hpp test.h | $(BIN)
+	$(CXX) $(CXXFLAGS) $(INC) -o $@ test_m4b_chapters.cpp $(SRC)/audiobook/m4b_chapters.cpp
 
 $(BIN)/test_icy: test_icy.c $(SRC)/icy.c $(SRC)/icy.h $(SRC)/utf8.c $(SRC)/utf8.h test.h | $(BIN)
 	$(CC) $(CFLAGS) $(INC) -o $@ test_icy.c $(SRC)/icy.c $(SRC)/utf8.c

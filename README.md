@@ -57,7 +57,7 @@ more lines to the log. Install it only to help find the cause of a problem.
 - Automatic screen off.
 
 ### Library
-- Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `AAC` and `OPUS` formats
+- Supports `WAV`, `MP3`, `OGG`, `FLAC`, `M4A`, `M4B`, `AAC` and `OPUS` formats
 - File browser for navigating music libraries (Audio files must be placed in `./Music` folder)
 - Shuffle and repeat modes
 - Spectrum visualizer with 4 options of color to choose from.
@@ -65,6 +65,27 @@ more lines to the log. Install it only to help find the cause of a problem.
 - Automated lyric download and display during playback
 - Search and download YouTube Music for music (Downloaded tracks will be placed in `./Music/Download`)
 - Playlist management
+
+### Audiobook
+- Books live in `./Audiobook`: either a subfolder (its audio files, sorted by name, are the chapters) or a single file
+- `M4B` files with internal chapters (Nero `chpl` or QuickTime chapter tracks)
+- One saved position **per book**, so several books can be in progress at once
+- A `Continue` row at the top of the list jumps straight back into the last book
+- Chapter list with direct jump, skip back 10s / forward 30s
+- Sleep timer (15/30/45/60 minutes, or end of chapter)
+- Playback continues in the background; "Now Playing" on the main menu returns to it
+
+Two ways to organize a book under `./Audiobook`:
+
+```
+Audiobook/
+├── Project Hail Mary/              # one folder per book = one chapter per file,
+│   ├── 01 - Chapter 1.mp3          # sorted by file name
+│   ├── 02 - Chapter 2.mp3
+│   └── 03 - Chapter 3.mp3
+└── Dune.m4b                        # or a single .m4b with its chapters
+                                    # read from embedded metadata
+```
 
 ### Online Radio
 - Preset station management (add, remove, save)
@@ -107,6 +128,19 @@ more lines to the log. Install it only to help find the cause of a problem.
 - **L2/L3 Shoulders**: Toggle Visualizer
 - **R2/R3 Shoulders**: Toggle Lyrics
 
+### Audiobook Player
+- **A Button**: Play/Pause
+- **B Button**: Back (a playing book keeps playing in the background; a paused one stops)
+- **X Button**: Chapter list
+- **Y Button**: Sleep timer (Off -> 15 -> 30 -> 45 -> 60 min -> end of chapter)
+- **D-Pad Left/Right**: Back 10 seconds / Forward 30 seconds
+- **D-Pad Up/Down**, **L1/R1**: Previous/Next chapter
+- **Select**: Turn Off Screen (**Select + A** wakes it)
+- **Start (short press)**: Show Controls Help
+- **Start (long press)**: Exit Application
+
+In the book list, **X** marks a book finished or unfinished.
+
 ### Radio Player
 - **B Button**: Back/Stop
 - **D-Pad Up**: Next Station
@@ -127,6 +161,12 @@ more lines to the log. Install it only to help find the cause of a problem.
 ### Playing Local Music
 - Navigate to your music folder using the `Library` menu
 - Select a file to start playback
+
+### Audiobooks
+- Copy books into `./Audiobook` on the SD card, one folder per book (or a single `.m4b`)
+- Open the `Audiobook` menu; the `Continue` row at the top resumes the last book you were listening to
+- Books in progress are listed first, with their chapter and position
+- Select a book to resume exactly where you left off
 
 ### Online Radio
 - Navigate to the stations list using the `Online Radio` menu
