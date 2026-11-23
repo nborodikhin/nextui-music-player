@@ -151,7 +151,7 @@ public:
 
     void onEnter() override {
         items.setRows(getRows());
-        getList().setAdapter(items);
+        screenView.setAdapter(items);
         updateLabels();
         list.start();
         getScheduler().postRepeating([this] { refreshRows(); }, kRowRefreshMs);
@@ -204,15 +204,14 @@ private:
 
     /** Sets the label of each row. A new label of the selected row restarts the wait of its text. */
     void updateLabels() {
-        const int selectedIndex = getList().getSelectedIndex();
-        for (int index = 0; index < getList().getItemCount(); index++) {
+        const int selectedIndex = list.getSelectedIndex();
+        for (int index = 0; index < list.getItemCount(); index++) {
             const bool changed = getRow(index).setText(getRowLabel(items.getItem(index)));
             if (changed && index == selectedIndex) list.restartRowScrolling();
         }
     }
 
-    ListView& getList() { return screenView.getListView(); }
-    ListRowView& getRow(int index) { return static_cast<ListRowView&>(getList().getItemView(index)); }
+    ListRowView& getRow(int index) { return static_cast<ListRowView&>(list.getItemView(index)); }
 
     /** Returns: true when the button has an action on the menu */
     bool pressButton(Button button) {

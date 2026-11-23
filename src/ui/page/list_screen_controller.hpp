@@ -56,6 +56,18 @@ public:
     /** Reads the items of the list again. */
     void notifyDataChanged();
 
+    /** Returns the position of the selected item, or -1 for an empty list. */
+    int getSelectedIndex() const;
+
+    /**
+     * Selects the item at `index`, which the next layout scrolls into view. A new selection
+     * restarts the wait before its row scrolls, and goes to onSelectionChanged().
+     */
+    void setSelectedIndex(int index);
+
+    int getItemCount() const;
+    ListItemView& getItemView(int index);
+
     /** Puts the text of the selected row at rest, and starts the wait before it scrolls. */
     void restartRowScrolling();
 

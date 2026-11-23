@@ -4,14 +4,14 @@
 #include <span>
 
 #include "input/input_events.hpp"
-#include "ui/view/ui_layout.hpp"
+#include "ui/view/scrolling_view.hpp"
 
 /**
  * Shows a part of one content view that can be higher than this view. The content gets the
  * width of this view and the height that it needs. The offset stays in the range where the last
  * line of the content is not above the bottom of this view.
  */
-class ScrollView : public UiLayout {
+class ScrollView : public ScrollingView {
 public:
     /** Shows `content`, which the caller keeps alive, from its top. */
     void setContent(UiView* content);
@@ -34,8 +34,9 @@ public:
      */
     bool handleButton(const input::ButtonEvent& event);
 
-    bool canScrollUp() const { return offset > 0; }
-    bool canScrollDown() const { return offset < getMaxOffset(); }
+    bool canScrollUp() const override { return offset > 0; }
+    bool canScrollDown() const override { return offset < getMaxOffset(); }
+    int getShownBottom() const override { return viewportHeight; }
 
     void layout(UiLayoutContext& context) override;
 

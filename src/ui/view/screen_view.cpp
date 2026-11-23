@@ -38,14 +38,6 @@ int layoutScreenBottom(UiLayoutContext& context, UiView& buttonHintsView) {
     return top;
 }
 
-SDL_Rect layoutScreenFrame(UiLayoutContext& context, UiView& titleView, UiView& statusView,
-                           UiView& buttonHintsView) {
-    const int padding = SCALE1(PADDING);
-    const int top     = layoutScreenTop(context, titleView, statusView);
-    const int bottom  = layoutScreenBottom(context, buttonHintsView);
-    return SDL_Rect{padding, top, context.getMaxSize().w - padding * 2, bottom - top};
-}
-
 int layoutCentered(UiLayoutContext& context, UiView& view, int y, int maxHeight) {
     const UiSize space        = context.getMaxSize();
     const int height          = maxHeight > 0 ? maxHeight : space.h;
@@ -58,8 +50,44 @@ int layoutCentered(UiLayoutContext& context, UiView& view, int y, int maxHeight)
     return size.h;
 }
 
+void ScreenView::setContent(UiView* newContent, ContentMargins newMargins) {
+    content          = newContent;
+    scrollingContent = nullptr;
+    margins          = newMargins;
+}
+
+void ScreenView::setScrollingContent(ScrollingView* newContent, ContentMargins newMargins) {
+    content          = newContent;
+    scrollingContent = newContent;
+    margins          = newMargins;
+}
+
 void ScreenView::layout(UiLayoutContext& context) {
     const int bodyTop    = layoutScreenTop(context, titleView, statusView);
     const int bodyBottom = layoutScreenBottom(context, buttonHintsView);
-    if (content) context.layoutChild(*content, SDL_Rect{0, bodyTop, context.getMaxSize().w, bodyBottom - bodyTop});
+    if (!content) return;
+
+    const int padding       = SCALE1(PADDING);
+    const int side          = margins == ContentMargins::None ? 0 : padding;
+    const int foot          = margins == ContentMargins::SidesAndFoot ? padding : 0;
+    const SDL_Rect bodyRect = {side, bodyTop, context.getMaxSize().w - side * 2, bodyBottom - bodyTop - foot};
+    context.layoutChild(*content, bodyRect);
+    if (scrollingContent) layoutScrollIndicators(context, bodyRect);
+}
+
+void ScreenView::layoutScrollIndicators(UiLayoutContext& context, const SDL_Rect& contentRect) {
+    // The down indicator sits under the part that shows, also over the button hints
+    const SDL_Rect wholeScreen    = context.getMaxRect();
+    UiLayoutContext upMeasuring   = context.createMeasuringContext();
+    UiLayoutContext downMeasuring = context.createMeasuringContext();
+    const UiSize upSize           = upMeasuring.layoutChild(scrollUpView, wholeScreen).getSize();
+    const UiSize downSize         = downMeasuring.layoutChild(scrollDownView, wholeScreen).getSize();
+    const int downY               = contentRect.y + scrollingContent->getShownBottom();
+    context.layoutChild(scrollUpView,
+                        SDL_Rect{(wholeScreen.w - upSize.w) / 2, contentRect.y - upSize.h, upSize.w, upSize.h});
+    context.layoutChild(scrollDownView, SDL_Rect{(wholeScreen.w - downSize.w) / 2, downY, downSize.w, downSize.h});
+
+    // The compositor reads the visibility after the layout
+    scrollUpView.setVisible(scrollingContent->canScrollUp());
+    scrollDownView.setVisible(scrollingContent->canScrollDown());
 }

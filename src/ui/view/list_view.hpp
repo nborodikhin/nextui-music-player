@@ -6,14 +6,14 @@
 
 #include "ui/view/list_adapter.hpp"
 #include "ui/view/list_item_view.hpp"
-#include "ui/view/ui_layout.hpp"
+#include "ui/view/scrolling_view.hpp"
 #include "ui/view/ui_view.hpp"
 
 /**
  * Lays out the items of an adapter in a column, and scrolls to keep the selected item
  * visible. Shows whole items only. Sets the selection of each item view.
  */
-class ListView : public UiLayout {
+class ListView : public ScrollingView {
 public:
     void setAdapter(ListAdapter& adapter);
 
@@ -49,6 +49,10 @@ public:
 
     /** Returns the id that the adapter gave for the item at `index`. */
     long getItemId(int index) const { return items[static_cast<size_t>(index)].id; }
+
+    bool canScrollUp() const override { return getFirstVisibleIndex() > 0; }
+    bool canScrollDown() const override;
+    int getShownBottom() const override;
 
     void layout(UiLayoutContext& context) override;
 
