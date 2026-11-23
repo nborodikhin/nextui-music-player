@@ -12,13 +12,14 @@ extern "C" {
 }
 
 // Washes out the pixels of `bitmap` from `end` - `fadeWidth` to `end`, from opaque to transparent.
-// The pixels are premultiplied, thus each channel takes the same factor.
+// `end` can be past the right edge of the bitmap: the wash then keeps its slope, and only its start
+// is on the bitmap. The pixels are premultiplied, thus each channel takes the same factor.
 static void washOut(SDL_Surface* bitmap, int end, int fadeWidth) {
-    end             = std::min(end, bitmap->w);
     const int start = std::max(0, end - fadeWidth);
+    const int stop  = std::min(end, bitmap->w);
     for (int y = 0; y < bitmap->h; y++) {
         uint32_t* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bitmap->pixels) + y * bitmap->pitch);
-        for (int x = start; x < end; x++) {
+        for (int x = start; x < stop; x++) {
             const uint32_t keep = static_cast<uint32_t>(255 * (end - x) / fadeWidth);
             uint32_t pixel      = 0;
             for (int shift = 0; shift < 32; shift += 8) {

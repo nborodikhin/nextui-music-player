@@ -763,6 +763,31 @@ TEST(test_follow_title_puts_a_new_text_after_the_text_under_the_edge) {
     CHECK(f.surfaceHasPixels(kTitle));
 }
 
+TEST(test_follow_title_change_near_the_end_of_the_text_keeps_the_area) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    ScreenTitle& tape = const_cast<ScreenTitle&>(title.getFollowTape());
+    // Move until the right edge of the area is just before the end of the text
+    bool nearEnd = false;
+    for (int step = 0; step < 2000 && !nearEnd; step++) {
+        runTitle(f, title, 20);
+        const int edge = ScreenTitle_offset(&tape, f.context.getActiveTime()) + kTitle.w;
+        // Close to the end, thus a wash from the end of the bitmap would reach far into the area
+        nearEnd        = edge >= tape.seg[0].text_w - 4 && edge < tape.seg[0].text_w;
+    }
+    CHECK(nearEnd);
+    const std::vector<uint32_t> before = layerPixels;
+    title.setText("/next");
+    // The cut text takes room past its end, and the wash keeps its slope there
+    CHECK(tape.seg[0].cut);
+    CHECK(tape.seg[0].len > tape.seg[0].text_w);
+    f.frame(title, kTitle);
+    CHECK(layerPixels == before);
+}
+
 TEST(test_follow_title_continues_after_a_new_screen) {
     Fixture f;
     TitleTextView title(testFont);
@@ -2316,6 +2341,7 @@ int main() {
     RUN(test_follow_title_moves_on_the_layer_after_the_start_delay);
     RUN(test_follow_title_puts_a_new_text_after_the_text_under_the_edge);
     RUN(test_follow_title_continues_after_a_new_screen);
+    RUN(test_follow_title_change_near_the_end_of_the_text_keeps_the_area);
     RUN(test_row_shows_long_text_only_when_selected);
     RUN(test_selection_change_makes_the_row_dirty);
     RUN(test_cursor_move_draws_only_the_two_changed_rows);
