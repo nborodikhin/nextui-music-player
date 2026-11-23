@@ -660,6 +660,42 @@ void runTitle(Fixture& f, TitleTextView& title, uint32_t ms) {
     }
 }
 
+TEST(test_layout_measures_a_text_and_the_draw_renders_it) {
+    Fixture f;
+    TextView view(testFont, true);
+    view.setText(kLongText);
+    UiLayoutContext measuring = f.compositor.beginLayout(f.context).createMeasuringContext();
+    const UiSize size         = measuring.layoutChild(view, kRow).getSize();
+    CHECK(size.w > 0 && size.w <= kRow.w);
+    CHECK(view.isClipped());
+    CHECK(!view.isRendered());
+    f.frame(view, kRow);
+    CHECK(view.isRendered());
+}
+
+TEST(test_row_outside_the_window_renders_no_text) {
+    Fixture f;
+    class RowAdapter final : public ListAdapter {
+    public:
+        std::vector<std::shared_ptr<ListRowView>> rows;
+        int getCount() const override { return 20; }
+        long getItemId(int index) const override { return index; }
+        std::shared_ptr<ListItemView> getView(int) override {
+            rows.push_back(std::make_shared<ListRowView>(testFont));
+            rows.back()->setText(kLongText);
+            return rows.back();
+        }
+    } adapter;
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(0);
+    f.frame(list, SDL_Rect{0, 0, 200, 120});
+    const int last = list.getLastVisibleIndex();
+    CHECK(last < 19);
+    CHECK(adapter.rows[0]->hasRenderedText());
+    CHECK(!adapter.rows[19]->hasRenderedText());
+}
+
 TEST(test_follow_title_at_rest_takes_a_new_text_at_once) {
     Fixture f;
     TitleTextView title(testFont);
@@ -2038,6 +2074,8 @@ int main() {
     RUN(test_transparent_box_has_no_content_until_it_gets_a_color);
     RUN(test_edge_pixel_on_the_surface_is_premultiplied);
     RUN(test_title_fades_at_the_cut_and_not_when_it_fits);
+    RUN(test_layout_measures_a_text_and_the_draw_renders_it);
+    RUN(test_row_outside_the_window_renders_no_text);
     RUN(test_follow_title_at_rest_takes_a_new_text_at_once);
     RUN(test_follow_title_moves_on_the_layer_after_the_start_delay);
     RUN(test_follow_title_puts_a_new_text_after_the_text_under_the_edge);

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include "ui_utils.h"
@@ -754,6 +755,16 @@ void draw_list_item_bg(SDL_Surface* screen, SDL_Rect* rect, bool selected) {
     }
 }
 
+// Writes into out_name the first `kept` bytes of in_name and "...". Returns the width of the
+// result with padding.
+static int measure_cut(TTF_Font* font, const char* in_name, char* out_name, size_t kept, int padding) {
+    memcpy(out_name, in_name, kept);
+    memcpy(out_name + kept, "...", 4);
+    int width = 0;
+    TTF_SizeUTF8(font, out_name, &width, NULL);
+    return width + padding;
+}
+
 int UI_truncateText(TTF_Font* font, const char* in_name, char* out_name, int max_width,
                     int padding) {
     size_t length = strlen(in_name);
@@ -762,21 +773,42 @@ int UI_truncateText(TTF_Font* font, const char* in_name, char* out_name, int max
     int width = 0;
     TTF_SizeUTF8(font, out_name, &width, NULL);
     width += padding;
+    if (width <= max_width) return width;
 
-    size_t kept = length;
-    while (width > max_width && kept > 0) {
-        // Cut whole characters until "..." fits in the place of the cut text
-        do {
-            out_name[kept] = '\0';
-            kept -= UTF8_lastCharBytes(out_name);
-        } while (kept > 0 && kept + 3 > length);
-
-        if (kept + 3 <= length) memcpy(out_name + kept, "...", 4);
-        else out_name[0] = '\0';
-
-        TTF_SizeUTF8(font, out_name, &width, NULL);
-        width += padding;
+    // The places to cut, from the longest kept text: each cut removes whole characters, and
+    // "..." takes no more room than the text that it replaces
+    size_t* cuts = (size_t*)malloc((length + 1) * sizeof(*cuts));
+    if (!cuts) return width;
+    int cut_count = 0;
+    size_t kept   = length;
+    while (kept > 0) {
+        out_name[kept] = '\0';
+        kept -= UTF8_lastCharBytes(out_name);
+        if (kept + 3 <= length) cuts[cut_count++] = kept;
     }
+    if (cut_count == 0) {
+        out_name[0] = '\0';
+        free(cuts);
+        TTF_SizeUTF8(font, out_name, &width, NULL);
+        return width + padding;
+    }
+
+    // The width falls with each cut, thus a binary search finds the longest text that fits.
+    // Where none fits, the shortest one stays.
+    int low  = 0;
+    int high = cut_count - 1;
+    int best = cut_count - 1;
+    while (low <= high) {
+        int middle = low + (high - low) / 2;
+        if (measure_cut(font, in_name, out_name, cuts[middle], padding) <= max_width) {
+            best = middle;
+            high = middle - 1;
+        } else {
+            low = middle + 1;
+        }
+    }
+    width = measure_cut(font, in_name, out_name, cuts[best], padding);
+    free(cuts);
     return width;
 }
 

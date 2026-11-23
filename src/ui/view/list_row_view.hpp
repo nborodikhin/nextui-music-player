@@ -38,6 +38,8 @@ public:
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
     void setRightView(std::shared_ptr<UiView> view);
     bool isSelected() const { return selected; }
+    /** Returns true while the row holds a bitmap of its text. */
+    bool hasRenderedText() const { return shortText.isRendered() || longText.isRendered(); }
 
     /** The text moves again each time the row shows it, until stopScrolling(). */
     void startScrolling() override {

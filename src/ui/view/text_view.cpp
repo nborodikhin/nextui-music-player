@@ -19,9 +19,10 @@ TextView::~TextView() { freeRender(); }
 
 bool TextView::setText(const std::string& newText) {
     if (text == newText) return false;
-    text        = newText;
-    renderStale = true;
-    dirty       = true;
+    text         = newText;
+    measureStale = true;
+    renderStale  = true;
+    dirty        = true;
     resetScrolling();
     return true;
 }
@@ -98,8 +99,9 @@ void TextView::setOffset(double newOffset) {
 }
 
 void TextView::onAttach(UiContext&) {
-    renderStale = true;
-    dirty       = true;
+    measureStale = true;
+    renderStale  = true;
+    dirty        = true;
     // Only a start from before the attach starts the scroll. A view that comes back to the layout
     // scrolls again after a new start only.
     if (std::exchange(startPending, false)) startScrolling(speedSpPerSecond);
@@ -143,31 +145,39 @@ SDL_Surface* TextView::renderBitmap(const std::string& line) const {
     return toPremultiplied(TTF_RenderUTF8_Blended(font, line.c_str(), opaque));
 }
 
+void TextView::measure() {
+    measureStale     = false;
+    measuredMaxWidth = maxWidth;
+    textWidth        = 0;
+    shownWidth       = 0;
+    const std::string oldShownText = std::exchange(shownText, std::string());
+    if (!text.empty()) {
+        TTF_SizeUTF8(font, text.c_str(), &textWidth, nullptr);
+        if (useEllipsis && textWidth > maxWidth) {
+            std::vector<char> truncated(text.size() + 1);
+            shownWidth = UI_truncateText(font, text.c_str(), truncated.data(), maxWidth, 0);
+            shownText  = truncated.data();
+        } else {
+            shownText  = text;
+            shownWidth = textWidth;
+        }
+    }
+    if (shownText != oldShownText) renderStale = true;
+}
+
 void TextView::render() {
     freeRender();
-    renderStale      = false;
-    renderedMaxWidth = maxWidth;
-    textWidth        = 0;
-    if (text.empty()) return;
-    TTF_SizeUTF8(font, text.c_str(), &textWidth, nullptr);
-
-    const SDL_Color opaque = {color.r, color.g, color.b, 255};
-    if (useEllipsis && textWidth > maxWidth) {
-        std::vector<char> truncated(text.size() + 1);
-        UI_truncateText(font, text.c_str(), truncated.data(), maxWidth, 0);
-        bitmap = toPremultiplied(TTF_RenderUTF8_Blended(font, truncated.data(), opaque));
-    } else {
-        bitmap = toPremultiplied(TTF_RenderUTF8_Blended(font, text.c_str(), opaque));
-    }
+    renderStale = false;
+    if (!shownText.empty()) bitmap = renderBitmap(shownText);
 }
 
 void TextView::layout(UiLayoutContext& context) {
     maxWidth = context.getMaxSize().w;
-    if (renderStale || (useEllipsis && maxWidth != renderedMaxWidth)) {
-        render();
+    if (measureStale || (useEllipsis && maxWidth != measuredMaxWidth)) {
+        measure();
         dirty = true;
     }
-    const int width      = std::min(useEllipsis && bitmap ? bitmap->w : textWidth, maxWidth);
+    const int width      = std::min(useEllipsis ? shownWidth : textWidth, maxWidth);
     const int fontHeight = getFontHeight();
     const int lineHeight = std::max(TTF_FontLineSkip(font), fontHeight);
     const int height     = std::max(fontHeight, std::min(lineHeight, context.getMaxSize().h));
@@ -180,6 +190,7 @@ void TextView::layout(UiLayoutContext& context) {
 void TextView::draw(UiDrawContext& context) {
     dirty               = false;
     SDL_Surface* target = context.getSurface();
+    if (renderStale) render();
     if (!bitmap || !target) return;
     context.setContentRect(SDL_Rect{0, textTop, target->w, bitmap->h});
     SDL_Rect from = {offset, 0, bitmap->w - offset, bitmap->h};
