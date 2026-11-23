@@ -6,15 +6,12 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
-#include <sys/stat.h>
 
-#include "background.h"
 #include "browser.h"
 #include "db.h"
 #include "file_utils.h"
 #include "filedb.h"
 #include "music_session.h"
-#include "spectrum.h"
 #include "ui/add_to_playlist_page.hpp"
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/music_playing_page.hpp"
@@ -74,13 +71,11 @@ public:
         row->setText(text);
         if (hasIcons) {
             if (entry.is_dir) {
-                row->setLeftIcon([](bool selected) { return Icons_getFolder(THEME_ROLE_PRIMARY, selected); });
+                row->setLeftIcon(ICON_FOLDER);
             } else if (entry.is_play_all) {
-                row->setLeftIcon([](bool selected) { return Icons_getPlayAll(THEME_ROLE_PRIMARY, selected); });
+                row->setLeftIcon(ICON_PLAY_ALL);
             } else {
-                const AudioFormat format = entry.format;
-                row->setLeftIcon(
-                    [format](bool selected) { return Icons_getForFormat(format, THEME_ROLE_PRIMARY, selected); });
+                row->setLeftIcon(Icons_getFormatIcon(entry.format));
             }
         }
         return row;
@@ -117,17 +112,14 @@ public:
     HelpId getHelpId() const override { return HELP_BROWSER; }
 
     void onEnter() override {
-        mkdir(get_music_path(), 0755);
+        ensure_music_dir();
         screenView.setAdapter(rows);
         list.start();
         loadFolder(Db_getRootDirId(), 0);
         getScheduler().postRepeating([this] { refresh(); }, kRefreshMs);
     }
 
-    void onExit() override {
-        if (!Background_isPlaying()) Spectrum_quit();
-        Browser_freeEntries(&browser);
-    }
+    void onExit() override { Browser_freeEntries(&browser); }
 
     void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
@@ -262,19 +254,23 @@ private:
 
     void confirmDelete(const FileEntry& entry) {
         if (entry.is_dir || entry.is_play_all) return;
-        DbFileResult* file = Db_getFile(entry.db_id);
-        if (!file) return;
+        DbFileResult* file_result = Db_getFile(entry.db_id);
         char path[512];
-        const bool found = get_music_abspath(file->file.path, path, sizeof(path));
-        Db_freeResult(file);
+        const bool found =  file_result && get_music_abspath(file_result->file.path, path, sizeof(path));
+        Db_freeResult(file_result);
         if (!found) return;
+
         // The dialog keeps the path, thus a refresh of the rows under it does not change the target
         getNavigator().openForResult(ConfirmDialogPage("Delete File?", entry.name),
                                      [this, target = std::string(path)](const bool& yes) {
-                                         if (!yes || unlink(target.c_str()) != 0) return;
-                                         const int position = list.getSelectedIndex();
-                                         loadFolder(browser.dir_id, std::min(position, browser.entry_count - 1));
+                                         if (yes) onDeleteConfirmed(target);
                                      });
+    }
+
+    /** Deletes the file at `path`, and shows the folder again with the cursor at its place. */
+    void onDeleteConfirmed(const std::string& path) {
+        if (unlink(path.c_str()) != 0) return;
+        loadFolder(browser.dir_id, std::min(list.getSelectedIndex(), browser.entry_count - 1));
     }
 
     BrowserContext browser{};

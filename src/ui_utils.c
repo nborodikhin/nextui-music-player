@@ -1348,7 +1348,7 @@ void render_empty_state(SDL_Surface* screen, const char* message,
     int hh = screen->h;
     int center_y = hh / 2 - SCALE1(15);
 
-    SDL_Surface* icon = Icons_getEmpty(THEME_ROLE_PRIMARY, false);
+    SDL_Surface* icon = Icons_getIcon(ICON_EMPTY, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (icon) {
         int icon_size = SCALE1(48);
         SDL_Rect src_rect = {0, 0, icon->w, icon->h};

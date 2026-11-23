@@ -10,26 +10,39 @@ extern "C" {
 #include "player.h"  // For AudioFormat
 #include "ui_theme.h"
 
+// The icons of the app
+typedef enum {
+    ICON_FOLDER,
+    ICON_PLAY_ALL,
+    // A file of a format with no icon of its own
+    ICON_AUDIO,
+    ICON_MP3,
+    ICON_FLAC,
+    ICON_OGG,
+    ICON_WAV,
+    ICON_M4A,
+    ICON_AAC,
+    ICON_OPUS,
+    // The badges of a podcast episode
+    ICON_COMPLETE,
+    ICON_DOWNLOAD,
+    // The icon of an empty state
+    ICON_EMPTY,
+    ICON_COUNT,
+} IconId;
+
 // Load each icon and set its color channels to white.
 void Icons_init(void);
 
 // Cleanup icons
 void Icons_quit(void);
 
-// Icon getters. Note that each icon has a surface. To avoid collisions,
-// draw the obtained surface before the next icon request.
+// Returns the icon `id` in `color`, or NULL when the icon did not load. Each icon has one
+// surface, thus the surface is valid only until the next request of that icon: draw it first.
+SDL_Surface* Icons_getIcon(IconId id, SDL_Color color);
 
-// File type icons
-SDL_Surface* Icons_getFolder(ThemeRole role, bool selected);
-SDL_Surface* Icons_getPlayAll(ThemeRole role, bool selected);
-SDL_Surface* Icons_getForFormat(AudioFormat format, ThemeRole role, bool selected);
-
-// Podcast badge icons
-SDL_Surface* Icons_getComplete(ThemeRole role, bool selected);
-SDL_Surface* Icons_getDownload(ThemeRole role, bool selected);
-
-// Empty state icon
-SDL_Surface* Icons_getEmpty(ThemeRole role, bool selected);
+// Returns the icon of an audio file of `format`.
+IconId Icons_getFormatIcon(AudioFormat format);
 
 // Check if icons are loaded
 bool Icons_isLoaded(void);

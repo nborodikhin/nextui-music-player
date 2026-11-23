@@ -13,7 +13,7 @@ extern "C" {
 void EmptyStateView::IconView::draw(UiDrawContext& context) {
     dirty                = false;
     SDL_Surface* surface = context.getSurface();
-    SDL_Surface* bitmap  = Icons_getEmpty(THEME_ROLE_PRIMARY, false);
+    SDL_Surface* bitmap  = Icons_getIcon(ICON_EMPTY, Theme_getColor(THEME_ROLE_PRIMARY, false));
     if (!surface || !bitmap) return;
     SDL_SetSurfaceBlendMode(bitmap, SDL_BLENDMODE_BLEND);
     SDL_BlitScaled(bitmap, nullptr, surface, nullptr);
@@ -30,7 +30,7 @@ void EmptyStateView::onAttach(UiContext&) {
 void EmptyStateView::layout(UiLayoutContext& context) {
     const UiSize space        = context.getMaxSize();
     const int iconSize        = SCALE1(48);
-    const bool hasIcon        = Icons_getEmpty(THEME_ROLE_PRIMARY, false) != nullptr;
+    const bool hasIcon        = Icons_getIcon(ICON_EMPTY, Theme_getColor(THEME_ROLE_PRIMARY, false)) != nullptr;
     UiLayoutContext measuring = context.createMeasuringContext();
     const UiSize messageSize  = measuring.layoutChild(message, SDL_Rect{0, 0, space.w, space.h}).getSize();
     const UiSize lineSize     = measuring.layoutChild(line, SDL_Rect{0, 0, space.w, space.h}).getSize();

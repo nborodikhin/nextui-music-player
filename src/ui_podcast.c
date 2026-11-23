@@ -1328,7 +1328,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
             int bx = pos.badge_x;
             int by = y + (layout.item_h - badge_icon_size) / 2;
             if (is_played) {
-                SDL_Surface* icon = Icons_getComplete(THEME_ROLE_PRIMARY, false);
+                SDL_Surface* icon = Icons_getIcon(ICON_COMPLETE, Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (icon) {
                     SDL_Rect src = {0, 0, icon->w, icon->h};
                     SDL_Rect dst = {bx, by, badge_icon_size, badge_icon_size};
@@ -1337,7 +1337,7 @@ void render_podcast_episodes(SDL_Surface* screen, int show_setting,
                 }
             }
             if (!is_downloaded) {
-                SDL_Surface* icon = Icons_getDownload(THEME_ROLE_PRIMARY, false);
+                SDL_Surface* icon = Icons_getIcon(ICON_DOWNLOAD, Theme_getColor(THEME_ROLE_PRIMARY, false));
                 if (icon) {
                     SDL_Rect src = {0, 0, icon->w, icon->h};
                     SDL_Rect dst = {bx, by, badge_icon_size, badge_icon_size};

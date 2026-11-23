@@ -2,12 +2,13 @@
 #define __UI_VIEW_LIST_ROW_VIEW_HPP__
 
 #include <cstdint>
-#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <SDL2/SDL_ttf.h>
 
+#include "ui_icons.h"
 #include "ui/view/text_view.hpp"
 #include "ui/view/list_item_view.hpp"
 
@@ -29,11 +30,8 @@ public:
     bool setText(const std::string& text);
     void setSelected(bool selected) override;
 
-    /**
-     * Shows an icon before the text. The row calls `getIcon` with its selection in each draw, and
-     * does not keep the surface. Pass an empty function in `getIcon` to remove the icon.
-     */
-    void setLeftIcon(std::function<SDL_Surface*(bool selected)> getIcon);
+    /** Shows `icon` before the text, in the color of the text. */
+    void setLeftIcon(IconId icon);
 
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
     void setRightView(std::shared_ptr<UiView> view);
@@ -57,10 +55,10 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
-    /** The icon that the getter of the row returns for its selection */
+    /** The icon of the row, in the color of the text of its selection */
     class IconView : public UiView {
     public:
-        std::function<SDL_Surface*(bool selected)> getIcon;
+        std::optional<IconId> icon;
         bool selected = false;
         bool dirty    = true;
 
