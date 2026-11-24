@@ -11,7 +11,7 @@ extern "C" {
 #include "api.h"
 }
 
-ListRowView::ListRowView(TTF_Font* font) : font(font), shortText(font, true), longText(font, false) {
+ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font, false) {
     icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
@@ -51,11 +51,8 @@ void ListRowView::layout(UiLayoutContext& context) {
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
     const int padding   = SCALE1(BUTTON_PADDING);
-    // The icon is as high as the font, and a space of the font keeps it from the text
-    const int iconSize = TTF_FontHeight(font);
-    int spaceWidth     = 0;
-    TTF_SizeUTF8(font, " ", &spaceWidth, nullptr);
-    const int iconSpace = hasIcon ? iconSize + spaceWidth : 0;
+    const int iconSize  = SCALE1(24);
+    const int iconSpace = hasIcon ? iconSize + SCALE1(6) : 0;
     SDL_Rect textRect   = {padding + iconSpace, 0, size.w - padding * 2 - iconSpace, size.h};
 
     UiLayoutContext measuring = context.createMeasuringContext();

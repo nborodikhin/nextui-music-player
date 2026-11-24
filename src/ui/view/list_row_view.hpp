@@ -30,7 +30,7 @@ public:
     bool setText(const std::string& text);
     void setSelected(bool selected) override;
 
-    /** Shows `icon` before the text, as high as the font and in the color of the text. */
+    /** Shows `icon` before the text, in the color of the text. */
     void setLeftIcon(IconId icon);
 
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
@@ -55,7 +55,6 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
-    TTF_Font* font;
     IconView icon{ICON_FOLDER};
     bool hasIcon = false;
     TextView shortText;
