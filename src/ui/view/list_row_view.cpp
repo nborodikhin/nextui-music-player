@@ -11,7 +11,8 @@ extern "C" {
 #include "api.h"
 }
 
-ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font, false) {
+ListRowView::ListRowView(TTF_Font* font) : font(font), shortText(font, true), longText(font, false) {
+    icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
@@ -26,8 +27,7 @@ void ListRowView::setSelected(bool newSelected) {
     selected = newSelected;
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
-    icon.selected = selected;
-    icon.dirty    = true;
+    icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     if (!selected) {
         stopScrolling();
         resetScrolling();
@@ -36,19 +36,9 @@ void ListRowView::setSelected(bool newSelected) {
 }
 
 void ListRowView::setLeftIcon(IconId id) {
-    icon.icon  = id;
-    icon.dirty = true;
-    dirty      = true;
-}
-
-void ListRowView::IconView::draw(UiDrawContext& context) {
-    dirty                = false;
-    SDL_Surface* surface = context.getSurface();
-    // The icon is a shared surface, which is valid only until the next request of that icon
-    SDL_Surface* bitmap  = icon ? Icons_getIcon(*icon, Theme_getColor(THEME_ROLE_PRIMARY, selected)) : nullptr;
-    if (!surface || !bitmap) return;
-    SDL_SetSurfaceBlendMode(bitmap, SDL_BLENDMODE_BLEND);
-    SDL_BlitScaled(bitmap, nullptr, surface, nullptr);
+    icon.setIcon(id);
+    hasIcon = true;
+    dirty   = true;
 }
 
 void ListRowView::setRightView(std::shared_ptr<UiView> view) {
@@ -61,9 +51,11 @@ void ListRowView::layout(UiLayoutContext& context) {
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
     const int padding   = SCALE1(BUTTON_PADDING);
-    const bool hasIcon  = icon.icon.has_value();
-    const int iconSize  = SCALE1(24);
-    const int iconSpace = hasIcon ? iconSize + SCALE1(6) : 0;
+    // The icon is as high as the font, and a space of the font keeps it from the text
+    const int iconSize = TTF_FontHeight(font);
+    int spaceWidth     = 0;
+    TTF_SizeUTF8(font, " ", &spaceWidth, nullptr);
+    const int iconSpace = hasIcon ? iconSize + spaceWidth : 0;
     SDL_Rect textRect   = {padding + iconSpace, 0, size.w - padding * 2 - iconSpace, size.h};
 
     UiLayoutContext measuring = context.createMeasuringContext();

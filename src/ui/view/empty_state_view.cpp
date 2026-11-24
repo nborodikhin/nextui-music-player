@@ -10,21 +10,12 @@ extern "C" {
 #include "api.h"
 }
 
-void EmptyStateView::IconView::draw(UiDrawContext& context) {
-    dirty                = false;
-    SDL_Surface* surface = context.getSurface();
-    SDL_Surface* bitmap  = Icons_getIcon(ICON_EMPTY, Theme_getColor(THEME_ROLE_PRIMARY, false));
-    if (!surface || !bitmap) return;
-    SDL_SetSurfaceBlendMode(bitmap, SDL_BLENDMODE_BLEND);
-    SDL_BlitScaled(bitmap, nullptr, surface, nullptr);
-}
-
 EmptyStateView::EmptyStateView() : message(Fonts_getMedium(), true), line(Fonts_getSmall(), true) {}
 
 void EmptyStateView::onAttach(UiContext&) {
     message.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     line.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-    icon.invalidate();
+    icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
 
 void EmptyStateView::layout(UiLayoutContext& context) {

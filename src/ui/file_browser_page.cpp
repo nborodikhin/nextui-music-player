@@ -1,7 +1,6 @@
 #include "ui/file_browser_page.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <unistd.h>
@@ -17,11 +16,8 @@
 #include "ui/music_playing_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
 #include "ui/view/empty_state_view.hpp"
-#include "ui/view/list_adapter.hpp"
-#include "ui/view/list_row_view.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui_fonts.h"
-#include "ui_icons.h"
 #include "ui_theme.h"
 
 using namespace input;
@@ -37,53 +33,6 @@ constexpr uint32_t kRefreshMs = 100;
 
 /** How many folders the way back up remembers */
 constexpr size_t kHistoryDepth = 32;
-
-/** The id of the row "..", which goes to the parent folder */
-constexpr long kParentRowId = -2;
-/** The id of the row Play All */
-constexpr long kPlayAllRowId = -1;
-
-bool isParentRow(const FileEntry& entry) { return entry.is_dir && std::strcmp(entry.name, "..") == 0; }
-
-/** The rows of the folder of a BrowserContext */
-class FolderAdapter final : public ListAdapter {
-public:
-    explicit FolderAdapter(const BrowserContext& browser) : browser(browser) {}
-
-    int getCount() const override { return browser.entry_count; }
-
-    long getItemId(int index) const override { return getFolderRowId(browser.entries[index]); }
-
-    std::shared_ptr<ListItemView> getView(int index) override {
-        const FileEntry& entry = browser.entries[index];
-        auto row               = std::make_shared<ListRowView>(Fonts_getMedium());
-        const bool hasIcons    = Icons_isLoaded();
-        std::string text;
-        if (entry.is_dir || entry.is_play_all) {
-            text = entry.name;
-            // Without icons, a text sign tells a folder and Play All from a file
-            if (!hasIcons) text = (entry.is_dir ? "[" + text + "]" : "> " + text);
-        } else {
-            char display[sizeof(entry.name)];
-            get_file_display_name(entry.name, display, sizeof(display));
-            text = display;
-        }
-        row->setText(text);
-        if (hasIcons) {
-            if (entry.is_dir) {
-                row->setLeftIcon(ICON_FOLDER);
-            } else if (entry.is_play_all) {
-                row->setLeftIcon(ICON_PLAY_ALL);
-            } else {
-                row->setLeftIcon(Icons_getFormatIcon(entry.format));
-            }
-        }
-        return row;
-    }
-
-private:
-    const BrowserContext& browser;
-};
 
 /** A folder that the user went into, and the row of the cursor in the folder before it */
 struct HistoryEntry {
@@ -147,7 +96,7 @@ public:
         }
         if (event.isSingleButton(Button::Y)) {
             // ".." and Play All are ways to move and to play, not content to add
-            if (!isParentRow(*entry) && !entry->is_play_all) {
+            if (!FolderAdapter::isParentRow(*entry) && !entry->is_play_all) {
                 getNavigator().open(AddToPlaylistPage(entry->db_id, entry->is_dir));
             }
             return true;
@@ -233,7 +182,7 @@ private:
     }
 
     void openEntry(const FileEntry& entry) {
-        if (isParentRow(entry)) {
+        if (FolderAdapter::isParentRow(entry)) {
             goUp();
             return;
         }
@@ -282,12 +231,6 @@ private:
 };
 
 }  // namespace
-
-long getFolderRowId(const FileEntry& entry) {
-    if (isParentRow(entry)) return kParentRowId;
-    if (entry.is_play_all) return kPlayAllRowId;
-    return 2L * entry.db_id + (entry.is_dir ? 0 : 1);
-}
 
 std::unique_ptr<UiPageImplBase> FileBrowserPage::createPageImpl() const {
     return std::make_unique<FileBrowserPageImpl>();

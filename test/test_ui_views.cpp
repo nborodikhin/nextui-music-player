@@ -1157,26 +1157,34 @@ FileEntry makeEntry(const char* name, int dbId, bool isDir, bool isPlayAll = fal
 }
 
 TEST(test_folder_and_file_with_one_database_id_have_different_row_ids) {
-    const long folder  = getFolderRowId(makeEntry("Album", 7, true));
-    const long file    = getFolderRowId(makeEntry("song.mp3", 7, false));
-    const long parent  = getFolderRowId(makeEntry("..", 7, true));
-    const long playAll = getFolderRowId(makeEntry("Play All", -1, false, true));
-    CHECK(folder != file);
-    CHECK(parent != folder);
-    CHECK(playAll != file && playAll != folder && playAll != parent);
-    CHECK_EQ_INT(static_cast<int>(getFolderRowId(makeEntry("Album", 7, true))), static_cast<int>(folder));
+    FileEntry entries[] = {makeEntry("..", 7, true), makeEntry("Album", 7, true), makeEntry("song.mp3", 7, false),
+                           makeEntry("Play All", -1, false, true)};
+    BrowserContext browser{};
+    browser.entries     = entries;
+    browser.entry_count = 4;
+    FolderAdapter adapter(browser);
+    for (int first = 0; first < 4; first++) {
+        for (int second = first + 1; second < 4; second++) {
+            CHECK(adapter.getItemId(first) != adapter.getItemId(second));
+        }
+    }
+    CHECK(FolderAdapter::isParentRow(entries[0]));
+    CHECK(!FolderAdapter::isParentRow(entries[1]));
 }
 
 TEST(test_refresh_keeps_the_cursor_on_the_file_with_the_id_of_a_folder) {
-    TestAdapter adapter;
-    const FileEntry folder = makeEntry("Album", 3, true);
-    const FileEntry file   = makeEntry("song.mp3", 3, false);
-    adapter.ids            = {getFolderRowId(folder), getFolderRowId(file)};
+    FileEntry before[] = {makeEntry("Album", 3, true), makeEntry("song.mp3", 3, false)};
+    FileEntry after[]  = {makeEntry("a.mp3", 9, false), makeEntry("Album", 3, true), makeEntry("song.mp3", 3, false)};
+    BrowserContext browser{};
+    browser.entries     = before;
+    browser.entry_count = 2;
+    FolderAdapter adapter(browser);
     ListView list;
     list.setAdapter(adapter);
     list.setSelectedIndex(1);
     // A new file comes before the folder: the cursor stays on the file, not on the folder
-    adapter.ids = {getFolderRowId(makeEntry("a.mp3", 9, false)), getFolderRowId(folder), getFolderRowId(file)};
+    browser.entries     = after;
+    browser.entry_count = 3;
     list.notifyDataChanged();
     CHECK_EQ_INT(list.getSelectedIndex(), 2);
 }

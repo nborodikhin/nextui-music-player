@@ -3,12 +3,12 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 
 #include <SDL2/SDL_ttf.h>
 
 #include "ui_icons.h"
+#include "ui/view/icon_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/list_item_view.hpp"
 
@@ -30,7 +30,7 @@ public:
     bool setText(const std::string& text);
     void setSelected(bool selected) override;
 
-    /** Shows `icon` before the text, in the color of the text. */
+    /** Shows `icon` before the text, as high as the font and in the color of the text. */
     void setLeftIcon(IconId icon);
 
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
@@ -55,18 +55,9 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
-    /** The icon of the row, in the color of the text of its selection */
-    class IconView : public UiView {
-    public:
-        std::optional<IconId> icon;
-        bool selected = false;
-        bool dirty    = true;
-
-        bool isDirty() const override { return dirty; }
-        void draw(UiDrawContext& context) override;
-    };
-
-    IconView icon;
+    TTF_Font* font;
+    IconView icon{ICON_FOLDER};
+    bool hasIcon = false;
     TextView shortText;
     TextView longText;
     std::shared_ptr<UiView> rightView;
