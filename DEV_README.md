@@ -367,11 +367,13 @@ The music player uses:
 
 ## UI Framework
 
-The code in `src/ui/view/` draws a screen from views. A page (`UiPage` in
-`src/ui/page/ui_page.hpp`) owns its views. The page stack (`PageStack` in
+The code in `src/ui/view/` draws a screen from views. A page has a declaration
+(`UiPage` in `src/ui/page/ui_page.hpp`), which holds its parameters, and an
+implementation (`UiPageImpl`), which owns its views. The page stack (`PageStack` in
 `src/ui/page/`) holds the open pages, and its frame loop (`PageStack::run()`) runs
-their frames. The main menu and the input test page use this framework. The other
-screens use the older draw functions.
+their frames. A screen that still uses the older draw functions is a legacy module.
+A legacy page (`LegacyModulePageImpl` in `src/ui/page/legacy_module_page.hpp`)
+starts it, and the module can start other legacy modules directly.
 
 ### Parts
 
@@ -379,16 +381,16 @@ screens use the older draw functions.
 |---|---|
 | `UiView` | A part of a screen. It lays itself out on each frame, and draws into a bitmap when its content changes. |
 | `UiLayout` | A view that only places its children, and draws nothing of its own. |
-| `UiLayoutContext` | The entry of one view in one frame: its place, its size, its content rectangle, its clip, its target layer and its visibility. |
+| `UiLayoutContext` | The entry of one view in one frame: its place, its size, its clip, its target layer and its visibility. |
 | `UiDrawContext` | The bitmap of one view during its draw. |
 | `UiContext` | What a page and its views get from the stack: the pixel format, the screen size, the elapsed time, the active time and the tasks. Each page has its own context. |
 | `UiCompositor` | Keeps one bitmap for each view, and composes the bitmaps on the screen. |
 
-`TextView`, `TitleTextView`, `ListRowView`, `ListView`, `ScrollIndicatorView`,
-`StatusGroupView`, `ButtonHintsView` and `BoxView` are the views. `ListScreenView`
-is a menu screen with a list. It owns the title, the status group, the list, the
-scroll indicators and the button hints, and lays them out. The page gives the list
-its adapter and keeps the adapter.
+The views for common use are in `src/ui/view/`. `ScreenView` is the root view of a
+full-screen page: the title and the status group in the top pill row, the button hints in the
+bottom pill row, and a content view in the body. A content that scrolls gets the
+scroll indicators. `ListScreenView` is a `ScreenView` with a list as its content.
+The page gives the list its adapter and keeps the adapter.
 
 ### The Frame
 
@@ -426,8 +428,9 @@ gets no time. It reads `getElapsedTime()` or `getActiveTime()` from its context.
 - Each task belongs to the page or to a view. After each layout, the stack
   cancels each task of a view that the layout did not reach. Thus a view must
   stay alive until the layout after it leaves the tree.
-- `TextView::startScrolling()` moves a text that does not fit, and
-  `stopScrolling()` and `resetScrolling()` stop it and put it at its start. The
+- `TextView::startScrolling()` moves a text that does not fit.
+  `stopScrolling()` stops it where it is, and `resetScrolling()` puts it at its
+  start. To stop a text at its start, call both. The
   page owns the delay before a text moves.
 
 ### Layout
@@ -449,7 +452,7 @@ content changes, and keeps the result.
 - A child is clipped to the rectangle of its parent, and to `clip`.
 - The order of the `layoutChild()` calls is the z order. A later view is on top.
   The bitmap of a view is below the bitmaps of its children.
-- A view that only places children is a `UiLayout`. A layout that needs a
+- A new view that only places children is a `UiLayout`. A layout that needs a
   background adds it as a child, thus the order of the background and the
   children is clear.
 - A view has two kinds of visibility. `UiView::setVisible()` hides the view until
@@ -464,12 +467,14 @@ content changes, and keeps the result.
 ### Draw
 
 The compositor calls `draw()` of a view only when the view is dirty
-(`isDirty()`), when its size changed, or when it was never drawn. A view that
+(`isDirty()`), when it attached after its last draw, when its size changed, or
+when it was never drawn. A view that
 moves and does not change is not drawn again.
 
 - `draw()` draws the whole view into `context.getSurface()`, in the coordinates
-  of the view. The bitmap has the size of the view, and is transparent when the
-  call returns it. The result must not depend on the position of the view.
+  of the view. The bitmap has the size of the view. The first call of a draw
+  returns it transparent, and a later call of the same draw returns what the draw
+  put in it. The result must not depend on the position of the view.
 - `context.setContentRect()` sets the part of the bitmap that holds content. The
   default is the whole bitmap. The compositor composes only this part.
 - A draw that does not call `getSurface()` leaves the view with no content. The
@@ -484,7 +489,8 @@ moves and does not change is not drawn again.
 After the layout, the compositor reads the entries in z order, in two passes.
 
 1. The first pass picks the shown views to draw: the views that are dirty, that
-   changed their size, or that were never drawn.
+   attached after their last draw, that changed their size, or that were never
+   drawn.
 2. The compositor draws these views. A draw can change the content rectangle,
    thus the damage comes after it.
 3. The second pass compares each entry with the last frame. The place of the
@@ -539,16 +545,47 @@ cover a view on the layer, also when it is later in the z order.
 
 ### Screen Changes and Dialogs
 
-- A new screen surface or a new output calls `setContext()` of the page with the
-  compositor. Each view drops its caches, and the compositor composes the whole
-  screen again.
+- A view attaches to the context of its page before its first layout, and again
+  after a new screen surface or a new output. After the attach the compositor draws the
+  view again, and the attach calls `onAttach()`, where the view drops each cache that depends on the screen.
+  The compositor then composes the whole screen again.
 - After a sleep, `invalidateAll()` composes the whole screen again.
-- Before a dialog, the loop calls `pause()` of the page and puts the compositor
-  in surface-only mode. In this mode each target is the regular surface, and the
-  compositor clears each layer that it wrote. The frame then shows the whole page on the
-  surface, with each scrolling text stopped where it is, and the dialog draws
-  over it. After the dialog, the loop calls `resume()` and composes the whole
-  screen again.
-- When the page exits, the compositor clears each layer that it wrote, thus the
-  next screen starts with no content of the page on the layers. A layer that the
+- When a dialog opens, the stack calls `pause()` of the page under it, and takes
+  a snapshot of that page: one layout and one draw of the page into a bitmap, with
+  the dim over it. While the dialog is the top, the stack lays out the snapshot
+  and then the dialog. It lays out the covered page again only to take a new
+  snapshot after a new screen surface or a new output. The compositor is
+  in surface-only mode: each target is the regular surface, and the compositor
+  clears each layer that it wrote. When the dialog closes, the stack calls
+  `resume()` and composes the whole screen again.
+- When the stack ends, the compositor clears each layer that it wrote, thus the
+  next screen starts with no content of the stack on the layers. A layer that the
   compositor did not write keeps its content.
+
+### Rules for Pages and Views
+
+New code follows these rules. Some older views do not follow each rule yet.
+
+- **Only `draw()` draws into the bitmap of a view.** An input handler, a task and
+  a cursor move change the state of the view and mark it dirty. They do not draw
+  and do not clear a layer. A layout can render into a cache to measure the size
+  of its content.
+- **`onTick()` is for timed work.** Work that an event starts goes in the handler
+  of the event.
+- **`draw()` reads the state of its view or page only.** It does not read
+  `InputState` or other state of the app. The page copies what it needs into its
+  views. The theme is not state of the app, and a draw can read it.
+- **A page does not clear the screen or a layer** when it opens or closes a page.
+  The compositor removes the content of the old page with the damage of the next
+  frame, and clears its layers when the stack ends.
+- **A parent handles the move of a child.** The child draws in its own
+  coordinates, and the compositor composes the old place and the new place.
+- **The framework gives the defaults**: the size of a view, its content
+  rectangle, and the dirty mark after an attach. A view changes a default only
+  where it needs another value.
+- **Use a child view, not a flag.** A gap is a `SpacerView`, and a background is
+  a child that comes first in the layout.
+- **Take a size from the child view**, not from the metrics of a font.
+- **A view that only one page uses stays with that page**, in its `.cpp` file. A
+  view for common use, such as one that a second page also uses, goes in
+  `src/ui/view/`. A view can be for common use from the start.
