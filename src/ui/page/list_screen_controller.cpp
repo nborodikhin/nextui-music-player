@@ -90,8 +90,8 @@ int ListScreenController::getSelectedIndex() const {
     return view.listView.getSelectedIndex();
 }
 
-void ListScreenController::setSelectedIndex(int index) {
-    view.listView.setSelectedIndex(index);
+void ListScreenController::setSelectedIndex(int index, bool center) {
+    view.listView.setSelectedIndex(index, center);
     showSelection();
 }
 

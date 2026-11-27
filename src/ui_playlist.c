@@ -94,7 +94,8 @@ void render_playlist_detail(SDL_Surface* screen, int show_setting,
 
         // Render icon
         if (Icons_isLoaded()) {
-            SDL_Surface *icon = Icons_getForFormat(tracks[idx].format, THEME_ROLE_PRIMARY, is_selected);
+            SDL_Surface *icon = Icons_getIcon(Icons_getFormatIcon(tracks[idx].format),
+                                              Theme_getColor(THEME_ROLE_PRIMARY, is_selected));
             if (icon) {
                 int icon_y = y + (layout.item_h - icon_size) / 2;
                 SDL_Rect src_rect = {0, 0, icon->w, icon->h};

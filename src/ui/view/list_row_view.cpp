@@ -12,6 +12,7 @@ extern "C" {
 }
 
 ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font, false) {
+    icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
 }
@@ -26,11 +27,18 @@ void ListRowView::setSelected(bool newSelected) {
     selected = newSelected;
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
+    icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, selected));
     if (!selected) {
         stopScrolling();
         resetScrolling();
     }
     dirty = true;
+}
+
+void ListRowView::setLeftIcon(IconId id) {
+    icon.setIcon(id);
+    hasIcon = true;
+    dirty   = true;
 }
 
 void ListRowView::setRightView(std::shared_ptr<UiView> view) {
@@ -42,8 +50,10 @@ void ListRowView::setRightView(std::shared_ptr<UiView> view) {
 void ListRowView::layout(UiLayoutContext& context) {
     // A row is as high as a selection pill
     const UiSize size       = {context.getMaxSize().w, std::min(context.getMaxSize().h, SCALE1(PILL_SIZE))};
-    const int padding = SCALE1(BUTTON_PADDING);
-    SDL_Rect textRect = {padding, 0, size.w - padding * 2, size.h};
+    const int padding   = SCALE1(BUTTON_PADDING);
+    const int iconSize  = SCALE1(24);
+    const int iconSpace = hasIcon ? iconSize + SCALE1(6) : 0;
+    SDL_Rect textRect   = {padding + iconSpace, 0, size.w - padding * 2 - iconSpace, size.h};
 
     UiLayoutContext measuring = context.createMeasuringContext();
     SDL_Rect rightRect{};
@@ -68,8 +78,8 @@ void ListRowView::layout(UiLayoutContext& context) {
     context.setSize(size);
 
     // A text that does not fit takes all of its space, and the pill with it
-    const int textSpace    = textRect.w + padding * 2;
-    const int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2);
+    const int textSpace    = textRect.w + padding * 2 + iconSpace;
+    const int newPillWidth = clipped ? textSpace : std::min(textSpace, shortText.getSize().w + padding * 2 + iconSpace);
     const int newBandWidth = rightView ? size.w : 0;
     if (newPillWidth != pillWidth || size.h != pillHeight || newBandWidth != bandWidth) {
         pillWidth  = newPillWidth;
@@ -77,6 +87,7 @@ void ListRowView::layout(UiLayoutContext& context) {
         bandWidth  = newBandWidth;
         dirty      = true;
     }
+    if (hasIcon) context.layoutChild(icon, SDL_Rect{padding, (size.h - iconSize) / 2, iconSize, iconSize});
     context.layoutChild(shown, textRect);
     if (rightView) context.layoutChild(*rightView, rightRect);
 }

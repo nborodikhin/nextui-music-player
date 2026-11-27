@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include "ui/view/icon_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/ui_layout.hpp"
 
@@ -23,18 +24,7 @@ protected:
     void onAttach(UiContext& context) override;
 
 private:
-    /** The empty icon of the theme, scaled to the size of the view. */
-    class IconView : public UiView {
-    public:
-        bool isDirty() const override { return dirty; }
-        void draw(UiDrawContext& context) override;
-        void invalidate() { dirty = true; }
-
-    private:
-        bool dirty = true;
-    };
-
-    IconView icon;
+    IconView icon{ICON_EMPTY};
     TextView message;
     TextView line;
 };

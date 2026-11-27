@@ -7,6 +7,8 @@
 
 #include <SDL2/SDL_ttf.h>
 
+#include "ui_icons.h"
+#include "ui/view/icon_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/view/list_item_view.hpp"
 
@@ -17,6 +19,8 @@
  *
  * A row can have a right view at its right edge, and the text then takes the space to the left of
  * it. A selected row with a right view shows a band under the whole row.
+ *
+ * A row can have an icon at its left edge, before the text.
  */
 class ListRowView : public ListItemView {
 public:
@@ -26,9 +30,14 @@ public:
     bool setText(const std::string& text);
     void setSelected(bool selected) override;
 
+    /** Shows `icon` before the text, in the color of the text. */
+    void setLeftIcon(IconId icon);
+
     /** Shows `view` at the right edge of the row. Pass nullptr in `view` to remove it. */
     void setRightView(std::shared_ptr<UiView> view);
     bool isSelected() const { return selected; }
+    /** Returns true while the row holds a bitmap of its text. */
+    bool hasRenderedText() const { return shortText.isRendered() || longText.isRendered(); }
 
     /** The text moves again each time the row shows it, until stopScrolling(). */
     void startScrolling() override {
@@ -46,6 +55,8 @@ public:
     void draw(UiDrawContext& context) override;
 
 private:
+    IconView icon{ICON_FOLDER};
+    bool hasIcon = false;
     TextView shortText;
     TextView longText;
     std::shared_ptr<UiView> rightView;

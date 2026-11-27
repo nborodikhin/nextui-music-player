@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -31,6 +32,7 @@
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/controls_help_page.hpp"
 #include "ui/database_error_dialog_page.hpp"
+#include "ui/file_browser_page.hpp"
 #include "ui/quit_dialog_page.hpp"
 #include "ui/page/page_stack.hpp"
 #include "ui/view/dialog_view.hpp"
@@ -649,6 +651,160 @@ TEST(test_title_fades_at_the_cut_and_not_when_it_fits) {
     CHECK(opaqueAtEnd);
 }
 
+// The follow mode of a title: a new text scrolls in after the old one
+
+const SDL_Rect kTitle = {0, 0, 200, 40};
+
+/** Runs frames of `title` until `ms` of active time passed, one frame each 20 ms. */
+void runTitle(Fixture& f, TitleTextView& title, uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 20) {
+        f.tick(20);
+        f.frame(title, kTitle);
+    }
+}
+
+TEST(test_layout_measures_a_text_and_the_draw_renders_it) {
+    Fixture f;
+    TextView view(testFont, true);
+    view.setText(kLongText);
+    UiLayoutContext measuring = f.compositor.beginLayout(f.context).createMeasuringContext();
+    const UiSize size         = measuring.layoutChild(view, kRow).getSize();
+    CHECK(size.w > 0 && size.w <= kRow.w);
+    CHECK(view.isClipped());
+    CHECK(!view.isRendered());
+    f.frame(view, kRow);
+    CHECK(view.isRendered());
+}
+
+TEST(test_row_outside_the_window_renders_no_text) {
+    Fixture f;
+    class RowAdapter final : public ListAdapter {
+    public:
+        std::vector<std::shared_ptr<ListRowView>> rows;
+        int getCount() const override { return 20; }
+        long getItemId(int index) const override { return index; }
+        std::shared_ptr<ListItemView> getView(int) override {
+            rows.push_back(std::make_shared<ListRowView>(testFont));
+            rows.back()->setText(kLongText);
+            return rows.back();
+        }
+    } adapter;
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(0);
+    f.frame(list, SDL_Rect{0, 0, 200, 120});
+    const int last = list.getLastVisibleIndex();
+    CHECK(last < 19);
+    CHECK(adapter.rows[0]->hasRenderedText());
+    CHECK(!adapter.rows[19]->hasRenderedText());
+}
+
+TEST(test_follow_title_at_rest_takes_a_new_text_at_once) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText("/a");
+    f.frame(title, kTitle);
+    runTitle(f, title, 2000);
+    title.setText("/b");
+    const ScreenTitle& tape = title.getFollowTape();
+    CHECK_EQ_INT(tape.count, 1);
+    CHECK(std::string(tape.seg[0].text) == "/b");
+    f.frame(title, kTitle);
+    CHECK(!f.layerHasPixels(kTitle));
+    CHECK(f.surfaceHasPixels(kTitle));
+}
+
+TEST(test_follow_title_moves_on_the_layer_after_the_start_delay) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    runTitle(f, title, SCREEN_TITLE_START_DELAY_MS - 100);
+    CHECK(!f.layerHasPixels(kTitle));
+    runTitle(f, title, 500);
+    CHECK(f.layerHasPixels(kTitle));
+    CHECK(!f.surfaceHasPixels(kTitle));
+}
+
+TEST(test_follow_title_puts_a_new_text_after_the_text_under_the_edge) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    runTitle(f, title, SCREEN_TITLE_START_DELAY_MS + 500);
+    ScreenTitle& tape   = const_cast<ScreenTitle&>(title.getFollowTape());
+    const uint32_t now  = f.context.getActiveTime();
+    const int offset    = ScreenTitle_offset(&tape, now);
+    CHECK(offset > 0);
+
+    title.setText("/next");
+    // What the area shows does not change: the old text is cut one em past the right edge
+    CHECK_EQ_INT(tape.count, 2);
+    CHECK(std::string(tape.seg[0].text) == kLongText);
+    CHECK(tape.seg[0].cut);
+    CHECK_EQ_INT(tape.seg[0].len, offset + kTitle.w + tape.fade_w);
+    CHECK(std::string(tape.seg[1].text) == "/next");
+    CHECK_EQ_INT(ScreenTitle_offset(&tape, now), offset);
+
+    // A second text that the area does not show yet takes the place of the first
+    title.setText("/last");
+    CHECK_EQ_INT(tape.count, 2);
+    CHECK(std::string(tape.seg[1].text) == "/last");
+
+    // The old text scrolls out, and the new text that fits comes to rest at the left edge
+    runTitle(f, title, 20000);
+    CHECK_EQ_INT(tape.count, 1);
+    CHECK(std::string(tape.seg[0].text) == "/last");
+    CHECK(!ScreenTitle_moves(&tape, f.context.getActiveTime()));
+    CHECK(!f.layerHasPixels(kTitle));
+    CHECK(f.surfaceHasPixels(kTitle));
+}
+
+TEST(test_follow_title_change_near_the_end_of_the_text_keeps_the_area) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    ScreenTitle& tape = const_cast<ScreenTitle&>(title.getFollowTape());
+    // Move until the right edge of the area is just before the end of the text
+    bool nearEnd = false;
+    for (int step = 0; step < 2000 && !nearEnd; step++) {
+        runTitle(f, title, 20);
+        const int edge = ScreenTitle_offset(&tape, f.context.getActiveTime()) + kTitle.w;
+        // Close to the end, thus a wash from the end of the bitmap would reach far into the area
+        nearEnd        = edge >= tape.seg[0].text_w - 4 && edge < tape.seg[0].text_w;
+    }
+    CHECK(nearEnd);
+    const std::vector<uint32_t> before = layerPixels;
+    title.setText("/next");
+    // The cut text takes room past its end, and the wash keeps its slope there
+    CHECK(tape.seg[0].cut);
+    CHECK(tape.seg[0].len > tape.seg[0].text_w);
+    f.frame(title, kTitle);
+    CHECK(layerPixels == before);
+}
+
+TEST(test_follow_title_continues_after_a_new_screen) {
+    Fixture f;
+    TitleTextView title(testFont);
+    title.setFollowText(true);
+    title.setText(kLongText);
+    f.frame(title, kTitle);
+    runTitle(f, title, SCREEN_TITLE_START_DELAY_MS + 500);
+    ScreenTitle& tape  = const_cast<ScreenTitle&>(title.getFollowTape());
+    const int before   = ScreenTitle_offset(&tape, f.context.getActiveTime());
+    CHECK(before > 0);
+    // A screen over the page closed, and the stack gave the page its screen again
+    f.context.setScreen(f.compositor);
+    f.frame(title, kTitle);
+    CHECK_EQ_INT(ScreenTitle_offset(&tape, f.context.getActiveTime()), before);
+    CHECK(f.layerHasPixels(kTitle));
+}
+
 TEST(test_row_shows_long_text_only_when_selected) {
     Fixture f;
     ListRowView row(testFont);
@@ -693,7 +849,7 @@ TEST(test_selection_change_makes_the_row_dirty) {
 class TestItem : public ListItemView {
 public:
     void layout(UiLayoutContext& context) override {
-        context.setSize(UiSize{context.getMaxSize().w, 10});
+        context.setSize(UiSize{context.getMaxSize().w, height});
     }
     bool isDirty() const override { return dirty; }
     void draw(UiDrawContext& context) override {
@@ -710,20 +866,25 @@ public:
     bool selected = false;
     bool dirty    = true;
     int draws     = 0;
+    int height    = 10;
 };
 
 class TestAdapter : public ListAdapter {
 public:
     std::vector<long> ids;
+    /** The height of each item. An item past the end of the vector is 10 high. */
+    std::vector<int> heights;
     int created = 0;
     /** Each view that the adapter made, in order */
     std::vector<std::shared_ptr<ListItemView>> made;
 
     int getCount() const override { return static_cast<int>(ids.size()); }
     long getItemId(int index) const override { return ids[static_cast<size_t>(index)]; }
-    std::shared_ptr<ListItemView> getView(int) override {
+    std::shared_ptr<ListItemView> getView(int index) override {
         created++;
-        made.push_back(std::make_shared<TestItem>());
+        auto item = std::make_shared<TestItem>();
+        if (static_cast<size_t>(index) < heights.size()) item->height = heights[static_cast<size_t>(index)];
+        made.push_back(item);
         return made.back();
     }
 };
@@ -859,6 +1020,173 @@ TEST(test_page_needs_the_layout_after_a_data_change) {
     CHECK_EQ_INT(list.getSelectedIndex(), 3);
     CHECK(list.pageBackward());
     CHECK_EQ_INT(list.getSelectedIndex(), 0);
+}
+
+// Six items of 10 pixels fill a list of 60
+const SDL_Rect kPage = {0, 0, 100, 60};
+
+/** Makes `count` items, shows the window that ends at `last`, and selects `selected`. */
+struct PagingList {
+    Fixture f;
+    TestAdapter adapter;
+    ListView list;
+
+    PagingList(int count, int last, int selected, std::vector<int> heights = {}) {
+        for (int id = 1; id <= count; id++) adapter.ids.push_back(id);
+        adapter.heights = std::move(heights);
+        list.setAdapter(adapter);
+        // A layout scrolls the list only until the cursor shows, thus the window ends at `last`
+        list.setSelectedIndex(last);
+        f.frame(list, kPage);
+        list.setSelectedIndex(selected);
+        frame();
+    }
+
+    void frame() { f.frame(list, kPage); }
+
+    void checkWindow(int first, int last, int selected) {
+        CHECK_EQ_INT(list.getFirstVisibleIndex(), first);
+        CHECK_EQ_INT(list.getLastVisibleIndex(), last);
+        CHECK_EQ_INT(list.getSelectedIndex(), selected);
+    }
+};
+
+TEST(test_right_moves_one_page) {
+    PagingList p(20, 5, 2);
+    CHECK(p.list.pageForward());
+    p.frame();
+    p.checkWindow(6, 11, 8);
+}
+
+TEST(test_right_shows_the_last_row) {
+    PagingList p(15, 11, 8);
+    p.checkWindow(6, 11, 8);
+    CHECK(p.list.pageForward());
+    p.frame();
+    p.checkWindow(9, 14, 11);
+}
+
+TEST(test_right_when_the_last_row_shows_selects_it) {
+    PagingList p(15, 14, 11);
+    CHECK(p.list.pageForward());
+    p.frame();
+    p.checkWindow(9, 14, 14);
+    CHECK(!p.list.pageForward());
+}
+
+TEST(test_left_moves_one_page) {
+    PagingList p(20, 11, 8);
+    CHECK(p.list.pageBackward());
+    p.frame();
+    p.checkWindow(0, 5, 2);
+}
+
+TEST(test_left_shows_the_first_row) {
+    PagingList p(20, 8, 7);
+    CHECK(p.list.pageBackward());
+    p.frame();
+    p.checkWindow(0, 5, 4);
+}
+
+TEST(test_left_when_the_first_row_shows_selects_it) {
+    PagingList p(20, 5, 3);
+    CHECK(p.list.pageBackward());
+    p.frame();
+    p.checkWindow(0, 5, 0);
+    CHECK(!p.list.pageBackward());
+}
+
+TEST(test_centered_selection_goes_to_the_middle_of_the_list) {
+    PagingList p(20, 5, 0);
+    p.list.setSelectedIndex(12, true);
+    p.frame();
+    // Two items of 10 fit in the half of the 50 pixels that the selected item leaves
+    p.checkWindow(10, 15, 12);
+}
+
+TEST(test_centered_selection_does_not_scroll_past_an_end) {
+    PagingList p(20, 5, 0);
+    p.list.setSelectedIndex(18, true);
+    p.frame();
+    p.checkWindow(14, 19, 18);
+    p.list.setSelectedIndex(1, true);
+    p.frame();
+    p.checkWindow(0, 5, 1);
+}
+
+TEST(test_page_on_a_list_shorter_than_the_page) {
+    PagingList p(4, 3, 1);
+    CHECK(p.list.pageForward());
+    p.checkWindow(0, 3, 3);
+    CHECK(p.list.pageBackward());
+    p.checkWindow(0, 3, 0);
+}
+
+TEST(test_right_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor) {
+    PagingList p(7, 5, 2, {10, 10, 10, 10, 10, 10, 60});
+    CHECK(p.list.pageForward());
+    p.frame();
+    p.checkWindow(6, 6, 6);
+}
+
+TEST(test_left_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor) {
+    PagingList p(8, 6, 6, {10, 10, 10, 10, 10, 10, 60, 10});
+    p.checkWindow(6, 6, 6);
+    CHECK(p.list.pageBackward());
+    p.frame();
+    p.checkWindow(0, 5, 0);
+}
+
+TEST(test_right_keeps_the_cursor_under_a_taller_row) {
+    // The cursor top is at 20. The new window has a row of 30 at the top, which covers it.
+    PagingList p(12, 5, 2, {10, 10, 10, 10, 10, 10, 30, 10, 10, 10, 10, 10});
+    CHECK(p.list.pageForward());
+    p.frame();
+    p.checkWindow(6, 9, 6);
+}
+
+// The ids of the rows of the file browser
+
+FileEntry makeEntry(const char* name, int dbId, bool isDir, bool isPlayAll = false) {
+    FileEntry entry{};
+    std::snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.db_id       = dbId;
+    entry.is_dir      = isDir;
+    entry.is_play_all = isPlayAll;
+    return entry;
+}
+
+TEST(test_folder_and_file_with_one_database_id_have_different_row_ids) {
+    FileEntry entries[] = {makeEntry("..", 7, true), makeEntry("Album", 7, true), makeEntry("song.mp3", 7, false),
+                           makeEntry("Play All", -1, false, true)};
+    BrowserContext browser{};
+    browser.entries     = entries;
+    browser.entry_count = 4;
+    FolderAdapter adapter(browser);
+    for (int first = 0; first < 4; first++) {
+        for (int second = first + 1; second < 4; second++) {
+            CHECK(adapter.getItemId(first) != adapter.getItemId(second));
+        }
+    }
+    CHECK(FolderAdapter::isParentRow(entries[0]));
+    CHECK(!FolderAdapter::isParentRow(entries[1]));
+}
+
+TEST(test_refresh_keeps_the_cursor_on_the_file_with_the_id_of_a_folder) {
+    FileEntry before[] = {makeEntry("Album", 3, true), makeEntry("song.mp3", 3, false)};
+    FileEntry after[]  = {makeEntry("a.mp3", 9, false), makeEntry("Album", 3, true), makeEntry("song.mp3", 3, false)};
+    BrowserContext browser{};
+    browser.entries     = before;
+    browser.entry_count = 2;
+    FolderAdapter adapter(browser);
+    ListView list;
+    list.setAdapter(adapter);
+    list.setSelectedIndex(1);
+    // A new file comes before the folder: the cursor stays on the file, not on the folder
+    browser.entries     = after;
+    browser.entry_count = 3;
+    list.notifyDataChanged();
+    CHECK_EQ_INT(list.getSelectedIndex(), 2);
 }
 
 TEST(test_move_past_an_end_wraps_to_the_other_end) {
@@ -2015,6 +2343,13 @@ int main() {
     RUN(test_transparent_box_has_no_content_until_it_gets_a_color);
     RUN(test_edge_pixel_on_the_surface_is_premultiplied);
     RUN(test_title_fades_at_the_cut_and_not_when_it_fits);
+    RUN(test_layout_measures_a_text_and_the_draw_renders_it);
+    RUN(test_row_outside_the_window_renders_no_text);
+    RUN(test_follow_title_at_rest_takes_a_new_text_at_once);
+    RUN(test_follow_title_moves_on_the_layer_after_the_start_delay);
+    RUN(test_follow_title_puts_a_new_text_after_the_text_under_the_edge);
+    RUN(test_follow_title_continues_after_a_new_screen);
+    RUN(test_follow_title_change_near_the_end_of_the_text_keeps_the_area);
     RUN(test_row_shows_long_text_only_when_selected);
     RUN(test_selection_change_makes_the_row_dirty);
     RUN(test_cursor_move_draws_only_the_two_changed_rows);
@@ -2025,6 +2360,20 @@ int main() {
     RUN(test_move_past_the_last_visible_row_scrolls);
     RUN(test_row_that_the_clip_cuts_is_hidden);
     RUN(test_page_needs_the_layout_after_a_data_change);
+    RUN(test_folder_and_file_with_one_database_id_have_different_row_ids);
+    RUN(test_refresh_keeps_the_cursor_on_the_file_with_the_id_of_a_folder);
+    RUN(test_right_moves_one_page);
+    RUN(test_right_shows_the_last_row);
+    RUN(test_right_when_the_last_row_shows_selects_it);
+    RUN(test_left_moves_one_page);
+    RUN(test_left_shows_the_first_row);
+    RUN(test_left_when_the_first_row_shows_selects_it);
+    RUN(test_page_on_a_list_shorter_than_the_page);
+    RUN(test_centered_selection_goes_to_the_middle_of_the_list);
+    RUN(test_centered_selection_does_not_scroll_past_an_end);
+    RUN(test_right_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor);
+    RUN(test_left_on_rows_of_different_heights_selects_the_row_that_covers_the_cursor);
+    RUN(test_right_keeps_the_cursor_under_a_taller_row);
     RUN(test_move_past_an_end_wraps_to_the_other_end);
     RUN(test_single_item_does_not_move);
     RUN(test_empty_list_gives_minus_one);

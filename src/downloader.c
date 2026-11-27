@@ -138,7 +138,7 @@ static void ensure_paths(void) {
     char state_dir[512];
     snprintf(state_dir, sizeof(state_dir), "%s/state", pak_path);
     mkdir(state_dir, 0755);
-    mkdir(get_music_path(), 0755);
+    ensure_music_dir();
     mkdir(download_dir, 0755);
 
     Downloader_loadQueue();

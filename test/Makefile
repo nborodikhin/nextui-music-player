@@ -485,7 +485,7 @@ $(BIN)/test_ui_music_playing: test_ui_music_playing.c $(SRC)/ui_music_playing.h 
 	      | grep -v -e musicplayer.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
 
 $(BIN)/test_ui_views: test_ui_views.cpp $(SRC)/ui/view/ui_view.hpp $(SRC)/ui/view/ui_compositor.hpp \
-                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp $(SRC)/ui/view/dialog_view.hpp $(SRC)/ui/view/multiline_text_view.hpp $(SRC)/ui/view/spanned_text.hpp $(SRC)/ui/view/bitmap_view.hpp $(SRC)/ui/view/progress_bar_view.hpp $(SRC)/ui/view/empty_state_view.hpp test.h | $(BIN) desktop-objs
+                      $(SRC)/ui/view/text_view.hpp $(SRC)/ui/view/title_text_view.hpp $(SRC)/ui/view/list_row_view.hpp $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/status_group_view.hpp $(SRC)/ui/view/list_screen_view.hpp $(SRC)/ui/view/box_view.hpp $(SRC)/ui/view/dialog_view.hpp $(SRC)/ui/view/multiline_text_view.hpp $(SRC)/ui/view/spanned_text.hpp $(SRC)/ui/view/bitmap_view.hpp $(SRC)/ui/view/progress_bar_view.hpp $(SRC)/ui/view/empty_state_view.hpp $(SRC)/ui/view/icon_view.hpp $(SRC)/ui/file_browser_page.hpp test.h | $(BIN) desktop-objs
 	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_ui_views.cpp
 	$(CXX) -o $@ $@.o \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \

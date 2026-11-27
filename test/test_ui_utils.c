@@ -13,6 +13,7 @@
 #include <string.h>
 #include "test.h"
 #include "ui_utils.h"
+#include "utf8.h"
 #include "ui_fonts.h"
 #include "config.h"
 
@@ -328,6 +329,17 @@ TEST(test_truncate_keeps_whole_characters) {
             CHECK_EQ_INT(width, out_w);
             // Only "..." alone can stay wider than the limit
             if (out_len > 3) CHECK(width <= max_w);
+            // The cut keeps the longest text that fits: one more character does not fit
+            size_t kept = out_len - 3;
+            size_t next = kept + (size_t)UTF8_charBytes(input + kept);
+            if (width <= max_w && next + 3 <= strlen(input)) {
+                char longer[64];
+                memcpy(longer, input, next);
+                memcpy(longer + next, "...", 4);
+                int longer_w;
+                TTF_SizeUTF8(font, longer, &longer_w, NULL);
+                CHECK(longer_w > max_w);
+            }
         }
     }
 }

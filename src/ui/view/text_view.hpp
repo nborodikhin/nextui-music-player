@@ -23,7 +23,7 @@ public:
     ~TextView() override;
 
     /** Returns: true when the text changed */
-    bool setText(const std::string& text);
+    virtual bool setText(const std::string& text);
     void setColor(SDL_Color color);
 
     /** Returns true when the text is wider than the space of the last layout. */
@@ -34,7 +34,7 @@ public:
      * is. A text that fits does not move. A view without a context does not move. A view that
      * leaves the layout stops, and moves again at the next start.
      */
-    void startScrolling(int32_t spPerSecond);
+    virtual void startScrolling(int32_t spPerSecond);
 
     /** Moves the text at the speed of each scrolling text of the app. */
     void startScrolling();
@@ -44,6 +44,9 @@ public:
 
     /** Puts the text at its start. Keeps the speed. */
     void resetScrolling();
+
+    /** Returns true while the view holds the bitmap of its text. A layout does not make it, a draw does. */
+    bool isRendered() const { return bitmap != nullptr; }
 
     /** Returns how far the text moved from its start, in pixels. */
     int getScrollOffset() const { return offset; }
@@ -61,8 +64,18 @@ protected:
 
     bool isScrolling() const { return scrolling; }
     int getFontHeight() const;
+    TTF_Font* getFont() const { return font; }
+    SDL_Color getColor() const { return color; }
+    /** Returns the top of the text in the view, from the last layout. */
+    int getTextTop() const { return textTop; }
+    /** Marks the view drawn, for a subclass that draws its text in a way of its own. */
+    void clearDirty() { dirty = false; }
+    /** Returns `text` in the font and the color of the view, premultiplied. The caller frees it. */
+    SDL_Surface* renderBitmap(const std::string& text) const;
 
 private:
+    /** Measures the text, and the cut text that ends in "..." where it does not fit. */
+    void measure();
     void render();
     void freeRender();
     /** Sets the scrolling flag from the speed and the offset. */
@@ -76,11 +89,16 @@ private:
     // White, until the owner sets the color of a role
     //noinspection HardcodedColor
     SDL_Color color      = {255, 255, 255, 255};
-    /** The text in its color, premultiplied */
+    /** The text that the view shows: the text, or the cut text that ends in "..." */
+    std::string shownText;
+    /** The text in its color, premultiplied. The first draw after a change renders it. */
     SDL_Surface* bitmap  = nullptr;
     bool renderStale     = true;
-    int renderedMaxWidth = -1;
+    /** The measure is valid until the text or the context changes, or a cut text gets another width */
+    bool measureStale    = true;
+    int measuredMaxWidth = -1;
     int textWidth        = 0;
+    int shownWidth       = 0;
     int maxWidth         = 0;
     // The top of the text in the view
     int textTop          = 0;

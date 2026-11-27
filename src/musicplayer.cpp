@@ -34,7 +34,6 @@ extern "C" {
 #include "ui/database_error_dialog_page.hpp"
 #include "ui/main_menu_page.hpp"
 #include "ui/page/page_stack.hpp"
-#include "module_file_browser.h"
 #include "music_session.h"
 #include "module_podcast.h"
 #include "downloader.h"
@@ -224,7 +223,6 @@ int main(int argc, char* argv[]) {
     }
     ScopedInit player{Player_quit};
     ScopedInit musicSession{MusicSession_quit};
-    ScopedInit fileBrowser{FileBrowserModule_quit};
     ScopedInit background{Background_stopAll};
 
     // Restore the volume on the mixer of the output, after the audio device is open and stable

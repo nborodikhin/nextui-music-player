@@ -28,15 +28,20 @@ public:
     bool moveBackward();
 
     /**
-     * Moves the selection by the items that fit in the height of the list.
+     * Moves the window of visible items one page, and keeps the selection at the same place on
+     * the screen. A window at the end of the list does not move, and the selection goes to the
+     * last or the first item.
      * Returns: true when the selection moved, and false also when the heights of the items are
      * not known, until the next layout
      */
     bool pageForward();
     bool pageBackward();
 
-    /** Selects index, which the next layout scrolls into view. */
-    void setSelectedIndex(int index);
+    /**
+     * Selects index, which the next layout scrolls into view. Pass true in `center` to put the item
+     * in the middle of the list, as far as the list can scroll.
+     */
+    void setSelectedIndex(int index, bool center = false);
 
     int getItemCount() const { return static_cast<int>(items.size()); }
 
@@ -68,6 +73,7 @@ private:
 
     int getTop(int index) const;
     int findLastFullyVisible(int first, int height) const;
+    int findFirstFullyVisible(int last, int height) const;
     bool movePage(int direction);
 
     ListAdapter* adapter = nullptr;
@@ -76,6 +82,8 @@ private:
     // frame still hold them.
     std::vector<std::shared_ptr<ListItemView>> leaving;
     bool measured    = false;
+    /** The next layout puts the selected item in the middle of the list */
+    bool centerPending = false;
     int selected     = -1;
     int firstVisible = 0;
     int lastVisible  = 0;

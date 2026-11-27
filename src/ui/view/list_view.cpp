@@ -65,23 +65,33 @@ bool ListView::pageBackward() { return movePage(-1); }
 
 bool ListView::movePage(int direction) {
     if (!measured || selected < 0) return false;
-    // One page is the height of the list, from the selected item
-    int moved   = 0;
-    int target  = selected;
-    while (true) {
-        const int next = target + direction;
-        if (next < 0 || next >= getItemCount()) break;
-        moved += items[static_cast<size_t>(next)].height;
-        if (moved > height) break;
-        target = next;
+    const int last = getItemCount() - 1;
+    const int edge = direction > 0 ? last : 0;
+    // The window shows the end of the list: only the cursor moves
+    if ((direction > 0 ? lastVisible : firstVisible) == edge) {
+        if (selected == edge) return false;
+        select(edge);
+        return true;
     }
-    if (target == selected) return false;
+
+    // A full page past the window, or else the full window at the end of the list
+    const int newFirst = direction > 0 ? std::min(lastVisible + 1, findFirstFullyVisible(last, height))
+                                       : findFirstFullyVisible(firstVisible - 1, height);
+    const int cursorTop = getTop(selected) - getTop(firstVisible);
+    firstVisible        = newFirst;
+    lastVisible         = findLastFullyVisible(newFirst, height);
+
+    // The cursor keeps its place on the screen: the item that covers its old top
+    const int windowTop = getTop(newFirst);
+    int target          = newFirst;
+    while (target < lastVisible && getTop(target + 1) - windowTop <= cursorTop) target++;
     select(target);
     return true;
 }
 
-void ListView::setSelectedIndex(int index) {
+void ListView::setSelectedIndex(int index, bool center) {
     select(items.empty() ? -1 : std::clamp(index, 0, getItemCount() - 1));
+    centerPending = center && selected >= 0;
 }
 
 int ListView::getTop(int index) const {
@@ -98,6 +108,16 @@ int ListView::findLastFullyVisible(int first, int listHeight) const {
         bottom += items[static_cast<size_t>(last)].height;
     }
     return last;
+}
+
+int ListView::findFirstFullyVisible(int last, int listHeight) const {
+    int first = last;
+    int top   = items[static_cast<size_t>(last)].height;
+    while (first > 0 && top + items[static_cast<size_t>(first - 1)].height <= listHeight) {
+        first--;
+        top += items[static_cast<size_t>(first)].height;
+    }
+    return first;
 }
 
 bool ListView::canScrollDown() const {
@@ -127,6 +147,18 @@ void ListView::layout(UiLayoutContext& context) {
         measured = true;
     }
 
+    if (std::exchange(centerPending, false) && selected >= 0) {
+        // The items above the selected one take half of the room that it leaves
+        const int roomAbove = (size.h - items[static_cast<size_t>(selected)].height) / 2;
+        int first           = selected;
+        int above           = 0;
+        while (first > 0 && above + items[static_cast<size_t>(first - 1)].height <= roomAbove) {
+            first--;
+            above += items[static_cast<size_t>(first)].height;
+        }
+        // The window does not go past the last item
+        firstVisible = std::min(first, findFirstFullyVisible(getItemCount() - 1, size.h));
+    }
     firstVisible = std::clamp(firstVisible, 0, getItemCount() - 1);
     if (selected < firstVisible) firstVisible = selected;
     while (selected > findLastFullyVisible(firstVisible, size.h)) firstVisible++;

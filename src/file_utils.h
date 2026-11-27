@@ -47,6 +47,13 @@ int userdata_snpath(const char* rel, char* out, size_t out_size);
 const char* get_music_path(void);
 
 /**
+ * Create the Music root and its parents where they are missing.
+ *
+ * @return false, with errno set, if the Music root is not a directory after the call
+ */
+bool ensure_music_dir(void);
+
+/**
  * Write the absolute path of a path relative to the Music root to out. Pass NULL or ""
  * in rel for the Music root itself.
  *

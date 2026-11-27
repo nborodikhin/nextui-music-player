@@ -1074,7 +1074,7 @@ static void* filedb_thread_main(void* unused) {
     char music_path[1024];
     if (get_music_abspath("", music_path, sizeof(music_path))) {
         LOG_info("[FileDb] music directory %s\n", music_path);
-        if (!mkdir_p(music_path)) {
+        if (!ensure_music_dir()) {
             LOG_error("[FileDb] cannot create %s: %s\n", music_path, strerror(errno));
         }
     }

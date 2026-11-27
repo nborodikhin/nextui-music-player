@@ -84,6 +84,10 @@ const char* get_music_path(void) {
     return MUSIC_PATH;
 }
 
+bool ensure_music_dir(void) {
+    return mkdir_p(MUSIC_PATH);
+}
+
 bool get_music_abspath(const char* rel, char* out, size_t out_size) {
     int length = rel && rel[0]
         ? snprintf(out, out_size, "%s/%s", MUSIC_PATH, rel)

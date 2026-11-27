@@ -60,10 +60,11 @@ public:
     int getSelectedIndex() const;
 
     /**
-     * Selects the item at `index`, which the next layout scrolls into view. A new selection
+     * Selects the item at `index`, which the next layout scrolls into view. Pass true in `center`
+     * to put the item in the middle of the list, as far as the list can scroll. A new selection
      * restarts the wait before its row scrolls, and goes to onSelectionChanged().
      */
-    void setSelectedIndex(int index);
+    void setSelectedIndex(int index, bool center = false);
 
     int getItemCount() const;
     ListItemView& getItemView(int index);
