@@ -73,6 +73,13 @@ void TitleTextView::startScrolling(int32_t spPerSecond) {
     if (!follow) TextView::startScrolling(spPerSecond);
 }
 
+void TitleTextView::restart() {
+    stopScrolling();
+    resetScrolling();
+    // Before the attach, the attach puts the text on the tape
+    if (follow && hasContext()) restartTape();
+}
+
 uint32_t TitleTextView::getNow() const { return hasContext() ? getContext().getActiveTime() : 0; }
 
 void TitleTextView::restartTape() {

@@ -216,6 +216,7 @@ void PageStack::apply(Command command) {
             const bool fullScreen = command.page->getKind() == PageKind::FullScreen;
             entries.back().page->pause();
             onActivityGap();
+            if (fullScreen) hideCoveredPages();
             push(std::move(command.page));
             if (fullScreen && onScreenChange) onScreenChange();
             break;
@@ -230,6 +231,14 @@ void PageStack::apply(Command command) {
             closeAll();
             quitRequested = true;
             break;
+    }
+}
+
+void PageStack::hideCoveredPages() {
+    // The pages under the first full-screen page were hidden already
+    for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+        entry->page->onFullyHidden();
+        if (entry->page->getKind() == PageKind::FullScreen) break;
     }
 }
 

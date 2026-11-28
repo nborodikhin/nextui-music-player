@@ -32,7 +32,7 @@ protected:
 };
 
 /**
- * The cursor buttons of a list screen, and the waits before its title and its selected row scroll.
+ * The cursor buttons of a list screen, and the wait before its selected row scrolls.
  * The page gives the list its adapter, and calls each change of the items through
  * notifyDataChanged().
  */
@@ -82,7 +82,6 @@ private:
     /** The selection that the listener knows */
     int shownIndex = -1;
     long shownId   = 0;
-    TaskId titleStart = 0;
     TaskId rowStart   = 0;
 };
 

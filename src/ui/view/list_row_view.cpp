@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "ui_fonts.h"
 #include "ui_theme.h"
 
 // The NextUI headers declare C functions and have no guard of their own
@@ -11,7 +12,7 @@ extern "C" {
 #include "api.h"
 }
 
-ListRowView::ListRowView(TTF_Font* font) : shortText(font, true), longText(font, false) {
+ListRowView::ListRowView() : shortText(Fonts_getLarge(), true), longText(Fonts_getLarge(), false) {
     icon.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     shortText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
     longText.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));

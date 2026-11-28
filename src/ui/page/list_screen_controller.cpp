@@ -48,7 +48,7 @@ std::span<const ButtonRequest> ListScreenController::getButtonRequests() {
 }
 
 void ListScreenController::start() {
-    restartScrolling(scheduler, view.getTitleView(), titleStart);
+    view.start();
     shownIndex = -1;
     showSelection();
 }

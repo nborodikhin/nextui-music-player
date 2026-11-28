@@ -39,7 +39,7 @@ std::span<const ButtonRequest> ScrollView::getButtonRequests() {
 }
 
 bool ScrollView::handleButton(const ButtonEvent& event) {
-    const int line = lineHeight > 0 ? lineHeight : Fonts_getMetric(Fonts_getMedium(), FONT_METRIC_LINE_HEIGHT);
+    const int line = lineHeight > 0 ? lineHeight : Fonts_getMetric(Fonts_getLarge(), FONT_METRIC_LINE_HEIGHT);
     if (event.isSingleButton(Button::DpadUp)) {
         scrollBy(-line);
     } else if (event.isSingleButton(Button::DpadDown)) {

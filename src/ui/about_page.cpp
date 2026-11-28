@@ -1,3 +1,4 @@
+#include "ui/page/screen_page.hpp"
 #include "ui/about_page.hpp"
 
 #include <string>
@@ -76,19 +77,16 @@ private:
     BitmapView qrCode;
 };
 
-class AboutPageImpl final : public UiPageImpl<AboutPage> {
+class AboutPageImpl final : public ScreenPageImpl<AboutPage> {
 public:
-    AboutPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screen.getTitleView().setText("About");
-        screen.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screen.setContent(&body);
+    AboutPageImpl() : ScreenPageImpl("About") {
+        getScreenView().setContent(&body);
     }
 
     HelpId getHelpId() const override { return HELP_ABOUT; }
 
     void onEnter() override {
-        // A long title scrolls after a wait, as on a list screen
-        getScheduler().postDelayed([this] { screen.getTitleView().startScrolling(); }, SCROLL_START_DELAY);
+        getScreenView().start();
         showUpdateState();
         getScheduler().runEachFrame([this] {
             SelfUpdate_update();
@@ -97,8 +95,6 @@ public:
     }
 
     void resume() override { showUpdateState(); }
-
-    void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (event.isSingleButton(Button::A)) {
@@ -167,13 +163,12 @@ private:
         }
         body.updateStatus.setText(text);
         body.updateStatus.setColor(Theme_getColor(role, false));
-        if (state != shownState || !hintsSet) screen.getButtonHintsView().setHints(kLeftHints, getRightHints(state));
+        if (state != shownState || !hintsSet) getScreenView().getButtonHintsView().setHints(kLeftHints, getRightHints(state));
         hintsSet   = true;
         shownState = state;
     }
 
     AboutBody body;
-    ScreenView screen{Fonts_getLarge()};
     UpdateUiState shownState = UPDATE_UI_UNCHECKED;
     bool hintsSet            = false;
 };

@@ -1,6 +1,6 @@
 #include "ui/main_menu_page.hpp"
 
-#include <array>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -13,17 +13,12 @@
 #include "toast.h"
 #include "ui/library_page.hpp"
 #include "ui/now_playing_page.hpp"
-#include "ui/page/list_screen_controller.hpp"
+#include "ui/page/menu_page.hpp"
 #include "ui/podcast_page.hpp"
 #include "ui/radio_page.hpp"
 #include "ui/resume_page.hpp"
 #include "ui/settings_page.hpp"
-#include "ui/view/list_adapter.hpp"
-#include "ui/view/list_row_view.hpp"
-#include "ui/view/list_screen_view.hpp"
-#include "ui_fonts.h"
 #include "ui_main.h"
-#include "ui_theme.h"
 #include "ui_utils.h"
 
 using namespace input;
@@ -56,12 +51,6 @@ enum class MenuItem : int8_t {
     Podcast,
     Settings,
 };
-
-/** The count of the items of the menu, each a value of MenuItem from 0. */
-constexpr size_t kMenuItemCount = static_cast<size_t>(MenuItem::Settings) + 1;
-
-constexpr const char* kLeftHints[]  = {"START", "CONTROLS", nullptr};
-constexpr const char* kRightHints[] = {"B", "EXIT", "A", "OPEN", nullptr};
 
 /** The exit prompt, while it is showing. TOAST_TOKEN_NONE = not armed. */
 ToastToken exitPrompt = TOAST_TOKEN_NONE;
@@ -100,65 +89,45 @@ std::string getRowLabel(MenuItem item) {
     return "";
 }
 
-/** The rows of the main menu, and the view of each row. */
-class MainMenuListAdapter final : public ListAdapter {
+/** The rows of the main menu. The id of a row is its MenuItem. */
+class MainMenuAdapter final : public MenuAdapter {
 public:
-    /**
-     * Sets the items of the rows, in order.
-     * Returns: true when the rows changed
-     */
-    bool setRows(const std::vector<MenuItem> &newRows) {
-        if (newRows == rows) return false;
-        rows = newRows;
-        return true;
+    /** Called with the item of a row that the user selects */
+    std::function<void(MenuItem)> onOpen;
+
+protected:
+    std::vector<long> loadRowIds() const override {
+        std::vector<long> ids;
+        const MenuItem playingItem = getPlayingItem();
+        if (playingItem != MenuItem::None) ids.push_back(static_cast<long>(playingItem));
+        for (MenuItem item : {MenuItem::Library, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings}) {
+            ids.push_back(static_cast<long>(item));
+        }
+        return ids;
     }
 
-    /** Returns the item of the row at index, or None for a row that is not there. */
-    MenuItem getItem(int index) const {
-        if (index < 0 || index >= getCount()) return MenuItem::None;
-        return rows[static_cast<size_t>(index)];
+    MenuRow loadRow(long id) const override {
+        const MenuItem item = static_cast<MenuItem>(id);
+        return {
+            .id       = id,
+            .label    = getRowLabel(item),
+            .onSelect = [this, item] { onOpen(item); },
+        };
     }
-
-    int getCount() const override { return static_cast<int>(rows.size()); }
-
-    long getItemId(int index) const override { return static_cast<long>(getItem(index)); }
-
-    /** Each item keeps its view while the menu runs, thus the Resume row keeps its scrolling. */
-    std::shared_ptr<ListItemView> getView(int index) override {
-        std::shared_ptr<ListRowView>& row = rowViews[static_cast<size_t>(getItem(index))];
-        if (!row) row = std::make_shared<ListRowView>(Fonts_getMedium());
-        return row;
-    }
-
-private:
-    std::vector<MenuItem> rows;
-    std::array<std::shared_ptr<ListRowView>, kMenuItemCount> rowViews;
 };
 
-class MainMenuPageImpl final : public UiPageImpl<MainMenuPage>, private ListScreenListener {
+class MainMenuPageImpl final : public MenuPageImpl<MainMenuPage> {
 public:
-    MainMenuPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screenView.getTitleView().setText("Music Player");
-        screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screenView.getButtonHintsView().setHints(kLeftHints, kRightHints);
+    MainMenuPageImpl() : MenuPageImpl("Music Player", HELP_MAIN_MENU) {
+        setBackText("EXIT");
+        items.onOpen = [this](MenuItem item) { openItem(item); };
     }
-
-    std::span<const ButtonRequest> getButtonRequests() const override {
-        return ListScreenController::getButtonRequests();
-    }
-
-    HelpId getHelpId() const override { return HELP_MAIN_MENU; }
 
     void onEnter() override {
-        items.setRows(getRows());
-        screenView.setAdapter(items);
-        updateLabels();
-        list.start();
+        start(items);
         getScheduler().postRepeating([this] { refreshRows(); }, kRowRefreshMs);
         Error_showToast();
     }
-
-    void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
     /** A legacy module can change the playback, and with it the rows and their labels */
     void resume() override { refreshRows(); }
@@ -168,63 +137,29 @@ public:
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (exiting) return true;
-        if (list.onButtonEvent(event)) return true;
-        if (const auto* typedEvent = std::get_if<event::ShortPress>(&event.kind)) {
-            return pressButton(typedEvent->button);
+        if (event.isSingleButton(Button::X)) {
+            clearPlayingItem();
+            return true;
         }
-        if (const auto* typedEvent = std::get_if<event::Repeat>(&event.kind)) {
-            return pressButton(typedEvent->button);
-        }
-        return false;
+        return MenuPageImpl::onButtonEvent(event);
     }
 
 private:
-    void onSelectionChanged(int listItemPosition) override { selectedItem = items.getItem(listItemPosition); }
+    void onBack() override { askExit(); }
 
     void refreshRows() {
-        updateRowMap();
-        updateLabels();
+        items.reload();
         Error_showToast();
     }
 
-    /** Returns the items of the rows, in order. */
-    static std::vector<MenuItem> getRows() {
-        std::vector<MenuItem> rows = {MenuItem::Library, MenuItem::Radio, MenuItem::Podcast, MenuItem::Settings};
-        const MenuItem playingItem = getPlayingItem();
-        if (playingItem != MenuItem::None) rows.insert(rows.begin(), playingItem);
-        return rows;
+    /** Returns the item of the row of the cursor, or None for an empty menu. */
+    MenuItem getSelectedItem() const {
+        const MenuRow* row = getSelectedRow();
+        return row ? static_cast<MenuItem>(row->id) : MenuItem::None;
     }
 
-    /** Builds the rows, and sets the labels of new rows. */
-    void updateRowMap() {
-        if (!items.setRows(getRows())) return;
-        list.notifyDataChanged();
-        updateLabels();
-    }
-
-    /** Sets the label of each row. A new label of the selected row restarts the wait of its text. */
-    void updateLabels() {
-        const int selectedIndex = list.getSelectedIndex();
-        for (int index = 0; index < list.getItemCount(); index++) {
-            const bool changed = getRow(index).setText(getRowLabel(items.getItem(index)));
-            if (changed && index == selectedIndex) list.restartRowScrolling();
-        }
-    }
-
-    ListRowView& getRow(int index) { return static_cast<ListRowView&>(list.getItemView(index)); }
-
-    /** Returns: true when the button has an action on the menu */
-    bool pressButton(Button button) {
-        switch (button) {
-            case Button::A: openItem(); return true;
-            case Button::X: clearPlayingItem(); return true;
-            case Button::B: askExit(); return true;
-            default:        return false;
-        }
-    }
-
-    void openItem() {
-        switch (selectedItem) {
+    void openItem(MenuItem item) {
+        switch (item) {
             case MenuItem::NowPlaying: openNowPlaying(); break;
             case MenuItem::Resume:     getNavigator().open(ResumePage{}); break;
             case MenuItem::Library:    getNavigator().open(LibraryPage{}); break;
@@ -246,12 +181,13 @@ private:
 
     /** Stops the playback or forgets the Resume record of the row of the cursor */
     void clearPlayingItem() {
+        const MenuItem selectedItem = getSelectedItem();
         if (selectedItem == MenuItem::NowPlaying) {
             Background_stopAll();
-            updateRowMap();
+            items.reload();
         } else if (selectedItem == MenuItem::Resume) {
             Resume_clear();
-            updateRowMap();
+            items.reload();
         }
     }
 
@@ -266,14 +202,9 @@ private:
         }
     }
 
-    MainMenuListAdapter items;
+    MainMenuAdapter items;
     /** The "Exiting..." toast shows before the quit */
     bool exiting = false;
-
-    ListScreenView screenView{Fonts_getLarge()};
-    ListScreenController list{screenView, getScheduler(), *this};
-    /** The item of the row of the cursor */
-    MenuItem selectedItem = MenuItem::None;
 };
 
 }  // namespace

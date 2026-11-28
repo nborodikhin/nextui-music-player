@@ -24,7 +24,8 @@
  */
 class ListRowView : public ListItemView {
 public:
-    explicit ListRowView(TTF_Font* font);
+    /** The text takes the large font. */
+    ListRowView();
 
     /** Returns: true when the text changed */
     bool setText(const std::string& text);
