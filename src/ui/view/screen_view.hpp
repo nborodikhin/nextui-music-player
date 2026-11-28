@@ -47,7 +47,8 @@ enum class ContentMargins : uint8_t {
  */
 class ScreenView : public UiLayout {
 public:
-    explicit ScreenView(TTF_Font* titleFont) : titleView(titleFont) {}
+    /** The title takes the large font and the secondary color of the theme. */
+    ScreenView();
 
     TitleTextView& getTitleView() { return titleView; }
     StatusGroupView& getStatusView() { return statusView; }
@@ -65,9 +66,20 @@ public:
      */
     void setScrollingContent(ScrollingView* content, ContentMargins margins = ContentMargins::None);
 
+    /** Starts the wait before the title scrolls. */
+    void start();
+
+    /** Called when a full-screen page opens over the page of this view and hides it. */
+    void onPageFullyHidden();
+
     void layout(UiLayoutContext& context) override;
 
+protected:
+    void onAttach(UiContext& context) override;
+
 private:
+    /** Puts the title at its start, and starts the wait before it scrolls. */
+    void restartTitle();
     void layoutScrollIndicators(UiLayoutContext& context, const SDL_Rect& contentRect);
 
     TitleTextView titleView;
@@ -78,6 +90,9 @@ private:
     ContentMargins margins          = ContentMargins::None;
     ScrollIndicatorView scrollUpView{ScrollIndicatorView::Direction::Up};
     ScrollIndicatorView scrollDownView{ScrollIndicatorView::Direction::Down};
+    TaskId titleStart = 0;
+    /** A start came before the attach */
+    bool startPending = false;
 };
 
 #endif

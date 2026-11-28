@@ -136,6 +136,12 @@ public:
     virtual void resume() {}
 
     /**
+     * Called when a full-screen page opens over this page and hides it. Called also when the page
+     * is paused already, as under a dialog. A dialog that opens does not call it.
+     */
+    virtual void onFullyHidden() {}
+
+    /**
      * Returns the delivery of the result of a legacy page after its module returned, or nullptr
      * when no caller waits for a result.
      */

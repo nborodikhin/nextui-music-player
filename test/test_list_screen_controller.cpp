@@ -16,12 +16,15 @@
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/ui_compositor.hpp"
 #include "ui_layers.h"
+#include "ui_theme.h"
+#include "ui_fonts.h"
 #include "ui_utils.h"
 
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
 #include "defines.h"
 #include "api.h"
+#include "config.h"
 }
 
 extern "C" void UiLayer_clear(UiLayer) {}
@@ -97,7 +100,7 @@ struct Fixture {
     std::unique_ptr<PageContext> context = PageContext::create(compositor);
     OwnerScheduler scheduler{1};
     TestAdapter adapter;
-    ListScreenView view{testFont};
+    ListScreenView view;
     TestListener listener;
     ListScreenController controller{view, scheduler, listener};
     uint32_t elapsed = 0;
@@ -288,6 +291,16 @@ int main() {
         printf("SKIP no font: %s\n", TTF_GetError());
         return 0;
     }
+    // The screen views and the rows of a list pick the fonts of the app
+    CFG_setFontFile(nullptr);
+    Fonts_load();
+    if (!Fonts_getLarge()) {
+        printf("SKIP no font of the app at %s\n", RES_PATH);
+        return 0;
+    }
+    // The title of a screen takes a color of the theme
+    SDL_Surface* themeScreen = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_ARGB8888);
+    Theme_init(themeScreen);
     RUN(test_up_and_down_move_one_row_and_wrap);
     RUN(test_repeat_acts_as_a_press);
     RUN(test_left_and_right_go_to_the_page_with_the_selected_position);
@@ -303,6 +316,7 @@ int main() {
     RUN(test_set_selection_restarts_the_row_and_gives_the_new_selection);
     RUN(test_set_selection_of_the_shown_selection_gives_nothing);
     RUN(test_controller_gives_the_items_of_the_list);
+    Fonts_unload();
     TTF_CloseFont(testFont);
     TTF_Quit();
     SDL_Quit();

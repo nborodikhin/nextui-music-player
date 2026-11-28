@@ -14,8 +14,6 @@
  */
 class ListScreenView : public ScreenView {
 public:
-    explicit ListScreenView(TTF_Font* titleFont) : ScreenView(titleFont) {}
-
     /** Shows the items of `adapter`, which the caller keeps alive. */
     void setAdapter(ListAdapter& adapter) { listView.setAdapter(adapter); }
 

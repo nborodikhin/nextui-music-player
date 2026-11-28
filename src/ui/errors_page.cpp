@@ -1,3 +1,4 @@
+#include "ui/page/screen_page.hpp"
 #include "ui/errors_page.hpp"
 
 #include <cstdlib>
@@ -14,7 +15,6 @@
 #include "ui/view/spacer_view.hpp"
 #include "ui/view/vertical_layout.hpp"
 #include "ui_fonts.h"
-#include "ui_theme.h"
 
 using namespace input;
 
@@ -56,20 +56,18 @@ std::unique_ptr<MultilineTextView> makeTextView(TTF_Font* font, const std::strin
     return view;
 }
 
-class ErrorsPageImpl final : public UiPageImpl<ErrorsPage> {
+class ErrorsPageImpl final : public ScreenPageImpl<ErrorsPage> {
 public:
-    ErrorsPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screen.getTitleView().setText("Errors");
-        screen.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screen.getButtonHintsView().setHints(nullptr, kRightHints);
+    ErrorsPageImpl() : ScreenPageImpl("Errors") {
+        getScreenView().getButtonHintsView().setHints(nullptr, kRightHints);
         buildContent();
         scrollView.setContent(&content);
-        screen.setScrollingContent(&scrollView, ContentMargins::SidesAndFoot);
+        getScreenView().setScrollingContent(&scrollView, ContentMargins::SidesAndFoot);
     }
 
     std::span<const ButtonRequest> getButtonRequests() const override { return ScrollView::getButtonRequests(); }
 
-    void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
+    void onEnter() override { getScreenView().start(); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (scrollView.handleButton(event)) return true;
@@ -84,13 +82,13 @@ private:
     /** Fills the content from the store, as it is when the page opens. */
     void buildContent() {
         content.addChild(makeTextView(Fonts_getSmall(), getIntroductionText()));
-        const int sectionSpace = Fonts_getMetric(Fonts_getMedium(), FONT_METRIC_LINE_HEIGHT) / 2;
+        const int sectionSpace = Fonts_getMetric(Fonts_getLarge(), FONT_METRIC_LINE_HEIGHT) / 2;
         for (int index = 0; index < ERROR_CLASS_COUNT; index++) {
             const ErrorClass errorClass         = static_cast<ErrorClass>(index);
             const std::vector<std::string> reports = Error_getReports(errorClass);
             if (reports.empty()) continue;
             content.addChild(std::make_unique<SpacerView>(sectionSpace));
-            content.addChild(makeTextView(Fonts_getMedium(), getHeadingText(errorClass)));
+            content.addChild(makeTextView(Fonts_getLarge(), getHeadingText(errorClass)));
             for (const std::string& report : reports) {
                 // A path has no words, thus each line of an item takes as many characters as fit
                 auto item = makeTextView(Fonts_getSmall(), "- " + shortenCardPath(report));
@@ -102,7 +100,6 @@ private:
 
     VerticalLayout content;
     ScrollView scrollView;
-    ScreenView screen{Fonts_getLarge()};
 };
 
 }  // namespace

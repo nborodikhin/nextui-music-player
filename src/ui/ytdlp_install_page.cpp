@@ -1,3 +1,4 @@
+#include "ui/page/screen_page.hpp"
 #include "ui/ytdlp_install_page.hpp"
 
 #include <string>
@@ -105,18 +106,17 @@ private:
     bool hasDetail     = false;
 };
 
-class YtdlpInstallPageImpl final : public UiPageImpl<YtdlpInstallPage> {
+class YtdlpInstallPageImpl final : public ScreenPageImpl<YtdlpInstallPage> {
 public:
-    YtdlpInstallPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screen.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screen.setContent(&body);
+    // The title tells whether the helpers install or update, thus the status gives it
+    YtdlpInstallPageImpl() : ScreenPageImpl("") {
+        getScreenView().setContent(&body);
     }
 
     HelpId getHelpId() const override { return HELP_DOWNLOADER_YTDLP; }
 
     void onEnter() override {
-        // A long title scrolls after a wait, as on a list screen
-        getScheduler().postDelayed([this] { screen.getTitleView().startScrolling(); }, SCROLL_START_DELAY);
+        getScreenView().start();
         // The helpers ship apart from the app, thus the paths of the downloader must exist first
         Downloader_init();
         Downloader_startUpdateCheck();
@@ -134,8 +134,6 @@ public:
     void onExit() override {
         if (isWorking(shownState)) Downloader_cancelUpdate();
     }
-
-    void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         // A button acts on the state of now, not on the state of the last frame
@@ -170,19 +168,18 @@ private:
         const DownloaderUpdateStatus status = Downloader_getUpdateStatus();
         const YtdlpUiState state            = Downloader_updateUiState(&status);
         const bool installing               = status.fresh_install;
-        screen.getTitleView().setText(installing ? "Installing Youtube helpers" : "Updating Youtube helpers");
+        getScreenView().getTitleView().setText(installing ? "Installing Youtube helpers" : "Updating Youtube helpers");
         body.show(status, state);
 
         const char* const* rightHints = kBackHints;
         if (state == YTDLP_UI_INSTALLING) rightHints = kCancelHints;
         if (state == YTDLP_UI_AVAILABLE) rightHints = installing ? kInstallHints : kUpdateHints;
-        if (rightHints != shownHints) screen.getButtonHintsView().setHints(kLeftHints, rightHints);
+        if (rightHints != shownHints) getScreenView().getButtonHintsView().setHints(kLeftHints, rightHints);
         shownHints = rightHints;
         shownState = state;
     }
 
     YtdlpInstallBody body;
-    ScreenView screen{Fonts_getLarge()};
     YtdlpUiState shownState       = YTDLP_UI_UNCHECKED;
     const char* const* shownHints = nullptr;
 };

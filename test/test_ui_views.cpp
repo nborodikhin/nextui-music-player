@@ -23,6 +23,7 @@
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/multiline_text_view.hpp"
 #include "ui/view/progress_bar_view.hpp"
+#include "ui/view/screen_view.hpp"
 #include "ui/view/scroll_view.hpp"
 #include "ui/view/status_group_view.hpp"
 #include "ui/view/text_view.hpp"
@@ -40,11 +41,14 @@
 #include "ui/view/ui_compositor.hpp"
 #include "ui_layers.h"
 #include "ui_theme.h"
+#include "ui_utils.h"
+#include "ui_fonts.h"
 
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
 #include "defines.h"
 #include "api.h"
+#include "config.h"
 }
 
 namespace {
@@ -329,7 +333,7 @@ TEST(test_start_moves_the_text_from_the_next_frame) {
 
 TEST(test_row_forwards_the_scroll_to_its_whole_text) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText(kLongText);
     row.setSelected(true);
     f.frame(row, kRow);
@@ -346,7 +350,7 @@ TEST(test_row_forwards_the_scroll_to_its_whole_text) {
 
 TEST(test_row_scrolls_again_when_its_whole_text_comes_back) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText(kLongText);
     row.setSelected(true);
     f.frame(row, kRow);
@@ -684,7 +688,7 @@ TEST(test_row_outside_the_window_renders_no_text) {
         int getCount() const override { return 20; }
         long getItemId(int index) const override { return index; }
         std::shared_ptr<ListItemView> getView(int) override {
-            rows.push_back(std::make_shared<ListRowView>(testFont));
+            rows.push_back(std::make_shared<ListRowView>());
             rows.back()->setText(kLongText);
             return rows.back();
         }
@@ -805,9 +809,65 @@ TEST(test_follow_title_continues_after_a_new_screen) {
     CHECK(f.layerHasPixels(kTitle));
 }
 
+/** Runs the frames of `screen` on the whole screen for `ms` of active time. */
+void runScreen(Fixture& f, ScreenView& screen, uint32_t ms) {
+    const SDL_Rect whole = {0, 0, kScreenW, kScreenH};
+    for (uint32_t done = 0; done < ms; done += 20) {
+        f.tick(20);
+        f.frame(screen, whole);
+    }
+}
+
+TEST(test_screen_start_before_the_attach_scrolls_the_title_after_the_delay) {
+    Fixture f;
+    ScreenView screen;
+    screen.getTitleView().setText(kLongText);
+    screen.start();
+    runScreen(f, screen, SCROLL_START_DELAY - 100);
+    CHECK_EQ_INT(screen.getTitleView().getScrollOffset(), 0);
+    runScreen(f, screen, 500);
+    CHECK(screen.getTitleView().getScrollOffset() > 0);
+}
+
+TEST(test_screen_title_starts_again_after_the_page_is_fully_hidden) {
+    Fixture f;
+    ScreenView screen;
+    TitleTextView& title = screen.getTitleView();
+    title.setText(kLongText);
+    screen.start();
+    runScreen(f, screen, SCROLL_START_DELAY + 500);
+    CHECK(title.getScrollOffset() > 0);
+    // The page is covered: its active time does not move until it is the top again
+    screen.onPageFullyHidden();
+    runScreen(f, screen, SCROLL_START_DELAY - 100);
+    CHECK_EQ_INT(title.getScrollOffset(), 0);
+    runScreen(f, screen, 500);
+    CHECK(title.getScrollOffset() > 0);
+}
+
+TEST(test_screen_follow_title_starts_again_after_the_page_is_fully_hidden) {
+    Fixture f;
+    ScreenView screen;
+    TitleTextView& title = screen.getTitleView();
+    title.setFollowText(true);
+    title.setText(kLongText);
+    screen.start();
+    runScreen(f, screen, SCREEN_TITLE_START_DELAY_MS + 500);
+    ScreenTitle& tape = const_cast<ScreenTitle&>(title.getFollowTape());
+    CHECK(ScreenTitle_offset(&tape, f.context.getActiveTime()) > 0);
+    screen.onPageFullyHidden();
+    CHECK_EQ_INT(tape.count, 1);
+    CHECK(std::string(tape.seg[0].text) == kLongText);
+    CHECK_EQ_INT(ScreenTitle_offset(&tape, f.context.getActiveTime()), 0);
+    runScreen(f, screen, SCREEN_TITLE_START_DELAY_MS - 100);
+    CHECK(!ScreenTitle_moves(&tape, f.context.getActiveTime()));
+    runScreen(f, screen, 500);
+    CHECK(ScreenTitle_offset(&tape, f.context.getActiveTime()) > 0);
+}
+
 TEST(test_row_shows_long_text_only_when_selected) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText(kLongText);
     row.startScrolling();
     f.frame(row, kRow);
@@ -823,19 +883,21 @@ TEST(test_row_shows_long_text_only_when_selected) {
     CHECK(f.layerHasPixels(kRow));
 
     Fixture g;
-    ListRowView shortRow(testFont);
+    ListRowView shortRow;
     shortRow.setText("short");
     shortRow.setSelected(true);
     shortRow.startScrolling();
-    g.frame(shortRow, kRow);
+    // A row of the size of a list row, which holds a short text in the large font
+    const SDL_Rect pillRow = {0, 0, kScreenW, SCALE1(PILL_SIZE)};
+    g.frame(shortRow, pillRow);
     g.tick(1000);
-    g.frame(shortRow, kRow);
-    CHECK(!g.layerHasPixels(kRow));
+    g.frame(shortRow, pillRow);
+    CHECK(!g.layerHasPixels(pillRow));
 }
 
 TEST(test_selection_change_makes_the_row_dirty) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText("short");
     f.frame(row, kRow);
     CHECK(!row.isDirty());
@@ -1389,7 +1451,7 @@ SDL_Rect rightViewRect() {
 
 TEST(test_right_view_shows_at_the_right_edge_of_the_row) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText("short");
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1400,7 +1462,7 @@ TEST(test_right_view_shows_at_the_right_edge_of_the_row) {
 
 TEST(test_long_text_ends_before_the_right_view) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText(kLongText);
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1412,7 +1474,7 @@ TEST(test_long_text_ends_before_the_right_view) {
 
 TEST(test_right_view_set_after_the_first_layout_attaches_at_the_next_layout) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     f.frame(row, kRow);
     // Records that it got a context
     class ContextView : public SizedView {
@@ -1432,7 +1494,7 @@ TEST(test_right_view_set_after_the_first_layout_attaches_at_the_next_layout) {
 
 TEST(test_removed_right_view_makes_the_row_dirty) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText("short");
     row.setRightView(std::make_shared<SizedView>(kRightColor, kRightSize));
     f.frame(row, kRow);
@@ -1445,7 +1507,7 @@ TEST(test_removed_right_view_makes_the_row_dirty) {
 
 TEST(test_new_right_view_of_a_selected_row_draws_the_row_again) {
     Fixture f;
-    ListRowView row(testFont);
+    ListRowView row;
     row.setText("short");
     row.setSelected(true);
     f.frame(row, kRow);
@@ -1630,7 +1692,7 @@ SDL_Rect screenRectOf(const UiLayoutContext& screen, const UiView& view) {
 
 TEST(test_screen_content_gets_the_body_inside_its_margins) {
     Fixture f(kBigW, kBigH);
-    ScreenView screen(testFont);
+    ScreenView screen;
     SizedView content(kTitleColor);
     const int padding = SCALE1(PADDING);
     const int top     = screenBodyTop();
@@ -1648,7 +1710,7 @@ TEST(test_screen_content_gets_the_body_inside_its_margins) {
 
 TEST(test_content_with_no_scroll_has_no_scroll_indicators) {
     Fixture f(kBigW, kBigH);
-    ScreenView screen(testFont);
+    ScreenView screen;
     SizedView content(kTitleColor);
     screen.setContent(&content);
     // The status group, the title, the hints and the content
@@ -1657,7 +1719,7 @@ TEST(test_content_with_no_scroll_has_no_scroll_indicators) {
 
 TEST(test_scrolling_content_gets_the_scroll_indicators) {
     Fixture f(kBigW, kBigH);
-    ScreenView screen(testFont);
+    ScreenView screen;
     TestScrolling content;
     content.up          = true;
     content.shownBottom = 30;
@@ -1732,7 +1794,7 @@ TEST(test_list_screen_lays_out_the_list_inside_the_side_margins) {
     Fixture f(kBigW, kBigH);
     TestAdapter adapter;
     for (long id = 1; id <= 60; id++) adapter.ids.push_back(id);
-    ListScreenView screen(testFont);
+    ListScreenView screen;
     screen.setAdapter(adapter);
     const UiLayoutContext& layout = layoutOnly(f, screen, kWholeBig);
     const int padding             = SCALE1(PADDING);
@@ -1751,7 +1813,7 @@ TEST(test_list_screen_lays_out_the_list_inside_the_side_margins) {
 TEST(test_empty_state_replaces_the_list_and_the_indicators) {
     Fixture f(kBigW, kBigH);
     TestAdapter adapter;
-    ListScreenView screen(testFont);
+    ListScreenView screen;
     // The test has no fonts of the app, thus the empty state lays out no text
     class TestEmptyState : public EmptyStateView {
     public:
@@ -2317,6 +2379,13 @@ int main() {
         printf("SKIP no font: %s\n", TTF_GetError());
         return 0;
     }
+    // The screen views and the rows of a list pick the fonts of the app
+    CFG_setFontFile(nullptr);
+    Fonts_load();
+    if (!Fonts_getLarge()) {
+        printf("SKIP no font of the app at %s\n", RES_PATH);
+        return 0;
+    }
     SDL_Surface* themeScreen = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_ARGB8888);
     Theme_init(themeScreen);
     RUN(test_text_that_fits_is_not_clipped_and_does_not_scroll);
@@ -2350,6 +2419,9 @@ int main() {
     RUN(test_follow_title_puts_a_new_text_after_the_text_under_the_edge);
     RUN(test_follow_title_continues_after_a_new_screen);
     RUN(test_follow_title_change_near_the_end_of_the_text_keeps_the_area);
+    RUN(test_screen_start_before_the_attach_scrolls_the_title_after_the_delay);
+    RUN(test_screen_title_starts_again_after_the_page_is_fully_hidden);
+    RUN(test_screen_follow_title_starts_again_after_the_page_is_fully_hidden);
     RUN(test_row_shows_long_text_only_when_selected);
     RUN(test_selection_change_makes_the_row_dirty);
     RUN(test_cursor_move_draws_only_the_two_changed_rows);

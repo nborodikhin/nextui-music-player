@@ -22,7 +22,7 @@ public:
     /** Moves the content up by `pages` heights of this view, or down for a negative value. */
     void scrollPage(int pages);
 
-    /** Sets the move of up and down, in pixels. The default is the line height of the medium font. */
+    /** Sets the move of up and down, in pixels. The default is the line height of the large font. */
     void setLineHeight(int pixels) { lineHeight = pixels; }
 
     /** Returns the repeats of the buttons that handleButton() uses. */

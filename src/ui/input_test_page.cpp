@@ -11,10 +11,9 @@
 #include <vector>
 
 #include "input/input_state.hpp"
-#include "ui/view/status_group_view.hpp"
+#include "ui/page/screen_page.hpp"
 #include "ui/view/text_view.hpp"
-#include "ui/view/title_text_view.hpp"
-#include "ui/page/ui_page.hpp"
+#include "ui/view/ui_layout.hpp"
 #include "ui_fonts.h"
 #include "ui_theme.h"
 #include "ui_utils.h"
@@ -40,8 +39,92 @@ constexpr std::array<ButtonRequest, 6> kRequests = {
     request::Combo{Button::Select, Button::A},
 };
 
-class InputTestPageImpl final : public UiPageImpl<InputTestPage> {
+/** The buttons that are held, and under them the log of the events, with the newest at the bottom */
+class InputLogView final : public UiLayout {
 public:
+    InputLogView() {
+        for (int index = 0; index < kEntryCount; index++) {
+            auto line = std::make_unique<TextView>(Fonts_getSmall(), true);
+            line->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+            logLines.push_back(std::move(line));
+        }
+        heldLine.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
+        setHeld(0);
+    }
+
+    /** Shows the buttons of the bits of `held`. */
+    void setHeld(uint32_t held) {
+        char heldText[256] = "Held:";
+        for (int index = 0; index < kButtonCount; index++) {
+            const Button button = static_cast<Button>(index);
+            if (held & getButtonBit(button)) {
+                const size_t used = strlen(heldText);
+                snprintf(heldText + used, sizeof(heldText) - used, " %s", getButtonName(button));
+            }
+        }
+        heldLine.setText(heldText);
+    }
+
+    void addEntry(uint32_t time, const std::string& stream, const std::string& type, const std::string& name);
+
+    void layout(UiLayoutContext& context) override;
+
+private:
+    static constexpr int kEntryCount = 32;
+
+    // A ring of the last entries. newest is the index of the newest entry
+    std::array<std::string, kEntryCount> entries{};
+    int newest        = -1;
+    int entryCount    = 0;
+    uint32_t lastTime = 0;
+
+    TextView heldLine{Fonts_getMedium(), true};
+    // One view for each line of the log. A line that does not fit on the screen is not laid out.
+    std::vector<std::unique_ptr<TextView>> logLines;
+};
+
+void InputLogView::addEntry(uint32_t time, const std::string& stream, const std::string& type, const std::string& name) {
+    const uint32_t delta = entryCount == 0 ? 0 : time - lastTime;
+    lastTime = time;
+    newest   = (newest + 1) % kEntryCount;
+    if (entryCount < kEntryCount) entryCount++;
+    char text[64];
+    snprintf(text, sizeof(text), "%-6s  %-6s  %-12s  +%u ms", stream.c_str(), type.c_str(), name.c_str(), delta);
+    entries[static_cast<size_t>(newest)] = text;
+}
+
+// Each line is a view that draws only when its text changes. The page draws no layer.
+void InputLogView::layout(UiLayoutContext& context) {
+    const UiSize space = context.getMaxSize();
+    UiLayoutContext measuring = context.createMeasuringContext();
+    const int heldHeight      = measuring.layoutChild(heldLine, SDL_Rect{0, 0, space.w, space.h}).getSize().h;
+    context.layoutChild(heldLine, SDL_Rect{0, 0, space.w, heldHeight});
+    // The lines of the log have one font, thus the first line gives the height of each line
+    const int lineHeight = measuring.layoutChild(*logLines.front(), SDL_Rect{0, 0, space.w, space.h}).getSize().h;
+
+    // The newest entry is at the bottom, as in a log
+    const int logTop = heldHeight + SCALE1(PADDING);
+    const int fit    = std::max(0, (space.h - logTop) / lineHeight);
+    const int shown  = std::min({entryCount, fit, kEntryCount});
+    for (int age = shown - 1, row = 0; age >= 0; age--, row++) {
+        const int index = (newest - age + kEntryCount) % kEntryCount;
+        TextView& line  = *logLines[static_cast<size_t>(row)];
+        line.setText(entries[static_cast<size_t>(index)]);
+        context.layoutChild(line, SDL_Rect{0, logTop + row * lineHeight, space.w, lineHeight});
+    }
+}
+
+constexpr const char* kRightHints[] = {"SELECT+START", "BACK", nullptr};
+
+class InputTestPageImpl final : public ScreenPageImpl<InputTestPage> {
+public:
+    InputTestPageImpl() : ScreenPageImpl("Input test") {
+        getScreenView().getButtonHintsView().setHints(nullptr, kRightHints);
+        getScreenView().setContent(&log, ContentMargins::SidesAndFoot);
+    }
+
+    void onEnter() override { getScreenView().start(); }
+
     std::span<const ButtonRequest> getButtonRequests() const override { return kRequests; }
 
     // Consumes each event, thus the global buttons do not act
@@ -66,6 +149,7 @@ public:
             addEntry(event.time, "raw", "Media", getMediaKeyName(typedEvent->key));
         }
 
+        log.setHeld(held);
         if ((held & kExitButtons) == kExitButtons) close();
         return true;
     }
@@ -87,105 +171,17 @@ public:
         return true;
     }
 
-    InputTestPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        for (int index = 0; index < kEntryCount; index++) {
-            auto line = std::make_unique<TextView>(Fonts_getSmall(), true);
-            line->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            logLines.push_back(std::move(line));
-        }
-        title.setText("Input test");
-        title.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        hintLine.setText("MENU + SELECT: back");
-        hintLine.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        heldLine.setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-    }
-
-    void layout(UiLayoutContext& context) override;
-
 private:
-    static constexpr int kEntryCount = 32;
-    static constexpr uint32_t kExitButtons = getButtonBit(Button::Menu) | getButtonBit(Button::Select);
+    static constexpr uint32_t kExitButtons = getButtonBit(Button::Select) | getButtonBit(Button::Start);
 
-    struct Entry {
-        std::string text;
-    };
-
-    void addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name);
+    void addEntry(uint32_t time, const std::string& stream, const std::string& type, const std::string& name) {
+        log.addEntry(time, stream, type, name);
+    }
 
     // The buttons that were pressed and are not released yet, from the raw events
     uint32_t held = 0;
-    // A ring of the last entries. newest is the index of the newest entry
-    std::array<Entry, kEntryCount> entries{};
-    int newest     = -1;
-    int entryCount = 0;
-    uint32_t lastTime = 0;
-
-    TitleTextView title{Fonts_getLarge()};
-    StatusGroupView statusGroup;
-    TextView heldLine{Fonts_getSmall(), true};
-    TextView hintLine{Fonts_getSmall(), true};
-    // One view for each line of the log. A line that does not fit on the screen is not laid out.
-    std::vector<std::unique_ptr<TextView>> logLines;
+    InputLogView log;
 };
-
-void InputTestPageImpl::addEntry(uint32_t time, const std::string &stream, const std::string &type, const std::string &name) {
-
-    const uint32_t delta = entryCount == 0 ? 0 : time - lastTime;
-    lastTime = time;
-    newest   = (newest + 1) % kEntryCount;
-    if (entryCount < kEntryCount) entryCount++;
-    char text[64];
-    snprintf(text, sizeof(text), "%-6s  %-6s  %-12s  +%u ms", stream.c_str(), type.c_str(),
-             name.c_str(), delta);
-    entries[newest].text = text;
-}
-
-// Each line is a view that draws only when its text changes. The page draws no layer.
-void InputTestPageImpl::layout(UiLayoutContext& context) {
-    const UiSize screen  = context.getMaxSize();
-    const int padding    = SCALE1(PADDING);
-    const int pillHeight = SCALE1(PILL_SIZE);
-
-    // The status group and the title share the top pill row, as on a list screen
-    UiLayoutContext measuring = context.createMeasuringContext();
-    const int statusWidth = measuring.layoutChild(statusGroup, SDL_Rect{0, 0, screen.w, padding + pillHeight}).getSize().w;
-    context.layoutChild(statusGroup, SDL_Rect{screen.w - padding - statusWidth, padding, statusWidth, pillHeight});
-    const int titleX      = padding + SCALE1(BUTTON_PADDING);
-    const int titleWidth  = screen.w - padding - SCALE1(BUTTON_PADDING) - statusWidth - titleX;
-    const int titleHeight = measuring.layoutChild(title, SDL_Rect{0, 0, titleWidth, pillHeight}).getSize().h;
-    context.layoutChild(title, SDL_Rect{titleX, padding + (pillHeight - titleHeight) / 2, titleWidth, titleHeight});
-
-    char heldText[256] = "Held:";
-    for (int index = 0; index < kButtonCount; index++) {
-        const Button button = static_cast<Button>(index);
-        if (held & getButtonBit(button)) {
-            const size_t used = strlen(heldText);
-            snprintf(heldText + used, sizeof(heldText) - used, " %s", getButtonName(button));
-        }
-    }
-    heldLine.setText(heldText);
-
-    const int lineX      = SCALE1(PADDING * 2);
-    const int lineWidth  = screen.w - lineX - padding;
-    // Each line has one font, thus the held line gives the height of each line
-    const int lineHeight = measuring.layoutChild(heldLine, SDL_Rect{0, 0, lineWidth, screen.h}).getSize().h;
-    const int heldTop    = padding + pillHeight + padding;
-    const int hintTop    = heldTop + lineHeight;
-    const int logTop     = hintTop + lineHeight + padding;
-    const int bottom     = screen.h - padding;
-    context.layoutChild(heldLine, SDL_Rect{lineX, heldTop, lineWidth, lineHeight});
-    context.layoutChild(hintLine, SDL_Rect{lineX, hintTop, lineWidth, lineHeight});
-
-    // The newest entry is at the bottom, as in a log
-    const int fit   = std::max(0, (bottom - logTop) / lineHeight);
-    const int shown = std::min({entryCount, fit, kEntryCount});
-    for (int age = shown - 1, row = 0; age >= 0; age--, row++) {
-        const int index = (newest - age + kEntryCount) % kEntryCount;
-        TextView& line  = *logLines[static_cast<size_t>(row)];
-        line.setText(entries[static_cast<size_t>(index)].text);
-        context.layoutChild(line, SDL_Rect{lineX, logTop + row * lineHeight, lineWidth, lineHeight});
-    }
-}
 
 }  // namespace
 }  // namespace ui

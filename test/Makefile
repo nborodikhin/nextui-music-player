@@ -127,6 +127,7 @@ TESTS   += $(BIN)/test_ui_music_playing
 # objects of the desktop build as the three above do. It gives a test double of ui_layers.c.
 TESTS   += $(BIN)/test_ui_views
 TESTS   += $(BIN)/test_list_screen_controller
+TESTS   += $(BIN)/test_menu_page
 # The Wi-Fi dialog links the same objects, with test doubles of wifi.c and toast.c in place of theirs.
 TESTS   += $(BIN)/test_wifi_dialog
 
@@ -502,6 +503,14 @@ $(BIN)/test_wifi_dialog: test_wifi_dialog.cpp $(SRC)/ui/wifi_dialog_page.hpp $(S
 $(BIN)/test_list_screen_controller: test_list_screen_controller.cpp $(SRC)/ui/page/list_screen_controller.hpp \
                                     $(SRC)/ui/view/list_view.hpp $(SRC)/ui/view/list_item_view.hpp test.h | $(BIN) desktop-objs
 	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_list_screen_controller.cpp
+	$(CXX) -o $@ $@.o \
+	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
+	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \
+	      | grep -v -e musicplayer.o -e ui_layers.o) $(DESKTOP_BUILD)/version_string.o $(DESKTOP_LIBS)
+
+$(BIN)/test_menu_page: test_menu_page.cpp $(SRC)/ui/page/menu_page.hpp $(SRC)/ui/page/screen_page.hpp \
+                       $(SRC)/ui/view/list_row_view.hpp test.h | $(BIN) desktop-objs
+	$(CXX) $(CXXFLAGS) $(INC) $(DESKTOP_INC) -c -o $@.o test_menu_page.cpp
 	$(CXX) -o $@ $@.o \
 	  $$(ls $(DESKTOP_OBJ)/*.o $(DESKTOP_OBJ)/input/*.o $(DESKTOP_OBJ)/ui/*.o $(DESKTOP_OBJ)/ui/page/*.o $(DESKTOP_OBJ)/ui/view/*.o $(DESKTOP_OBJ)/audio/*.o \
 	        $(DESKTOP_OBJ)/include/*/*.o $(DESKTOP_OBJ)/ext/*/*/*.o \

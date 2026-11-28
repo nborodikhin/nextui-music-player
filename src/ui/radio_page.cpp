@@ -1,8 +1,10 @@
 #include "ui/radio_page.hpp"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "background.h"
 #include "radio.h"
@@ -12,8 +14,8 @@
 #include "ui/radio_manage_page.hpp"
 #include "ui/radio_playing_page.hpp"
 #include "ui/view/empty_state_view.hpp"
-#include "ui/view/list_adapter.hpp"
-#include "ui/view/list_row_view.hpp"
+#include "ui/page/menu_page.hpp"
+#include "ui/page/screen_page.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui/view/text_view.hpp"
 #include "ui/wifi_dialog_page.hpp"
@@ -37,53 +39,62 @@ constexpr const char* kEmptyRightHints[] = {"Y", "MANAGE", "B", "BACK", nullptr}
 /** The URL of the station of the cursor when the station list closed last */
 std::string lastSelectedUrl;
 
+/** Returns the id of the row of `station`, which a station keeps while it does not change. */
+long getStationId(const RadioStation& station, std::unordered_map<std::string, long>& ids) {
+    std::string key        = std::string(station.url) + '\n' + station.name + '\n' + station.genre;
+    const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
+    return it->second;
+}
+
 /**
- * The rows of the saved stations. The id of a row comes from the URL, the name and the genre of its
- * station, thus a station that does not change keeps its row view while the list shows.
+ * The rows of the saved stations: the name, and the genre as the secondary text. The id of a row
+ * comes from the URL, the name and the genre of its station, thus a station that does not change
+ * keeps its row view while the list shows.
  */
-class StationListAdapter final : public ListAdapter {
+class StationMenuAdapter final : public MenuAdapter {
 public:
-    int getCount() const override {
+    /** Called with the URL of the station of a row that the user selects */
+    std::function<void(const std::string&)> onPlay;
+
+protected:
+    std::vector<long> loadRowIds() const override {
         RadioStation* stations;
-        return Radio_getStations(&stations);
+        const int count = Radio_getStations(&stations);
+        std::vector<long> rowIds;
+        rowIds.reserve(static_cast<size_t>(count));
+        for (int index = 0; index < count; index++) rowIds.push_back(getStationId(stations[index], ids));
+        return rowIds;
     }
 
-    long getItemId(int index) const override {
+    MenuRow loadRow(long id) const override {
         RadioStation* stations;
-        Radio_getStations(&stations);
-        const RadioStation& station = stations[index];
-        std::string key = std::string(station.url) + '\n' + station.name + '\n' + station.genre;
-        const auto [it, added] = ids.try_emplace(std::move(key), static_cast<long>(ids.size()));
-        return it->second;
-    }
-
-    std::shared_ptr<ListItemView> getView(int index) override {
-        RadioStation* stations;
-        Radio_getStations(&stations);
-        const RadioStation& station = stations[index];
-        auto row = std::make_shared<ListRowView>(Fonts_getMedium());
-        row->setText(station.name);
-        if (station.genre[0]) {
-            auto genre = std::make_shared<TextView>(Fonts_getTiny(), false);
-            genre->setText(station.genre);
-            genre->setColor(Theme_getColor(THEME_ROLE_PRIMARY, false));
-            row->setRightView(std::move(genre));
+        const int count = Radio_getStations(&stations);
+        for (int index = 0; index < count; index++) {
+            const RadioStation& station = stations[index];
+            if (getStationId(station, ids) != id) continue;
+            MenuRow row;
+            row.id            = id;
+            row.label         = station.name;
+            row.secondaryText = station.genre;
+            row.onSelect      = [this, url = std::string(station.url)] { onPlay(url); };
+            return row;
         }
-        return row;
+        return {};
     }
 
 private:
     mutable std::unordered_map<std::string, long> ids;
 };
 
-class RadioPageImpl final : public UiPageImpl<RadioPage>, private ListScreenListener {
+class RadioPageImpl final : public ScreenPageImpl<RadioPage, ListScreenView>,
+                            private ListScreenListener,
+                            private MenuAdapterListener {
 public:
-    RadioPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screenView.getTitleView().setText("Online Radio");
-        screenView.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+    RadioPageImpl() : ScreenPageImpl("Online Radio") {
+        stations.onPlay = [this](const std::string& url) { playStation(url); };
         emptyState.setMessage("No stations saved");
         emptyState.setLine("Press Y to manage stations");
-        screenView.setEmptyState(&emptyState);
+        getScreenView().setEmptyState(&emptyState);
         for (TextView* note : {&noteFirst, &noteSecond}) note->setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
         noteFirst.setText("These are default stations");
         noteSecond.setText("Press Y to manage stations");
@@ -102,7 +113,9 @@ public:
             return;
         }
         radioReady = true;
-        screenView.setAdapter(stations);
+        stations.reload();
+        stations.setListener(this);
+        getScreenView().setAdapter(stations);
         list.start();
         selectStation(lastSelectedUrl);
         updateHints();
@@ -117,7 +130,7 @@ public:
     }
 
     void layout(UiLayoutContext& context) override {
-        context.layoutChild(screenView, context.getMaxRect());
+        ScreenPageImpl::layout(context);
         if (Radio_hasUserStations() || stations.getCount() == 0) return;
         // The note ends one pill row above the row of the button hints
         const int hintsTop    = context.getMaxSize().h - SCALE1(PADDING + PILL_SIZE);
@@ -130,7 +143,8 @@ public:
     bool onButtonEvent(const ButtonEvent& event) override {
         if (list.onButtonEvent(event)) return true;
         if (event.isSingleButton(Button::A)) {
-            playSelectedStation();
+            const int index = list.getSelectedIndex();
+            if (index >= 0 && index < stations.getCount()) stations.getRow(index).onSelect();
             return true;
         }
         if (event.isSingleButton(Button::B)) {
@@ -157,12 +171,8 @@ private:
         return index >= 0 && index < count ? &all[index] : nullptr;
     }
 
-    void playSelectedStation() {
-        int index;
-        const RadioStation* station = getSelectedStation(index);
-        if (!station) return;
-        std::string url = station->url;
-        getNavigator().openForResult(WifiDialogPage{}, [this, url = std::move(url)](const bool& connected) {
+    void playStation(const std::string& url) {
+        getNavigator().openForResult(WifiDialogPage{}, [this, url](const bool& connected) {
             if (connected) openPlayingScreen(url);
         });
     }
@@ -201,21 +211,26 @@ private:
     /** Reads the stations again. The cursor keeps its position, or goes to the last row. */
     void reloadStations() {
         const int position = list.getSelectedIndex();
-        list.notifyDataChanged();
+        stations.reload();
         if (position >= 0) list.setSelectedIndex(position);
         updateHints();
     }
 
-    void updateHints() {
-        screenView.getButtonHintsView().setHints(kLeftHints, stations.getCount() > 0 ? kRightHints : kEmptyRightHints);
+    void onRowsChanged() override { list.notifyDataChanged(); }
+
+    void onRowChanged(int index) override {
+        if (index == list.getSelectedIndex()) list.restartRowScrolling();
     }
 
-    StationListAdapter stations;
-    ListScreenView screenView{Fonts_getLarge()};
+    void updateHints() {
+        getScreenView().getButtonHintsView().setHints(kLeftHints, stations.getCount() > 0 ? kRightHints : kEmptyRightHints);
+    }
+
+    StationMenuAdapter stations;
     EmptyStateView emptyState;
     TextView noteFirst{Fonts_getTiny(), true};
     TextView noteSecond{Fonts_getTiny(), true};
-    ListScreenController list{screenView, getScheduler(), *this};
+    ListScreenController list{getScreenView(), getScheduler(), *this};
     bool radioReady = false;
 };
 

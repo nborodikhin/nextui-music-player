@@ -1,3 +1,4 @@
+#include "ui/page/screen_page.hpp"
 #include "ui/app_update_page.hpp"
 
 #include <string>
@@ -145,19 +146,16 @@ private:
     bool hasStatusText    = false;
 };
 
-class AppUpdatePageImpl final : public UiPageImpl<AppUpdatePage> {
+class AppUpdatePageImpl final : public ScreenPageImpl<AppUpdatePage> {
 public:
-    AppUpdatePageImpl() : UiPageImpl(PageKind::FullScreen) {
-        screen.getTitleView().setText("App Update");
-        screen.getTitleView().setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
-        screen.setContent(&body);
+    AppUpdatePageImpl() : ScreenPageImpl("App Update") {
+        getScreenView().setContent(&body);
     }
 
     HelpId getHelpId() const override { return HELP_ABOUT; }
 
     void onEnter() override {
-        // A long title scrolls after a wait, as on a list screen
-        getScheduler().postDelayed([this] { screen.getTitleView().startScrolling(); }, SCROLL_START_DELAY);
+        getScreenView().start();
         ModuleCommon_setAutosleepDisabled(true);
         SelfUpdate_startUpdate();
         showStatus();
@@ -173,8 +171,6 @@ public:
 
     /** The update continues while a dialog covers the page */
     void resume() override { showStatus(); }
-
-    void layout(UiLayoutContext& context) override { context.layoutChild(screen, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         // A button acts on the state of now, not on the state of the last frame
@@ -202,14 +198,13 @@ private:
         const SelfUpdateStatus status = SelfUpdate_getStatus();
         body.show(status);
         if (status.state != shownState || !hintsSet) {
-            screen.getButtonHintsView().setHints(kLeftHints, getRightHints(status.state));
+            getScreenView().getButtonHintsView().setHints(kLeftHints, getRightHints(status.state));
         }
         hintsSet   = true;
         shownState = status.state;
     }
 
     AppUpdateBody body;
-    ScreenView screen{Fonts_getLarge()};
     SelfUpdateState shownState = SELFUPDATE_STATE_IDLE;
     bool hintsSet              = false;
 };

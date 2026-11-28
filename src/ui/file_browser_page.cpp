@@ -15,10 +15,10 @@
 #include "ui/confirm_dialog_page.hpp"
 #include "ui/music_playing_page.hpp"
 #include "ui/page/list_screen_controller.hpp"
+#include "ui/page/screen_page.hpp"
 #include "ui/view/empty_state_view.hpp"
 #include "ui/view/list_screen_view.hpp"
 #include "ui_fonts.h"
-#include "ui_theme.h"
 
 using namespace input;
 
@@ -40,16 +40,15 @@ struct HistoryEntry {
     int selected;
 };
 
-class FileBrowserPageImpl final : public UiPageImpl<FileBrowserPage>, private ListScreenListener {
+class FileBrowserPageImpl final : public ScreenPageImpl<FileBrowserPage, ListScreenView>, private ListScreenListener {
 public:
-    FileBrowserPageImpl() : UiPageImpl(PageKind::FullScreen) {
-        TitleTextView& title = screenView.getTitleView();
+    // The title shows the path of the folder at each load
+    FileBrowserPageImpl() : ScreenPageImpl("") {
         // A path that changes while the title moves scrolls in after the old one
-        title.setFollowText(true);
-        title.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+        getScreenView().getTitleView().setFollowText(true);
         emptyState.setMessage("No music files found");
         emptyState.setLine("Add music to /Music on your SD card");
-        screenView.setEmptyState(&emptyState);
+        getScreenView().setEmptyState(&emptyState);
     }
 
     ~FileBrowserPageImpl() override { Browser_freeEntries(&browser); }
@@ -62,15 +61,13 @@ public:
 
     void onEnter() override {
         ensure_music_dir();
-        screenView.setAdapter(rows);
+        getScreenView().setAdapter(rows);
         list.start();
         loadFolder(Db_getRootDirId(), 0);
         getScheduler().postRepeating([this] { refresh(); }, kRefreshMs);
     }
 
     void onExit() override { Browser_freeEntries(&browser); }
-
-    void layout(UiLayoutContext& context) override { context.layoutChild(screenView, context.getMaxRect()); }
 
     bool onButtonEvent(const ButtonEvent& event) override {
         if (event.isSingleButton(Button::B)) {
@@ -137,9 +134,9 @@ private:
 
     /** Shows the path, the empty state and the hints of the folder. */
     void showFolder() {
-        screenView.getTitleView().setText("/" + std::string(browser.current_path));
-        screenView.setEmptyStateForced(browser.root_no_music);
-        screenView.getButtonHintsView().setHints(kLeftHints, browser.root_no_music ? kEmptyRightHints : kRightHints);
+        getScreenView().getTitleView().setText("/" + std::string(browser.current_path));
+        getScreenView().setEmptyStateForced(browser.root_no_music);
+        getScreenView().getButtonHintsView().setHints(kLeftHints, browser.root_no_music ? kEmptyRightHints : kRightHints);
     }
 
     /** Reads the database again when it changed. The cursor stays on its row. */
@@ -225,9 +222,8 @@ private:
     BrowserContext browser{};
     FolderAdapter rows{browser};
     std::vector<HistoryEntry> history;
-    ListScreenView screenView{Fonts_getLarge()};
     EmptyStateView emptyState;
-    ListScreenController list{screenView, getScheduler(), *this};
+    ListScreenController list{getScreenView(), getScheduler(), *this};
 };
 
 }  // namespace

@@ -1,5 +1,11 @@
 #include "ui/view/screen_view.hpp"
 
+#include <utility>
+
+#include "ui_fonts.h"
+#include "ui_theme.h"
+#include "ui_utils.h"
+
 // The NextUI headers declare C functions and have no guard of their own
 extern "C" {
 #include "defines.h"
@@ -48,6 +54,33 @@ int layoutCentered(UiLayoutContext& context, UiView& view, int y, int maxHeight)
     // takes its own width at the left of the rectangle.
     context.layoutChild(view, SDL_Rect{(space.w - size.w) / 2, y, width, size.h});
     return size.h;
+}
+
+ScreenView::ScreenView() : titleView(Fonts_getLarge()) {
+    titleView.setColor(Theme_getColor(THEME_ROLE_SECONDARY, false));
+}
+
+void ScreenView::start() {
+    restartTitle();
+}
+
+void ScreenView::onPageFullyHidden() {
+    restartTitle();
+}
+
+void ScreenView::onAttach(UiContext&) {
+    if (std::exchange(startPending, false)) restartTitle();
+}
+
+void ScreenView::restartTitle() {
+    titleView.restart();
+    if (!hasContext()) {
+        startPending = true;
+        return;
+    }
+    getScheduler().cancelTask(titleStart);
+    // The delay counts the active time of the page, thus it does not end while the page is covered
+    titleStart = getScheduler().postDelayed([this] { titleView.startScrolling(); }, SCROLL_START_DELAY);
 }
 
 void ScreenView::setContent(UiView* newContent, ContentMargins newMargins) {

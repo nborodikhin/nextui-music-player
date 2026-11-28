@@ -142,6 +142,8 @@ private:
     /** Returns false and keeps no command when the frame already has one. */
     bool acceptCommand();
     void apply(Command command);
+    /** Tells each page that a full-screen page hides, from the top down. */
+    void hideCoveredPages();
     void push(std::unique_ptr<UiPageImplBase> page);
     void pop(std::function<void()> deliver);
     /** Gives the input to the new top page. */

@@ -28,7 +28,7 @@ long FolderAdapter::getItemId(int index) const {
 
 std::shared_ptr<ListItemView> FolderAdapter::getView(int index) {
     const FileEntry& entry = browser.entries[index];
-    auto row               = std::make_shared<ListRowView>(Fonts_getMedium());
+    auto row               = std::make_shared<ListRowView>();
     const bool hasIcons    = Icons_isLoaded();
     std::string text;
     if (entry.is_dir || entry.is_play_all) {

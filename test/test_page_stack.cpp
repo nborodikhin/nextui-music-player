@@ -28,6 +28,8 @@ extern "C" void UiLayer_blit(SDL_Surface*, int, int, UiLayer layer) { layerHasPi
 namespace {
 
 std::vector<std::string> pageLog;
+/** The name of each page that got onFullyHidden(), in order */
+std::vector<std::string> hiddenLog;
 /** The name of the page of each root view that the stack lays out */
 std::vector<std::string> layoutLog;
 
@@ -112,6 +114,7 @@ public:
     }
     void onExit() override { add("exit"); }
     void pause() override { add("pause"); }
+    void onFullyHidden() override { hiddenLog.push_back(page.name); }
     void resume() override {
         add("resume");
         if (page.onResumeHook) page.onResumeHook(*this);
@@ -179,6 +182,7 @@ struct StackFixture {
 
     explicit StackFixture(const PlainPage& bottom) {
         pageLog.clear();
+        hiddenLog.clear();
         stack.start(bottom.createPageImpl(), screen);
         stack.startFrame(now);
     }
@@ -460,6 +464,30 @@ TEST(fullscreen_page_that_opens_or_closes_changes_the_screen) {
     f.endFrame();
     f.tap(Button::B);
     CHECK_EQ_INT(changes, 2);
+}
+
+TEST(full_screen_over_a_page_hides_it) {
+    StackFixture f(makePage("main"));
+    f.stack.open(makePage("next"));
+    f.endFrame();
+    CHECK(hiddenLog == std::vector<std::string>{"main"});
+}
+
+TEST(dialog_over_a_page_does_not_hide_it) {
+    StackFixture f(makePage("main"));
+    f.stack.open(makePage("dialog", PageKind::Dialog));
+    f.endFrame();
+    CHECK(hiddenLog.empty());
+}
+
+TEST(full_screen_over_a_full_screen_hides_only_the_top_page) {
+    StackFixture f(makePage("main"));
+    f.stack.open(makePage("next"));
+    f.endFrame();
+    hiddenLog.clear();
+    f.stack.open(makePage("third"));
+    f.endFrame();
+    CHECK(hiddenLog == std::vector<std::string>{"next"});
 }
 
 TEST(covered_page_pauses_and_resumes) {
@@ -1026,6 +1054,9 @@ int main(void) {
     RUN(exit_then_open_in_one_frame_quits);
     RUN(dialog_cannot_open_a_page);
     RUN(fullscreen_page_that_opens_or_closes_changes_the_screen);
+    RUN(full_screen_over_a_page_hides_it);
+    RUN(dialog_over_a_page_does_not_hide_it);
+    RUN(full_screen_over_a_full_screen_hides_only_the_top_page);
     RUN(covered_page_pauses_and_resumes);
     RUN(exit_closes_each_page_from_the_top_with_no_callback);
     RUN(close_of_the_bottom_page_ends_the_stack);

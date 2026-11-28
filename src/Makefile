@@ -235,7 +235,7 @@ LOCAL_SRC = \
     spectrum_ceiling.c \
     input/button_detector.cpp input/input_driver.cpp input/input_driver_nextui.cpp \
     input/common_button_handler.cpp input/common_button_handler_nextui.cpp input/input_manager.cpp \
-    ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
+    ui/page/page_stack.cpp ui/page/page_stack_loop.cpp ui/page/page_context.cpp ui/page/legacy_module_page.cpp ui/page/list_screen_controller.cpp ui/page/menu_page.cpp ui/quit_dialog_page.cpp ui/confirm_dialog_page.cpp ui/wifi_dialog_page.cpp ui/controls_help_page.cpp ui/database_error_dialog_page.cpp \
     ui/now_playing_page.cpp ui/resume_page.cpp ui/library_page.cpp ui/radio_page.cpp ui/radio_playing_page.cpp ui/radio_manage_page.cpp ui/music_playing_page.cpp ui/add_to_playlist_page.cpp ui/podcast_page.cpp \
     ui/settings_page.cpp ui/errors_page.cpp ui/about_page.cpp ui/app_update_page.cpp ui/ytdlp_install_page.cpp ui/file_browser_page.cpp ui/file_browser_page_adapter.cpp \
     ui/playlists_page.cpp ui/downloader_page.cpp \

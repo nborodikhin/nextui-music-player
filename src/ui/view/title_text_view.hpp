@@ -27,6 +27,9 @@ public:
     /** A title in the follow mode moves by itself, thus a start does nothing. */
     void startScrolling(int32_t spPerSecond) override;
 
+    /** Puts the title at its start, at rest. In the follow mode, puts the current text on the tape again. */
+    void restart();
+
     /** Returns the texts that the title shows and will show, in the follow mode. */
     const ScreenTitle& getFollowTape() const { return tape; }
 
